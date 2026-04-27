@@ -1,0 +1,217 @@
+"""
+NAS 리소스 API 모듈
+
+NAS 인스턴스 및 관련 정보를 조회하는 API 모듈입니다.
+"""
+
+from typing import Dict, List, Optional
+from utils.common_rest import NCPBaseClient
+
+
+class VNasAPI:
+    """
+    NAS 리소스 API 클래스
+    
+    NAS 인스턴스 및 관련 정보를 조회합니다.
+    """
+    
+    def __init__(self, client: NCPBaseClient):
+        """
+        VNasAPI를 초기화합니다.
+        
+        Args:
+            client: NCPBaseClient 인스턴스
+        """
+        self.client = client
+    """
+    ================================================================
+    NAS 인스턴스 관련 API
+    ================================================================
+    """
+    def get_nas_volume_instance_list(
+        self,
+        region_code: Optional[str] = None,
+        zone_code: Optional[str] = None,
+        nas_volume_instance_no_list: Optional[List[str]] = None,
+        volume_name: Optional[str] = None,
+        volume_allotment_protocol_type_code: Optional[str] = None,
+        is_event_configuration: Optional[bool] = None,
+        is_snapshot_configuration: Optional[bool] = None,
+        responseFormatType: str = 'json'
+        
+    ) -> Dict:
+        """
+        NAS 볼륨 인스턴스 목록을 조회합니다.
+        
+        Args:
+            str region_code: 리전 코드(선택사항)
+            str zone_code: 존 코드
+            str nas_volume_instance_no_list: NAS 볼륨 인스턴스 번호 리스트
+            str volume_name: 볼륨 이름
+            str volume_Allotment_Protocol_Type_Code: 볼륨 할당 프로토콜 타입 코드
+            str is_event_Configuration: 이벤트 설정 여부
+            str is_snapshot_Configuration: 스냅샷 설정 여부
+        
+        Returns:
+            Dict: NAS 볼륨 인스턴스 목록 응답
+        """
+
+        if region_code:
+            params['regionCode'] = region_code
+        if zone_code:
+            params['zoneCode'] = zone_code
+        if nas_volume_instance_no_list:
+            params['nasVolumeInstanceNoList'] = nas_volume_instance_no_list
+        if volume_name:
+            params['volumeName'] = volume_name
+        if volume_allotment_protocol_type_code:
+            params['volumeAllotmentProtocolTypeCode'] = volume_allotment_protocol_type_code
+        if is_event_configuration:
+            params['isEventConfiguration'] = is_event_configuration
+        if is_snapshot_configuration:
+            params['isSnapshotConfiguration'] = is_snapshot_configuration
+
+        params = {
+            
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+             
+        return self.client.get('/getNasVolumeInstanceList', params=params)
+
+    def get_nas_volume_instance_detail(
+        self,
+        nas_volume_instance_no: str,
+        region_code: Optional[str] = None,
+        responseFormatType: str = 'json'
+    ) -> Dict:
+        """
+        NAS 볼륨 인스턴스 상세 정보를 조회합니다.
+    
+        Args:
+            str nas_volume_instance_no: NAS 볼륨 인스턴스 번호
+            str region_code: 리전 코드(선택사항)
+        
+        Returns:
+            Dict: NAS 볼륨 인스턴스 상세 정보 응답
+        """
+        params = {
+            'nasVolumeInstanceNo': nas_volume_instance_no,
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+        if region_code:
+            params['regionCode'] = region_code
+        return self.client.get('/getNasVolumeInstanceDetail', params=params)
+
+    def get_nas_volume_access_control_rule_list(
+        self,
+        nas_volume_instance_no: str,
+        region_code: Optional[str] = None,
+        responseFormatType: str = 'json'
+    ) -> Dict:
+        """
+        NAS 볼륨 인스턴스에 설정된 접근 제어 규칙 목록을 조회합니다.
+        
+        Args:
+            str nas_volume_instance_no: NAS 볼륨 인스턴스 번호
+            str region_code: 리전 코드(선택사항)
+        
+        Returns:
+            Dict: NAS 볼륨 인스턴스에 설정된 접근 제어 규칙 목록 응답
+        """
+        params = {
+            'nasVolumeInstanceNo': nas_volume_instance_no,
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+        if region_code:
+            params['regionCode'] = region_code
+        return self.client.get('/getNasVolumeAccessControlRuleList', params=params)
+
+    def get_nas_volume_instance_rating_list(
+        self,
+        nas_volume_instance_no: str,
+        start_time: str,
+        end_time: str,
+        interval: str,
+        region_code: Optional[str] = None,
+        responseFormatType: str = 'json'
+    ) -> Dict:
+        """
+        특정 기간의 NAS 볼륨 인스턴스의 크기를 설정한 측정 간격에 따라 조회합니다.
+        
+        Args:
+            str nas_volume_instance_no: NAS 볼륨 인스턴스 번호
+            str start_time: 시작 시간 (yyyy-MM-dd'T'HH:mm:ssZ)(<예시> 2024-04-01'T'00:00:00+0900)(GET 방식 이용 시 URL 인코딩 필요)
+            str end_time: 종료 시간 (yyyy-MM-dd'T'HH:mm:ssZ)(<예시> 2024-04-01'T'00:00:00+0900)(GET 방식 이용 시 URL 인코딩 필요)
+            str interval: 측정 간격 (5m: 5분, 6h: 6시간, 1d: 1일, 1M: 1개월) 제약조건(5m: 최대 3일, 6h: 최대 1개월, 1d: 최대 2년, 1M: 최대 5년)
+            str region_code: 리전 코드(선택사항)
+        
+        Returns:
+        """
+        params = {
+            'nasVolumeInstanceNo': nas_volume_instance_no,
+            'startTime': start_time,
+            'endTime': end_time,
+            'interval': interval,
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+        if region_code:
+            params['regionCode'] = region_code
+
+        return self.client.get('/getNasVolumeInstanceRatingList', params=params)
+
+
+
+    """
+    ================================================================
+    NAS 볼륨 스냅샷 관련 API
+    ================================================================
+    """
+    def get_nas_volume_snapshot_configuration_history_list(
+        self,
+        nas_volume_instance_no: str,
+        region_code: Optional[str] = None,
+        responseFormatType: str = 'json'
+    ) -> Dict:
+        """
+        NAS 볼륨 인스턴스의 스냅샷 설정 이력을 조회할 수 있습니다.
+        
+        Args:
+            str nas_volume_instance_no: NAS 볼륨 인스턴스 번호
+            str region_code: 리전 코드(선택사항)
+        
+        Returns:
+            Dict: NAS 볼륨 인스턴스의 스냅샷 설정 이력 응답
+        """
+        params = {
+            'nasVolumeInstanceNo': nas_volume_instance_no,
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+        if region_code:
+            params['regionCode'] = region_code
+
+        return self.client.get('/getNasVolumeSnapshotConfigurationHistoryList', params=params)
+
+    def get_nas_volume_snapshot_list(
+            self,
+            nas_volume_instance_no: str,
+            region_code: Optional[str] = None,
+            responseFormatType: str = 'json'
+    ) -> Dict:
+        """
+        NAS 볼륨 인스턴스의 스냅샷 목록을 조회합니다.
+            
+        Args:
+            str nas_volume_instance_no: NAS 볼륨 인스턴스 번호
+            str region_code: 리전 코드(선택사항)
+                
+        Returns:
+            Dict: NAS 볼륨 인스턴스의 스냅샷 목록 응답
+        """
+        params = {
+            'nasVolumeInstanceNo': nas_volume_instance_no,
+            'responseFormatType': responseFormatType  # JSON 형식 명시
+        }
+        
+        if region_code:
+            params['regionCode'] = region_code
+        return self.client.get('/getNasVolumeSnapshotList', params=params)
