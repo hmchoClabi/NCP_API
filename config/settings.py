@@ -154,9 +154,16 @@ if NCP_API_TYPE == 'gov':
     NAS_BASE_URL = 'https://ncloud.apigw.gov-ntruss.com/vnas/v2'
     RESOURCE_MANAGER_BASE_URL = 'https://resourcemanager.apigw.gov-ntruss.com'
     VPC_BASE_URL = 'https://ncloud.apigw.gov-ntruss.com/vpc/v2'
+    CLA_BASE_URL = 'https://cloudloganalytics.apigw.gov-ntruss.com'
+    SUBACCOUNT_BASE_URL = 'https://subaccount.apigw.gov-ntruss.com'
+    WMS_BASE_URL = 'https://wms.apigw.gov-ntruss.com'
     GLOBAL_DNS_BASE_URL = 'https://globaldns.apigw.gov-ntruss.com/dns/v1'
-    SYSTEM_SERVER_VPC_CW_KEY = os.getenv('GOV_CLOUD_INSIGHT_CW_KEY', '567435234753253376')  # 정부용 vServer 기본값
-    SYSTEM_NKS_CW_KEY = os.getenv('GOV_NKS_CW_KEY', '769285093356343296')  # 정부용 NKS 기본값
+    CLOUD_INSIGHT_BASE_URL = 'https://cw.apigw.gov-ntruss.com'
+    CLOUD_ACTIVITY_TRACER_BASE_URL = 'https://cloudactivitytracer.apigw.gov-ntruss.com'
+    SECURITY_MONITORING_BASE_URL = 'https://securitymonitoring.apigw.gov-ntruss.com'
+    CERTIFICATE_MANAGER_BASE_URL = 'https://certificatemanager.apigw.gov-ntruss.com'
+    #SYSTEM_SERVER_VPC_CW_KEY = os.getenv('GOV_CLOUD_INSIGHT_CW_KEY', '567435234753253376')  # 정부용 vServer 기본값
+    #SYSTEM_NKS_CW_KEY = os.getenv('GOV_NKS_CW_KEY', '769285093356343296')  # 정부용 NKS 기본값
     print(f"정부용(GOV) API 엔드포인트 사용: {API_BASE_URL}")
     print(f"정부용(GOV) NKS 엔드포인트 사용: {NKS_BASE_URL}")
     print(f"정부용(GOV) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
@@ -177,10 +184,16 @@ else:
     NAS_BASE_URL = 'https://ncloud.apigw.ntruss.com/vnas/v2'
     RESOURCE_MANAGER_BASE_URL = 'https://resourcemanager.apigw.ntruss.com'
     VPC_BASE_URL = 'https://ncloud.apigw.ntruss.com/vpc/v2'
+    CLA_BASE_URL = 'https://cloudloganalytics.apigw.ntruss.com'
+    SUBACCOUNT_BASE_URL = 'https://subaccount.apigw.ntruss.com'
+    WMS_BASE_URL = 'https://wms.apigw.ntruss.com'
     GLOBAL_DNS_BASE_URL = 'https://globaldns.apigw.ntruss.com/dns/v1'
     CLOUD_INSIGHT_BASE_URL = 'https://cw.apigw.ntruss.com'
-    SYSTEM_SERVER_VPC_CW_KEY = os.getenv('CLOUD_INSIGHT_CW_KEY', '460438474722512896')  # 민간용 vServer 기본값
-    SYSTEM_NKS_CW_KEY = os.getenv('NKS_CW_KEY', '526115048926613504')  # 민간용 NKS 기본값
+    CLOUD_ACTIVITY_TRACER_BASE_URL = 'https://cw.apigw.ntruss.com'
+    SECURITY_MONITORING_BASE_URL = 'https://securitymonitoring.apigw.ntruss.com'
+    CERTIFICATE_MANAGER_BASE_URL = 'https://certificatemanager.apigw.ntruss.com/api/v1'
+    #SYSTEM_SERVER_VPC_CW_KEY = os.getenv('CLOUD_INSIGHT_CW_KEY', '460438474722512896')  # 민간용 vServer 기본값
+    #SYSTEM_NKS_CW_KEY = os.getenv('NKS_CW_KEY', '526115048926613504')  # 민간용 NKS 기본값
     print(f"민간용(PUBLIC) API 엔드포인트 사용: {API_BASE_URL}")
     print(f"민간용(PUBLIC) NKS 엔드포인트 사용: {NKS_BASE_URL}")
     print(f"민간용(PUBLIC) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
@@ -201,8 +214,15 @@ API_ENDPOINTS: Dict[str, str] = {
     'vpc' : VPC_BASE_URL,
     'lb' : LB_BASE_URL,
     'globaldns' : GLOBAL_DNS_BASE_URL,
-    'resourcemanager' : RESOURCE_MANAGER_BASE_URL
-}
+    'resourcemanager' : RESOURCE_MANAGER_BASE_URL,
+    'cla' : CLA_BASE_URL,
+    'subaccount' : SUBACCOUNT_BASE_URL,
+    'wms' : WMS_BASE_URL,
+    'insight' : CLOUD_INSIGHT_BASE_URL,
+    'tracer' : CLOUD_ACTIVITY_TRACER_BASE_URL,
+    'securitymonitoring' : SECURITY_MONITORING_BASE_URL,
+    'certificatemanager' : CERTIFICATE_MANAGER_BASE_URL
+    }
 
 # 리포트 출력 경로
 REPORT_OUTPUT_DIR = os.getenv('REPORT_OUTPUT_DIR', './reports')

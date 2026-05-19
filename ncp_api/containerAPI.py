@@ -32,7 +32,9 @@ class ContainerAPI:
     ================================================================
     """
     def get_registry_list(
-        self
+        self,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None
         
     ) -> Dict:
         """
@@ -45,6 +47,12 @@ class ContainerAPI:
             Dict: 컨테이너 레지스트리 목록 응답 데이터
         """
         params = {}
+
+        if page is not None:
+            params['page'] = page
+        if page_size is not None:
+            params['pagesize'] = page_size
+
         return self.client.get('/repositories', params=params)
     """
     ================================================================
@@ -53,7 +61,9 @@ class ContainerAPI:
     """
     def get_image_list(
         self,
-        registry_id: str
+        registry_id: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None
     ) -> Dict:
         """
         컨테이너 이미지 목록을 조회합니다.
@@ -65,47 +75,60 @@ class ContainerAPI:
             Dict: 컨테이너 이미지 목록 응답 데이터
         """
         params = {}
+
+        if page is not None:
+            params['page'] = page
+        if page_size is not None:
+            params['pagesize'] = page_size
+
         return self.client.get(f'/repositories/{registry_id}', params=params)
 
     def get_image_detail(
         self,
         registry_id: str,
-        image_id: str
+        image_name: str
     ) -> Dict:
         """
         컨테이너 이미지 상세 정보를 조회합니다.
         
         Args:
             registry_id: 레지스트리 ID,
-            image_id: 이미지 ID
+            image_name: 이미지 이름
 
         Returns:
             Dict: 컨테이너 이미지 상세 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/repositories/{registry_id}/{image_id}', params=params)
+        return self.client.get(f'/repositories/{registry_id}/{image_name}', params=params)
 
     def get_image_tag(
         self,
         registry_id: str,
-        image_id: str
-    ) -> Dict:
+        image_name: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None
+        ) -> Dict:
         """
         컨테이너 이미지 태그 목록을 조회합니다.
         
         Args:
             registry_id: 레지스트리 ID,
-            image_id: 이미지 ID
-        returns:
+            image_name: 이미지 이름
+        Returns:
             Dict: 컨테이너 이미지 태그 목록 응답 데이터
         """
         params = {}
-        return self.client.get(f'/repositories/{registry_id}/{image_id}/tags', params=params)
+        if page is not None:
+            params['page'] = page
+        if page_size is not None:
+            params['pagesize'] = page_size
+
+        return self.client.get(f'/repositories/{registry_id}/{image_name}/tags', params=params)
 
     def get_image_tag_detail(
         self,
         registry_id: str,
-        image_id: str,
+        image_name: str,
         reference: str
     ) -> Dict:
         """
@@ -113,8 +136,8 @@ class ContainerAPI:
 
         Args:
             registry_id: 레지스트리 ID,
-            image_id: 이미지 ID,
+            image_name: 이미지 이름름,
             reference: 태그 이름
         """
         params = {}
-        return self.client.get(f'/repositories/{registry_id}/{image_id}/tags/{reference}', params=params)
+        return self.client.get(f'/repositories/{registry_id}/{image_name}/tags/{reference}', params=params)

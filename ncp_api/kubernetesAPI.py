@@ -48,7 +48,8 @@ class KubernetesAPI:
         uuid: str
     ) -> Dict:
         """
-        NKS 클러스터 상세 정보를 조회합니다.
+        Cluster 조회
+        특정클러스터의 정보를 조회합니다.
         
         Args:
             uuid: 클러스터 UUID
@@ -136,17 +137,21 @@ class KubernetesAPI:
 
     def get_nks_cluster_nodepool_list(
         self,
-        uuid: str
+        uuid: str,
+        hypervisor_code: Optional[str] = None
     ) -> Dict:
         """
         NKS 클러스터 노드풀 목록 정보를 조회합니다.
         
         Args:
             uuid: 클러스터 UUID
+            hypervisor_code: 하이퍼바이져 코드(xen, kvm) (선택사항)
         Returns:
             Dict: NKS 클러스터 노드풀 목록 정보 응답 데이터
         """
         params = {}
+        if hypervisor_code is not None:
+            params['hypervisorCode'] = hypervisor_code
         return self.client.get(f'/clusters/{uuid}/node-pool', params=params)
 
     def get_nks_kubeconfig(
@@ -166,7 +171,8 @@ class KubernetesAPI:
 
     def get_nks_support_version(
         self,
-        hypervisorCode: Optional[str] = None
+        hypervisor_code: Optional[str] = None,
+        is_regional_support: Optional[bool] = None
     ) -> Dict:
         """
         NKS 클러스터 지원 버전 정보를 조회합니다.
@@ -177,13 +183,15 @@ class KubernetesAPI:
             Dict: NKS 클러스터 지원 버전 정보 응답 데이터
         """
         params = {}
-        if hypervisorCode:
-            params['hypervisorCode'] = hypervisorCode
+        if hypervisor_code is not None:
+            params['hypervisorCode'] = hypervisor_code
+        if is_regional_support is not None:
+            params['isRegionalSupport'] = is_regional_support
         return self.client.get(f'/option/version', params=params)
 
     def get_nks_cluster_server_image(
         self,
-        hypervisorCode: Optional[str] = None
+        hypervisor_code: Optional[str] = None
     ) -> Dict:
         """
         NKS 클러스터 서버 이미지 정보를 조회합니다.
@@ -194,31 +202,31 @@ class KubernetesAPI:
             Dict: NKS 클러스터 서버 이미지 정보 응답 데이터
         """
         params = {}
-        if hypervisorCode:
-            params['hypervisorCode'] = hypervisorCode
+        if hypervisor_code is not None:
+            params['hypervisorCode'] = hypervisor_code
         return self.client.get(f'/option/server-image', params=params)
 
     def get_nks_cluster_server_spec(
         self,
-        softwareCode: str,
-        zoneCode: Optional[str] = None,
-        zoneNo: Optional[str] = None
+        software_code: str,
+        zone_code: Optional[str] = None,
+        zone_no: Optional[str] = None
     ) -> Dict:
         """
         NKS 클러스터 서버 스펙 정보를 조회합니다.
         
         Args:
-            softwareCode: 소프트웨어 코드
-            zoneCode: 존 코드 (선택사항)
-            zoneNo: 존 번호 (선택사항)
+            software_code: 소프트웨어 코드
+            zone_code: 존 코드 (선택사항)
+            zone_no: 존 번호 (선택사항)
         Returns:
             Dict: NKS 클러스터 서버 스펙 정보 응답 데이터
         """
-        params = {'softwareCode': softwareCode}
-        if not zoneNo and not zoneCode:
+        params = {'softwareCode': software_code}
+        if not zone_no and not zone_code:
             raise ValueError("zoneNo 또는 zoneCode 중 하나는 필수 입력 값입니다.")
-        if zoneNo:
-            params['zoneNo'] = zoneNo
-        if zoneCode:
-            params['zoneCode'] = zoneCode
-        return self.client.get(f'/option/server-product-code', params=params)   
+        if zone_no is not None:
+            params['zoneNo'] = zone_no
+        if zone_code is not None:
+            params['zoneCode'] = zone_code
+        return self.client.get(f'/option/server-product-code', params=params)

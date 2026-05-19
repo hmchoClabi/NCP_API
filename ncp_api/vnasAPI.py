@@ -37,7 +37,11 @@ class VNasAPI:
         volume_allotment_protocol_type_code: Optional[str] = None,
         is_event_configuration: Optional[bool] = None,
         is_snapshot_configuration: Optional[bool] = None,
-        responseFormatType: str = 'json'
+        page_no: Optional[int] = None,
+        page_size: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
+        responseFormatType: Optional[str] = 'json'
         
     ) -> Dict:
         """
@@ -51,38 +55,49 @@ class VNasAPI:
             str volume_Allotment_Protocol_Type_Code: 볼륨 할당 프로토콜 타입 코드
             str is_event_Configuration: 이벤트 설정 여부
             str is_snapshot_Configuration: 스냅샷 설정 여부
+            int page_no: 페이지 번호
+            int page_size: 페이지당 항목 수
+            str sort_by: 정렬 기준 (예: nasVolumeInstanceNo | volumeName | volumeTotalSize |nasVolumeInstanceNo: NAS 볼륨 인스턴스 번호 | volumeName: 볼륨 이름 |volumeTotalSize: 볼륨 총 크기 )
+            str sort_order: 정렬 순서 ('asc' 또는 'desc')
         
         Returns:
             Dict: NAS 볼륨 인스턴스 목록 응답
         """
+        params = {}             
 
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
-        if zone_code:
+        if zone_code is not None:
             params['zoneCode'] = zone_code
-        if nas_volume_instance_no_list:
-            params['nasVolumeInstanceNoList'] = nas_volume_instance_no_list
-        if volume_name:
+        if nas_volume_instance_no_list is not None:
+            for idx, nas_volume_instance_no in enumerate(nas_volume_instance_no_list, start=1):
+                params[f'nasVolumeInstanceNoList.{idx}'] = nas_volume_instance_no
+        if volume_name is not None:
             params['volumeName'] = volume_name
-        if volume_allotment_protocol_type_code:
+        if volume_allotment_protocol_type_code is not None:
             params['volumeAllotmentProtocolTypeCode'] = volume_allotment_protocol_type_code
-        if is_event_configuration:
+        if is_event_configuration is not None:
             params['isEventConfiguration'] = is_event_configuration
-        if is_snapshot_configuration:
+        if is_snapshot_configuration is not None:
             params['isSnapshotConfiguration'] = is_snapshot_configuration
-
-        params = {
-            
-            'responseFormatType': responseFormatType  # JSON 형식 명시
-        }
-             
+        if page_no is not None:
+            params['pageNo'] = page_no
+        if page_size is not None:
+            params['pageSize'] = page_size
+        if sort_by is not None:
+            params['sortBy'] = sort_by
+        if sort_order is not None:
+            params['sortOrder'] = sort_order
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
+        
         return self.client.get('/getNasVolumeInstanceList', params=params)
 
     def get_nas_volume_instance_detail(
         self,
         nas_volume_instance_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
         NAS 볼륨 인스턴스 상세 정보를 조회합니다.
@@ -95,18 +110,19 @@ class VNasAPI:
             Dict: NAS 볼륨 인스턴스 상세 정보 응답
         """
         params = {
-            'nasVolumeInstanceNo': nas_volume_instance_no,
-            'responseFormatType': responseFormatType  # JSON 형식 명시
+            'nasVolumeInstanceNo': nas_volume_instance_no            
         }
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         return self.client.get('/getNasVolumeInstanceDetail', params=params)
 
     def get_nas_volume_access_control_rule_list(
         self,
         nas_volume_instance_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
         NAS 볼륨 인스턴스에 설정된 접근 제어 규칙 목록을 조회합니다.
@@ -119,12 +135,16 @@ class VNasAPI:
             Dict: NAS 볼륨 인스턴스에 설정된 접근 제어 규칙 목록 응답
         """
         params = {
-            'nasVolumeInstanceNo': nas_volume_instance_no,
-            'responseFormatType': responseFormatType  # JSON 형식 명시
+            'nasVolumeInstanceNo': nas_volume_instance_no
+            
         }
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         return self.client.get('/getNasVolumeAccessControlRuleList', params=params)
+    
+    
 
     def get_nas_volume_instance_rating_list(
         self,
@@ -133,7 +153,7 @@ class VNasAPI:
         end_time: str,
         interval: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
         특정 기간의 NAS 볼륨 인스턴스의 크기를 설정한 측정 간격에 따라 조회합니다.
@@ -151,11 +171,13 @@ class VNasAPI:
             'nasVolumeInstanceNo': nas_volume_instance_no,
             'startTime': start_time,
             'endTime': end_time,
-            'interval': interval,
-            'responseFormatType': responseFormatType  # JSON 형식 명시
+            'interval': interval
+            
         }
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
 
         return self.client.get('/getNasVolumeInstanceRatingList', params=params)
 
@@ -170,7 +192,7 @@ class VNasAPI:
         self,
         nas_volume_instance_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
         NAS 볼륨 인스턴스의 스냅샷 설정 이력을 조회할 수 있습니다.
@@ -183,11 +205,13 @@ class VNasAPI:
             Dict: NAS 볼륨 인스턴스의 스냅샷 설정 이력 응답
         """
         params = {
-            'nasVolumeInstanceNo': nas_volume_instance_no,
-            'responseFormatType': responseFormatType  # JSON 형식 명시
+            'nasVolumeInstanceNo': nas_volume_instance_no
+            
         }
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
 
         return self.client.get('/getNasVolumeSnapshotConfigurationHistoryList', params=params)
 
@@ -195,7 +219,7 @@ class VNasAPI:
             self,
             nas_volume_instance_no: str,
             region_code: Optional[str] = None,
-            responseFormatType: str = 'json'
+            responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
         NAS 볼륨 인스턴스의 스냅샷 목록을 조회합니다.
@@ -208,10 +232,12 @@ class VNasAPI:
             Dict: NAS 볼륨 인스턴스의 스냅샷 목록 응답
         """
         params = {
-            'nasVolumeInstanceNo': nas_volume_instance_no,
-            'responseFormatType': responseFormatType  # JSON 형식 명시
+            'nasVolumeInstanceNo': nas_volume_instance_no
+            
         }
         
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         return self.client.get('/getNasVolumeSnapshotList', params=params)
