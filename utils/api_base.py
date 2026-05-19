@@ -73,3 +73,36 @@ class APIParamBuilder:
 
     def build(self) -> Dict[str, Any]:
         return dict(self.params)
+
+    def add_ncp(self, key: str, value: Any) -> "APIParamBuilder":
+        """Add value using NCP-friendly serialization rules.
+
+        Supported:
+        - scalar: key=value
+        - list[scalar]: key.1=value1, key.2=value2
+        - dict: key.child=value
+        - list[dict]: key.1.child=value
+        """
+        if value is None:
+            return self
+
+        if isinstance(value, Mapping):
+            for child_key, child_value in value.items():
+                self.add_ncp(f"{key}.{child_key}", child_value)
+            return self
+
+        if isinstance(value, (list, tuple)):
+            if all(isinstance(item, Mapping) for item in value):
+                self.add_indexed_objects(key, value)  # type: ignore[arg-type]
+                return self
+            self.add_indexed(key, value)
+            return self
+
+        self.params[key] = value
+        return self
+
+    def add_many_ncp(self, mapping: Mapping[str, Any]) -> "APIParamBuilder":
+        """Add many keys using add_ncp serialization."""
+        for key, value in mapping.items():
+            self.add_ncp(key, value)
+        return self
