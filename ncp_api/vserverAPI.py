@@ -171,23 +171,20 @@ class VServerAPI(BaseNCPAPI):
         if len(root_password_server_instance_list_server_instance_no_list) != len(root_password_server_instance_list_private_key_list):
             raise ValueError("server_instance_no_list와 private_key_list 길이가 같아야 합니다.")
 
-        params = {}
-
-        for idx, (server_instance_no, private_key) in enumerate(
-            zip(
-                root_password_server_instance_list_server_instance_no_list,
-                root_password_server_instance_list_private_key_list
-            ),
-            start=1
-        ):
-            params[f'rootPasswordServerInstanceList.{idx}.serverInstanceNo'] = server_instance_no
-            params[f'rootPasswordServerInstanceList.{idx}.privateKey'] = private_key
-
-        if region_code is not None:
-            params['regionCode'] = region_code
-
-        if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+        params = (
+            self.build_params()
+            .add_indexed_parallel(
+                "rootPasswordServerInstanceList",
+                ["serverInstanceNo", "privateKey"],
+                [
+                    root_password_server_instance_list_server_instance_no_list,
+                    root_password_server_instance_list_private_key_list,
+                ],
+            )
+            .add("regionCode", region_code)
+            .add("responseFormatType", responseFormatType)
+            .build()
+        )
 
         return self.post('/vserver/v2/getRootPasswordServerInstanceList', params=params)
 

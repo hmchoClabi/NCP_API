@@ -728,13 +728,15 @@ class NetworkAPI(BaseNCPAPI):
         if sortlist_sorted_by and sortlist_sorting_order:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
-
-            for idx, (sorted_by, sorting_order) in enumerate(
-                zip(sortlist_sorted_by, sortlist_sorting_order),
-                start=1
-            ):
-                params[f"sortList.{idx}.sortedBy"] = sorted_by
-                params[f"sortList.{idx}.sortingOrder"] = sorting_order
+            sort_items = [
+                {"sortedBy": sorted_by, "sortingOrder": sorting_order}
+                for sorted_by, sorting_order in zip(sortlist_sorted_by, sortlist_sorting_order)
+            ]
+            params = (
+                self.build_params(params)
+                .add_indexed_objects("sortList", sort_items)
+                .build()
+            )
 
         return self.get('/getLoadBalancerInstanceList', params=params)
 
@@ -893,13 +895,15 @@ class NetworkAPI(BaseNCPAPI):
         if sortlist_sorted_by and sortlist_sorting_order:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
-
-            for idx, (sorted_by, sorting_order) in enumerate(
-                zip(sortlist_sorted_by, sortlist_sorting_order),
-                start=1
-            ):
-                params[f"sortList.{idx}.sortedBy"] = sorted_by
-                params[f"sortList.{idx}.sortingOrder"] = sorting_order
+            sort_items = [
+                {"sortedBy": sorted_by, "sortingOrder": sorting_order}
+                for sorted_by, sorting_order in zip(sortlist_sorted_by, sortlist_sorting_order)
+            ]
+            params = (
+                self.build_params(params)
+                .add_indexed_objects("sortList", sort_items)
+                .build()
+            )
         
         return self.get('/getTargetGroupList', params=params)
 
