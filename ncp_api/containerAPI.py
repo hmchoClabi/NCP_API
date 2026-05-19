@@ -38,12 +38,12 @@ class ContainerAPI(BaseNCPAPI):
         Returns:
             Dict: 컨테이너 레지스트리 목록 응답 데이터
         """
-        params = {}
-
-        if page is not None:
-            params['page'] = page
-        if page_size is not None:
-            params['pagesize'] = page_size
+        params = (
+            self.build_params()
+            .add('page', page)
+            .add('pagesize', page_size)
+            .build()
+        )
 
         return self.get('/repositories', params=params)
     """
@@ -66,12 +66,12 @@ class ContainerAPI(BaseNCPAPI):
         Returns:
             Dict: 컨테이너 이미지 목록 응답 데이터
         """
-        params = {}
-
-        if page is not None:
-            params['page'] = page
-        if page_size is not None:
-            params['pagesize'] = page_size
+        params = (
+            self.build_params()
+            .add('page', page)
+            .add('pagesize', page_size)
+            .build()
+        )
 
         return self.get(f'/repositories/{registry_id}', params=params)
 
@@ -90,7 +90,7 @@ class ContainerAPI(BaseNCPAPI):
         Returns:
             Dict: 컨테이너 이미지 상세 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/repositories/{registry_id}/{image_name}', params=params)
 
     def get_image_tag(
@@ -109,11 +109,12 @@ class ContainerAPI(BaseNCPAPI):
         Returns:
             Dict: 컨테이너 이미지 태그 목록 응답 데이터
         """
-        params = {}
-        if page is not None:
-            params['page'] = page
-        if page_size is not None:
-            params['pagesize'] = page_size
+        params = (
+            self.build_params()
+            .add('page', page)
+            .add('pagesize', page_size)
+            .build()
+        )
 
         return self.get(f'/repositories/{registry_id}/{image_name}/tags', params=params)
 
@@ -131,5 +132,5 @@ class ContainerAPI(BaseNCPAPI):
             image_name: 이미지 이름름,
             reference: 태그 이름
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/repositories/{registry_id}/{image_name}/tags/{reference}', params=params)

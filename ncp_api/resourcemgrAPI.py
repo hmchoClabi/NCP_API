@@ -36,14 +36,13 @@ class ResourceManagerAPI(BaseNCPAPI):
         Returns:
             Dict: 리소스 매니져 그룹 목록 응답
         """
-        params = {}
-
-        if group_name:
-            params['groupName'] = group_name
-        if page_index:
-            params['pageIndex'] = page_index
-        if page_size:
-            params['pageSize'] = page_size
+        params = (
+            self.build_params()
+            .add('groupName', group_name)
+            .add('pageIndex', page_index)
+            .add('pageSize', page_size)
+            .build()
+        )
 
         return self.get('/api/v1/groups', params=params)
 
@@ -76,26 +75,19 @@ class ResourceManagerAPI(BaseNCPAPI):
         Returns:
             Dict: 리소스 목록 응답
         """
-        params = {}
-        if nrn:
-            params['nrn'] = nrn
-        if product_name:
-            params['productName'] = product_name
-        if region_code:
-            params['regionCode'] = region_code
-        if resource_type:
-            params['resourceType'] = resource_type
-        if resource_id:
-            params['resourceId'] = resource_id
-        if resource_name:
-            params['resourceName'] = resource_name
-        if tag:
-            params['tag'] = tag
-        if group_name:
-            params['groupName'] = group_name
-        if page:
-            params['page'] = page
-        if size:
-            params['size'] = size
+        params = (
+            self.build_params()
+            .add('nrn', nrn)
+            .add('productName', product_name)
+            .add('regionCode', region_code)
+            .add('resourceType', resource_type)
+            .add('resourceId', resource_id)
+            .add('resourceName', resource_name)
+            .add('tag', tag)
+            .add('groupName', group_name)
+            .add('page', page)
+            .add('size', size)
+            .build()
+        )
 
         return self.post('/api/v1/resources', json_data=params)

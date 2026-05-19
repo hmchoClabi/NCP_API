@@ -32,7 +32,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 목록 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters', params=params)
 
     def get_nks_cluster_detail(
@@ -48,7 +48,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 상세 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}', params=params)
 
     def get_nks_cluster_oidc(
@@ -63,7 +63,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 OIDC 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/oidc', params=params)
 
     def get_nks_cluster_ip_acl(
@@ -78,7 +78,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 IP ACL 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/ip-acl', params=params)
 
     def get_nks_cluster_iam_access_list(
@@ -93,7 +93,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 IAM 액세스 목록 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/access-entries', params=params)
 
     def get_nks_cluster_iam_access(
@@ -109,7 +109,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 IAM 액세스 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/access-entries/{entryUuid}', params=params)
 
     def get_nks_cluster_worker_node(
@@ -124,7 +124,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 워커 노드 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/nodes', params=params)
 
     def get_nks_cluster_nodepool_list(
@@ -141,9 +141,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 노드풀 목록 정보 응답 데이터
         """
-        params = {}
-        if hypervisor_code is not None:
-            params['hypervisorCode'] = hypervisor_code
+        params = self.build_params().add('hypervisorCode', hypervisor_code).build()
         return self.get(f'/clusters/{uuid}/node-pool', params=params)
 
     def get_nks_kubeconfig(
@@ -158,7 +156,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 Kubeconfig 정보 응답 데이터
         """
-        params = {}
+        params = self.build_params().build()
         return self.get(f'/clusters/{uuid}/kubeconfig', params=params)
 
     def get_nks_support_version(
@@ -174,11 +172,12 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 지원 버전 정보 응답 데이터
         """
-        params = {}
-        if hypervisor_code is not None:
-            params['hypervisorCode'] = hypervisor_code
-        if is_regional_support is not None:
-            params['isRegionalSupport'] = is_regional_support
+        params = (
+            self.build_params()
+            .add('hypervisorCode', hypervisor_code)
+            .add('isRegionalSupport', is_regional_support)
+            .build()
+        )
         return self.get(f'/option/version', params=params)
 
     def get_nks_cluster_server_image(
@@ -193,9 +192,7 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 서버 이미지 정보 응답 데이터
         """
-        params = {}
-        if hypervisor_code is not None:
-            params['hypervisorCode'] = hypervisor_code
+        params = self.build_params().add('hypervisorCode', hypervisor_code).build()
         return self.get(f'/option/server-image', params=params)
 
     def get_nks_cluster_server_spec(
@@ -214,11 +211,8 @@ class KubernetesAPI(BaseNCPAPI):
         Returns:
             Dict: NKS 클러스터 서버 스펙 정보 응답 데이터
         """
-        params = {'softwareCode': software_code}
+        params = self.build_params({'softwareCode': software_code})
         if not zone_no and not zone_code:
             raise ValueError("zoneNo 또는 zoneCode 중 하나는 필수 입력 값입니다.")
-        if zone_no is not None:
-            params['zoneNo'] = zone_no
-        if zone_code is not None:
-            params['zoneCode'] = zone_code
+        params = params.add('zoneNo', zone_no).add('zoneCode', zone_code).build()
         return self.get(f'/option/server-product-code', params=params)
