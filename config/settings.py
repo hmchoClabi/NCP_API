@@ -198,9 +198,33 @@ else:
     # print(f"민간용(PUBLIC) NKS 엔드포인트 사용: {NKS_BASE_URL}")
     # print(f"민간용(PUBLIC) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
 
-# API 엔드포인트 설정
-# 쿠버네티스(NKS)는 별도의 게이트웨이 사용
-API_ENDPOINTS: Dict[str, str] = {
+REQUIRED_API_SERVICES = (
+    'server',
+    'vserver',
+    'container_registry',
+    'billing',
+    'monitoring',
+    'storage',
+    'loadbalancer',
+    'kubernetes',
+    'vnas',
+    'vpc',
+    'lb',
+    'globaldns',
+    'resourcemanager',
+    'cla',
+    'subaccount',
+    'wms',
+    'insight',
+    'tracer',
+    'securitymonitoring',
+    'certificatemanager',
+)
+
+
+def build_api_endpoints() -> Dict[str, str]:
+    """서비스별 API endpoint 매핑을 반환합니다."""
+    return {
     'server': API_BASE_URL,
     'vserver': API_BASE_URL,
     'container_registry': CONTAINER_REGISTRY_BASE_URL,
@@ -222,6 +246,23 @@ API_ENDPOINTS: Dict[str, str] = {
     'securitymonitoring' : SECURITY_MONITORING_BASE_URL,
     'certificatemanager' : CERTIFICATE_MANAGER_BASE_URL
     }
+
+
+def validate_api_endpoints(endpoints: Dict[str, str]) -> None:
+    """필수 서비스 endpoint 누락/빈값을 검증합니다."""
+    missing = [service for service in REQUIRED_API_SERVICES if service not in endpoints]
+    if missing:
+        raise ValueError(f"필수 API endpoint가 누락되었습니다: {', '.join(missing)}")
+
+    empty = [service for service, url in endpoints.items() if not str(url).strip()]
+    if empty:
+        raise ValueError(f"빈 API endpoint가 존재합니다: {', '.join(empty)}")
+
+
+# API 엔드포인트 설정
+# 쿠버네티스(NKS)는 별도의 게이트웨이 사용
+API_ENDPOINTS: Dict[str, str] = build_api_endpoints()
+validate_api_endpoints(API_ENDPOINTS)
 
 # 리포트 출력 경로
 REPORT_OUTPUT_DIR = os.getenv('REPORT_OUTPUT_DIR', './reports')
@@ -268,4 +309,3 @@ def get_config() -> Dict[str, Any]:
         'log_level': LOG_LEVEL,
         'log_file': LOG_FILE,
     }
-

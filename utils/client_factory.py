@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from config.settings import API_ENDPOINTS
+from typing import Mapping
+
+from config.settings import API_ENDPOINTS, validate_api_endpoints
 from utils.common_rest import NCPBaseClient
 from utils.credentials import CredentialProvider, EnvCredentialProvider
 
@@ -10,14 +12,20 @@ from utils.credentials import CredentialProvider, EnvCredentialProvider
 class NCPClientFactory:
     """서비스 이름으로 NCPBaseClient를 생성합니다."""
 
-    def __init__(self, credential_provider: CredentialProvider | None = None):
+    def __init__(
+        self,
+        credential_provider: CredentialProvider | None = None,
+        endpoint_map: Mapping[str, str] | None = None,
+    ):
         self.credential_provider = credential_provider or EnvCredentialProvider()
+        self.endpoint_map = dict(endpoint_map or API_ENDPOINTS)
+        validate_api_endpoints(self.endpoint_map)
 
     def create(self, service: str, tenant_id: str | None = None) -> NCPBaseClient:
         try:
-            base_url = API_ENDPOINTS[service]
+            base_url = self.endpoint_map[service]
         except KeyError as exc:
-            available = ", ".join(sorted(API_ENDPOINTS.keys()))
+            available = ", ".join(sorted(self.endpoint_map.keys()))
             raise ValueError(f"지원하지 않는 서비스입니다: {service}. 사용 가능: {available}") from exc
 
         credentials = self.credential_provider.get_credentials(service=service, tenant_id=tenant_id)
