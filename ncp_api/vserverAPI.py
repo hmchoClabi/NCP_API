@@ -6,23 +6,15 @@
 
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class VServerAPI:
+class VServerAPI(BaseNCPAPI):
     """
     서버 리소스 API 클래스
     
     서버 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        ServerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     서버 인스턴스 관련 API
@@ -115,7 +107,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         
-        return self.client.get('/vserver/v2/getServerInstanceList', params=params)
+        return self.get('/vserver/v2/getServerInstanceList', params=params)
     
     def get_server_instance_detail(
         self,
@@ -142,7 +134,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         
-        return self.client.get('/vserver/v2/getServerInstanceDetail', params=params)
+        return self.get('/vserver/v2/getServerInstanceDetail', params=params)
     
     
     """
@@ -166,7 +158,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
 
-        return self.client.get('/vserver/v2/getRootPassword', params=params)
+        return self.get('/vserver/v2/getRootPassword', params=params)
     
     def get_root_password_server_instance_list(
         self,
@@ -197,7 +189,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.post('/vserver/v2/getRootPasswordServerInstanceList', params=params)
+        return self.post('/vserver/v2/getRootPasswordServerInstanceList', params=params)
 
     """
     ================================================================
@@ -270,7 +262,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getServerImageList', params=params)
+        return self.get('/vserver/v2/getServerImageList', params=params)
     
     def server_image_detail(
         self,
@@ -296,7 +288,7 @@ class VServerAPI:
         if responseFormatType is not None:  # JSON 형식 명시
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getServerImageDetail', params=params)
+        return self.get('/vserver/v2/getServerImageDetail', params=params)
     
     def get_member_server_instance_list(
         self,
@@ -354,7 +346,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getMemberServerImageInstanceList', params=params)
+        return self.get('/vserver/v2/getMemberServerImageInstanceList', params=params)
 
     def get_member_server_instance_detail(
         self,
@@ -381,7 +373,7 @@ class VServerAPI:
             params['responseFormatType'] = responseFormatType
 
         
-        return self.client.get('/vserver/v2/getMemberServerImageInstanceDetail', params=params)
+        return self.get('/vserver/v2/getMemberServerImageInstanceDetail', params=params)
     """
     ================================================================
     블록 스토리지 관련 API
@@ -480,7 +472,7 @@ class VServerAPI:
         
         
                    
-        return self.client.get('/vserver/v2/getBlockStorageInstanceList', params=params)
+        return self.get('/vserver/v2/getBlockStorageInstanceList', params=params)
     
     
     
@@ -508,7 +500,7 @@ class VServerAPI:
         if responseFormatType is not None:   # JSON 형식 명시
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getBlockStorageInstanceDetail', params=params)
+        return self.get('/vserver/v2/getBlockStorageInstanceDetail', params=params)
     
 
 
@@ -563,7 +555,7 @@ class VServerAPI:
         if responseFormatType is not None:   # JSON 형식 명시
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getBlockStorageVolumeTypeList', params=params)
+        return self.get('/vserver/v2/getBlockStorageVolumeTypeList', params=params)
     
 
 
@@ -647,7 +639,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getBlockStorageSnapshotInstanceList', params=params)
+        return self.get('/vserver/v2/getBlockStorageSnapshotInstanceList', params=params)
 
     def get_block_storage_snapshot_instance_detail(
         self,
@@ -675,7 +667,7 @@ class VServerAPI:
             params['responseFormatType'] = responseFormatType
 
 
-        return self.client.get('/vserver/v2/getBlockStorageSnapshotInstanceDetail', params=params)
+        return self.get('/vserver/v2/getBlockStorageSnapshotInstanceDetail', params=params)
     
     """
     ================================================================
@@ -738,7 +730,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getPublicIpInstanceList', params=params)
+        return self.get('/vserver/v2/getPublicIpInstanceList', params=params)
 
 
     def get_public_ip_instance_detail(
@@ -768,7 +760,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getPublicIpInstanceDetail', params=params)
+        return self.get('/vserver/v2/getPublicIpInstanceDetail', params=params)
 
     def get_public_ip_target_server_instance_list(
         self,
@@ -788,7 +780,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
 
-        return self.client.get('/vserver/v2/getPublicIpTargetServerInstanceList', params=params)
+        return self.get('/vserver/v2/getPublicIpTargetServerInstanceList', params=params)
     
     """
     ===============================================================
@@ -845,7 +837,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
 
-        return self.client.get('/vserver/v2/getInitScriptList', params=params)
+        return self.get('/vserver/v2/getInitScriptList', params=params)
     
 
     def get_init_script_detail (
@@ -872,7 +864,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
 
-        return self.client.get('/vserver/v2/getInitScriptDetail', params=params)
+        return self.get('/vserver/v2/getInitScriptDetail', params=params)
             
     """
     ===============================================================
@@ -947,7 +939,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
         
-        return self.client.get('/vserver/v2/getNetworkInterfaceList', params=params)
+        return self.get('/vserver/v2/getNetworkInterfaceList', params=params)
     
     def get_network_interface_instance_detail(
         self,
@@ -973,7 +965,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
         
-        return self.client.get('/vserver/v2/getNetworkInterfaceDetail', params=params)  
+        return self.get('/vserver/v2/getNetworkInterfaceDetail', params=params)  
     
     def get_flow_log_configuration_list(
         self,
@@ -1000,7 +992,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
         
-        return self.client.get('/vserver/v2/getFlowLogConfigurationList', params=params)
+        return self.get('/vserver/v2/getFlowLogConfigurationList', params=params)
     
     """
     ================================================================
@@ -1052,7 +1044,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
         
-        return self.client.get('/vserver/v2/getAccessControlGroupList', params=params)
+        return self.get('/vserver/v2/getAccessControlGroupList', params=params)
     
     def get_access_control_group_detail(
         self,
@@ -1078,7 +1070,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType    
         
-        return self.client.get('/vserver/v2/getAccessControlGroupDetail', params=params)
+        return self.get('/vserver/v2/getAccessControlGroupDetail', params=params)
     
     def get_access_control_group_rule_list(
         self,
@@ -1111,7 +1103,7 @@ class VServerAPI:
             params['responseFormatType'] = responseFormatType    
         
         
-        return self.client.get('/vserver/v2/getAccessControlGroupRuleList', params=params)
+        return self.get('/vserver/v2/getAccessControlGroupRuleList', params=params)
     
     """
     ================================================================
@@ -1184,7 +1176,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getFabricClusterList', params=params)
+        return self.get('/vserver/v2/getFabricClusterList', params=params)
 
 
     def get_fabric_cluster_detail(
@@ -1212,7 +1204,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getFabricClusterDetail', params=params)
+        return self.get('/vserver/v2/getFabricClusterDetail', params=params)
 
 
     def get_fabric_cluster_pool_list(          
@@ -1248,7 +1240,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getFabricClusterPoolList', params=params)
+        return self.get('/vserver/v2/getFabricClusterPoolList', params=params)
 
 
 
@@ -1277,7 +1269,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getHypervisorTypeList', params=params)  
+        return self.get('/vserver/v2/getHypervisorTypeList', params=params)  
     
     def get_raid_list(
         self,
@@ -1300,7 +1292,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
                 
-        return self.client.get('/vserver/v2/getRaidList', params=params)
+        return self.get('/vserver/v2/getRaidList', params=params)
     
     def get_region_list(
         self,
@@ -1321,7 +1313,7 @@ class VServerAPI:
             params['responseFormatType'] = responseFormatType
         
                 
-        return self.client.get('/vserver/v2/getRegionList', params=params)
+        return self.get('/vserver/v2/getRegionList', params=params)
 
     def get_server_image_product_list(
         self,
@@ -1366,7 +1358,7 @@ class VServerAPI:
             params['responseFormatType'] = responseFormatType
         
         
-        return self.client.get('/vserver/v2/getServerImageProductList', params=params)
+        return self.get('/vserver/v2/getServerImageProductList', params=params)
     
     def get_server_product_list(
         self,
@@ -1413,7 +1405,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getServerProductList', params=params)
+        return self.get('/vserver/v2/getServerProductList', params=params)
     
     def get_server_spec_detail(
         self,
@@ -1439,7 +1431,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/vserver/v2/getServerSpecDetail', params=params)
+        return self.get('/vserver/v2/getServerSpecDetail', params=params)
     
     def get_server_spec_list(
         self,
@@ -1479,7 +1471,7 @@ class VServerAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/vserver/v2/getServerSpecList', params=params)
+        return self.get('/vserver/v2/getServerSpecList', params=params)
     
     def get_zone_list(
         self,
@@ -1501,5 +1493,5 @@ class VServerAPI:
         if region_code:
             params['regionCode'] = region_code
 
-        return self.client.get('/vserver/v2/getZoneList', params=params)
+        return self.get('/vserver/v2/getZoneList', params=params)
     

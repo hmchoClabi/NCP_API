@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional, Any
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class CloudInsightAPI:
+class CloudInsightAPI(BaseNCPAPI):
     """
     CloudInsightAPI 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        CloudInsightAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     CloudInsight Dashboard API
@@ -39,7 +31,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/chart/dashboard', params=params)
+        return self.get(f'/cw_fea/real/cw/api/chart/dashboard', params=params)
     
     def get_dashboard_widget_list(
             self,
@@ -59,7 +51,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets', params=params)
+        return self.get(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets', params=params)
         
     
     
@@ -113,7 +105,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets', params=params)
+        return self.get(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets', params=params)
     
         
     """
@@ -169,7 +161,7 @@ class CloudInsightAPI:
             json_body['onlyFetchUnCloseEvent'] = only_fetch_un_close_event
 
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/search', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/event/search', json_data=json_body)
 
     def get_search_event_by_id(
             self,
@@ -217,7 +209,7 @@ class CloudInsightAPI:
             json_body['onlyFetchUnCloseEvent'] = only_fetch_un_close_event
 
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/searchById', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/event/searchById', json_data=json_body)
 
 
     def get_search_event_count_console(
@@ -245,7 +237,7 @@ class CloudInsightAPI:
             'endTime' : end_time
         }
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/searchEventCountConsole', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/event/searchEventCountConsole', json_data=json_body)
     
 
     """
@@ -277,7 +269,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/group/monitor/{prod_key}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/group/monitor/{prod_key}', params=params)
     
 
     def get_metrics_group(
@@ -314,7 +306,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/group/metrics/query/{prod_key}/{id}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/group/metrics/query/{prod_key}/{id}', params=params)
     
 
     
@@ -351,7 +343,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/group/metrics/query/{prod_key}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/group/metrics/query/{prod_key}', params=params)
 
     def get_monitor_group  (
         self,
@@ -379,7 +371,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/group/monitor/{prod_key}/{id}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/group/monitor/{prod_key}/{id}', params=params)
     
     def get_notification_recipient_list  (
         self
@@ -398,7 +390,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/notify/groups', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/notify/groups', params=params)
     
     def get_rule_group   (
         self,
@@ -446,7 +438,7 @@ class CloudInsightAPI:
         """
         params = {}
 
-        return self.client.get(f'/cw_fea/real/cw/api/rule/group/ruleGrp/query/{prod_key}/{id}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/rule/group/ruleGrp/query/{prod_key}/{id}', params=params)
     
     def get_rule_group_by_metric_group_ids(
             self,
@@ -496,7 +488,7 @@ class CloudInsightAPI:
         }
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/metric/group/related', json_data=metric_group_ids, params=params)
+        return self.post(f'/cw_fea/real/cw/api/rule/group/metric/group/related', json_data=metric_group_ids, params=params)
     
     def get_rule_group_by_monitor_group_ids(
             self,
@@ -547,7 +539,7 @@ class CloudInsightAPI:
         }
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/monitor/group/related', json_data=monitor_group_ids, params=params)
+        return self.post(f'/cw_fea/real/cw/api/rule/group/monitor/group/related', json_data=monitor_group_ids, params=params)
 
 
     def get_rule_group_list(
@@ -608,7 +600,7 @@ class CloudInsightAPI:
             json_body['search'] = search
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/ruleGrp/query', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/rule/group/ruleGrp/query', json_data=json_body)
     
     def get_search_metric_list(
             self,
@@ -659,7 +651,7 @@ class CloudInsightAPI:
             json_body['dimensionsSelectedList'] = dimensions_selected_list           
         
       
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/metric/search', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/rule/group/metric/search', json_data=json_body)
     
 
 
@@ -694,7 +686,7 @@ class CloudInsightAPI:
              
         
       
-        return self.client.post(f'/cw_fea/real/cw/api/schema/extended/status', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/schema/extended/status', json_data=json_body)
     
     def get_product_schema(
             self,
@@ -723,7 +715,7 @@ class CloudInsightAPI:
         if cw_key is not None:
             params['cw_key'] = cw_key
         
-        return self.client.get(f'/cw_fea/real/cw/api/schema', params=params)
+        return self.get(f'/cw_fea/real/cw/api/schema', params=params)
     
     def get_system_schema_key_list(
             self
@@ -744,7 +736,7 @@ class CloudInsightAPI:
 
         
         
-        return self.client.get(f'/cw_fea/real/cw/api/schema/system/list', params=params)
+        return self.get(f'/cw_fea/real/cw/api/schema/system/list', params=params)
     
 
     """
@@ -781,7 +773,7 @@ class CloudInsightAPI:
             params['query'] = query
         
         
-        return self.client.get(f'/cw_fea/real/cw/api/custom/resource/list', params=params)
+        return self.get(f'/cw_fea/real/cw/api/custom/resource/list', params=params)
 
     def get_custom_resource(
             self,
@@ -805,7 +797,7 @@ class CloudInsightAPI:
 
         
         
-        return self.client.get(f'/cw_fea/real/cw/api/custom/resource/{resource_id}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/custom/resource/{resource_id}', params=params)
     
     """
     ================================================================
@@ -909,7 +901,7 @@ class CloudInsightAPI:
             params["resourceId"] = resource_id
             params["productKey"] = product_key
              
-        return self.client.get(f'/cw_fea/real/cw/api/planned-maintenances', params=params)
+        return self.get(f'/cw_fea/real/cw/api/planned-maintenances', params=params)
     
     def get_planned_maintenance_detail_by_id(
             self,
@@ -937,7 +929,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_fea/real/cw/api/planned-maintenances/{id}', params=params)
+        return self.get(f'/cw_fea/real/cw/api/planned-maintenances/{id}', params=params)
     
     """
     ================================================================
@@ -964,7 +956,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/file', params=params)
+        return self.get(f'/cw_server/real/api/plugin/file', params=params)
     
     def get_all_port_plugin(
         self
@@ -986,7 +978,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/port', params=params)
+        return self.get(f'/cw_server/real/api/plugin/port', params=params)
     
     def get_all_process_plugin(
         self
@@ -1008,7 +1000,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/process', params=params)
+        return self.get(f'/cw_server/real/api/plugin/process', params=params)
     
     def get_file_plugin (
             self,
@@ -1030,7 +1022,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/file/instanceNo/{instance_no}', params=params)
+        return self.get(f'/cw_server/real/api/plugin/file/instanceNo/{instance_no}', params=params)
 
     def get_port_plugin (
             self,
@@ -1052,7 +1044,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/port/instanceNo/{instance_no}', params=params)
+        return self.get(f'/cw_server/real/api/plugin/port/instanceNo/{instance_no}', params=params)
     
     def get_process_plugin (
             self,
@@ -1074,7 +1066,7 @@ class CloudInsightAPI:
         """
         params = {}       
         
-        return self.client.get(f'/cw_server/real/api/plugin/process/instanceNo/{instance_no}', params=params)
+        return self.get(f'/cw_server/real/api/plugin/process/instanceNo/{instance_no}', params=params)
     
     """
     ================================================================
@@ -1116,7 +1108,7 @@ class CloudInsightAPI:
         if prod is not None:
             params['prod'] = prod
         
-        return self.client.post(f'/cw_fea/real/cw/api/servers/top', params=params)
+        return self.post(f'/cw_fea/real/cw/api/servers/top', params=params)
     
     """
     ================================================================
@@ -1173,7 +1165,7 @@ class CloudInsightAPI:
         if query_aggregation is not None:
             json_body['queryAggregation'] = query_aggregation
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/query', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/data/query', json_data=json_body)
     
     def get_query_data_multiple (
         self,
@@ -1211,7 +1203,7 @@ class CloudInsightAPI:
             'metricInfoList' : metric_info_list
         }
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/query/multiple', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/data/query/multiple', json_data=json_body)
     
 
     def get_query_widget_data_preview  (
@@ -1263,5 +1255,5 @@ class CloudInsightAPI:
             'metricsInfo' : metrics_info
         }
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/chart/preview', json_data=json_body)
+        return self.post(f'/cw_fea/real/cw/api/data/chart/preview', json_data=json_body)
     

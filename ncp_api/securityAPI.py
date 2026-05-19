@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional, Any
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class SecurityMonitoringAPI:
+class SecurityMonitoringAPI(BaseNCPAPI):
     """
     SecurityMonitoringAPI 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-         초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     SecurityMonitoringAPI
@@ -84,7 +76,7 @@ class SecurityMonitoringAPI:
         if malwareType is not None:
             json_body['malwareType'] = malwareType
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getAVList', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getAVList', json_data=json_body)
     
 
 
@@ -154,7 +146,7 @@ class SecurityMonitoringAPI:
         if targetIp is not None:
             json_body['targetIp'] = targetIp
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getDDoSList', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getDDoSList', json_data=json_body)
 
     def get_ddos_event_detail (
         self,
@@ -184,7 +176,7 @@ class SecurityMonitoringAPI:
 
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getDDoSEventDetail', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getDDoSEventDetail', json_data=json_body)
     
     def get_ids_list(
         self, 
@@ -234,7 +226,7 @@ class SecurityMonitoringAPI:
         if targetIp is not None:
             json_body['targetIp'] = targetIp
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIDSList', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getIDSList', json_data=json_body)
     
     def get_ids_event_detail (
         self,
@@ -264,7 +256,7 @@ class SecurityMonitoringAPI:
 
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIDSEventDetail', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getIDSEventDetail', json_data=json_body)
     
     def get_ips_list(
         self, 
@@ -349,7 +341,7 @@ class SecurityMonitoringAPI:
         
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIPSList', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getIPSList', json_data=json_body)
     
 
     def get_waf_list(
@@ -432,7 +424,7 @@ class SecurityMonitoringAPI:
             json_body['targetIp'] = targetIp
                 
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getWAFList', json_data=json_body)
+        return self.post(f'/vsecuritymonitoring/v1/getWAFList', json_data=json_body)
      
 
     

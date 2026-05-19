@@ -9,23 +9,15 @@ Container Registry 서비스에서는 레지스트리와 도커 컨테이너 이
 
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class ContainerAPI:
+class ContainerAPI(BaseNCPAPI):
     """
     컨테이너 리소스 API 클래스
     
     컨테이너 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        ContainerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     컨테이너 레지스트리 관련 API
@@ -53,7 +45,7 @@ class ContainerAPI:
         if page_size is not None:
             params['pagesize'] = page_size
 
-        return self.client.get('/repositories', params=params)
+        return self.get('/repositories', params=params)
     """
     ================================================================
     컨테이너 이미지 관련 API
@@ -81,7 +73,7 @@ class ContainerAPI:
         if page_size is not None:
             params['pagesize'] = page_size
 
-        return self.client.get(f'/repositories/{registry_id}', params=params)
+        return self.get(f'/repositories/{registry_id}', params=params)
 
     def get_image_detail(
         self,
@@ -99,7 +91,7 @@ class ContainerAPI:
             Dict: 컨테이너 이미지 상세 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/repositories/{registry_id}/{image_name}', params=params)
+        return self.get(f'/repositories/{registry_id}/{image_name}', params=params)
 
     def get_image_tag(
         self,
@@ -123,7 +115,7 @@ class ContainerAPI:
         if page_size is not None:
             params['pagesize'] = page_size
 
-        return self.client.get(f'/repositories/{registry_id}/{image_name}/tags', params=params)
+        return self.get(f'/repositories/{registry_id}/{image_name}/tags', params=params)
 
     def get_image_tag_detail(
         self,
@@ -140,4 +132,4 @@ class ContainerAPI:
             reference: 태그 이름
         """
         params = {}
-        return self.client.get(f'/repositories/{registry_id}/{image_name}/tags/{reference}', params=params)
+        return self.get(f'/repositories/{registry_id}/{image_name}/tags/{reference}', params=params)

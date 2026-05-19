@@ -10,23 +10,15 @@ VPC, SUBNET, NACL, NATGW, VPC peer, Route Table 등 네트워크 관련 리소�
 from bisect import insort_right
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class NetworkAPI:
+class NetworkAPI(BaseNCPAPI):
     """
     Network 리소스 API 클래스
     
     Network 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        NetworkAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     VPC 인스턴스 관련 API
@@ -53,19 +45,15 @@ class NetworkAPI:
         Returns:
             Dict: VPC 목록 응답
         """
-        params = {
-            'responseFormatType': responseFormatType
-        }
-        if region_code is not None:
-            params['regionCode'] = region_code
-        if vpc_status_code is not None:
-            params['vpcStatusCode'] = vpc_status_code
-        if vpc_name is not None:
-            params['vpcName'] = vpc_name
-        if vpc_no_list is not None:
-            for idx, vpc_no in enumerate(vpc_no_list, start=1):
-                params[f'vpcNoList.{idx}'] = vpc_no
-        return self.client.get('/getVpcList', params=params)
+        params = (
+            self.build_params({'responseFormatType': responseFormatType})
+            .add('regionCode', region_code)
+            .add('vpcStatusCode', vpc_status_code)
+            .add('vpcName', vpc_name)
+            .add_indexed('vpcNoList', vpc_no_list)
+            .build()
+        )
+        return self.get('/getVpcList', params=params)
 
     def get_vpc_detail(
         self,
@@ -89,7 +77,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getVpcDetail', params=params)
+        return self.get('/getVpcDetail', params=params)
 
     """
     ================================================================
@@ -132,35 +120,23 @@ class NetworkAPI:
         Returns:
             Dict: SUBNET 목록 응답
         """
-        params = {
-            'responseFormatType': responseFormatType
-        }
-        if region_code is not None:
-            params['regionCode'] = region_code
-        if subnet_no_list is not None:
-            for idx, subnet_no in enumerate(subnet_no_list, start=1):
-                params[f'subnetNoList.{idx}'] = subnet_no
-        if subnet_name is not None:
-            params['subnetName'] = subnet_name
-        if subnet is not None:
-            params['subnet'] = subnet
-        if subnet_type_code is not None:
-            params['subnetTypeCode'] = subnet_type_code
-        if usage_type_code is not None:
-            params['usageTypeCode'] = usage_type_code
-        if network_acl_no is not None:
-            params['networkAclNo'] = network_acl_no
-        if page is not None:
-            params['page'] = page
-        if page_size is not None:
-            params['pageSize'] = page_size
-        if subnet_status_code is not None:
-            params['subnetStatusCode'] = subnet_status_code
-        if vpc_no is not None:
-            params['vpcNo'] = vpc_no
-        if zone_code is not None:
-            params['zoneCode'] = zone_code
-        return self.client.get('/getSubnetList', params=params)
+        params = (
+            self.build_params({'responseFormatType': responseFormatType})
+            .add('regionCode', region_code)
+            .add_indexed('subnetNoList', subnet_no_list)
+            .add('subnetName', subnet_name)
+            .add('subnet', subnet)
+            .add('subnetTypeCode', subnet_type_code)
+            .add('usageTypeCode', usage_type_code)
+            .add('networkAclNo', network_acl_no)
+            .add('page', page)
+            .add('pageSize', page_size)
+            .add('subnetStatusCode', subnet_status_code)
+            .add('vpcNo', vpc_no)
+            .add('zoneCode', zone_code)
+            .build()
+        )
+        return self.get('/getSubnetList', params=params)
 
     def get_subnet_detail(
         self,
@@ -184,7 +160,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getSubnetDetail', params=params)
+        return self.get('/getSubnetDetail', params=params)
 
 
     """
@@ -237,7 +213,7 @@ class NetworkAPI:
             params['pageSize'] = page_size
         if vpc_no is not None:
             params['vpcNo'] = vpc_no
-        return self.client.get('/getNetworkAclList', params=params)
+        return self.get('/getNetworkAclList', params=params)
 
     def get_network_acl_detail(
         self,
@@ -261,7 +237,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getNetworkAclDetail', params=params)
+        return self.get('/getNetworkAclDetail', params=params)
 
     def get_network_acl_rule_list(
         self,
@@ -289,7 +265,7 @@ class NetworkAPI:
             params['regionCode'] = region_code
         if network_acl_rule_type_code:
             params['networkAclRuleTypeCode'] = network_acl_rule_type_code
-        return self.client.get('/getNetworkAclRuleList', params=params)
+        return self.get('/getNetworkAclRuleList', params=params)
 
     def get_network_acl_deny_allow_group_list(
         self,
@@ -339,7 +315,7 @@ class NetworkAPI:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
-        return self.client.get('/getNetworkAclDenyAllowGroupList', params=params)
+        return self.get('/getNetworkAclDenyAllowGroupList', params=params)
 
 
     def get_network_acl_deny_allow_group_detail(
@@ -364,7 +340,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getNetworkAclDenyAllowGroupDetail', params=params)
+        return self.get('/getNetworkAclDenyAllowGroupDetail', params=params)
     """
     ================================================================
     NATGW 인스턴스 관련 API
@@ -440,7 +416,7 @@ class NetworkAPI:
             params['privateIp'] = private_ip
         if nat_gateway_type_code is not None:
             params['natGatewayTypeCode'] = nat_gateway_type_code
-        return self.client.get('/getNatGatewayInstanceList', params=params)
+        return self.get('/getNatGatewayInstanceList', params=params)
 
     def get_nat_gateway_instance_detail(
         self,
@@ -466,7 +442,7 @@ class NetworkAPI:
             params['regionCode'] = region_code
         if output is not None:
             params['output'] = output
-        return self.client.get('/getNatGatewayInstanceDetail', params=params)
+        return self.get('/getNatGatewayInstanceDetail', params=params)
 
 
     """
@@ -531,7 +507,7 @@ class NetworkAPI:
             params['sortedBy'] = sorted_by
         if sort_order is not None:
             params['sortOrder'] = sort_order
-        return self.client.get('/getVpcPeeringInstanceList', params=params)
+        return self.get('/getVpcPeeringInstanceList', params=params)
         
     def get_vpc_peering_instance_detail(
         self,
@@ -555,7 +531,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getVpcPeeringInstanceDetail', params=params)
+        return self.get('/getVpcPeeringInstanceDetail', params=params)
 
     """
     ================================================================
@@ -615,7 +591,7 @@ class NetworkAPI:
             params['sortedBy'] = sorted_by
         if sort_order is not None:
             params['sortOrder'] = sort_order
-        return self.client.get('/getRouteTableList', params=params)
+        return self.get('/getRouteTableList', params=params)
 
     def get_route_table_detail(
         self,
@@ -639,7 +615,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getRouteTableDetail', params=params)
+        return self.get('/getRouteTableDetail', params=params)
         
         
     def get_route_list(
@@ -667,7 +643,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getRouteList', params=params)
+        return self.get('/getRouteList', params=params)
 
     def get_route_table_subnet_list(
         self,
@@ -692,7 +668,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getRouteTableSubnetList', params=params)
+        return self.get('/getRouteTableSubnetList', params=params)
     
     """
     ================================================================
@@ -760,7 +736,7 @@ class NetworkAPI:
                 params[f"sortList.{idx}.sortedBy"] = sorted_by
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
 
-        return self.client.get('/getLoadBalancerInstanceList', params=params)
+        return self.get('/getLoadBalancerInstanceList', params=params)
 
 
     def get_load_balancer_instance_detail(
@@ -790,7 +766,7 @@ class NetworkAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/getLoadBalancerInstanceDetail', params=params)
+        return self.get('/getLoadBalancerInstanceDetail', params=params)
 
     def get_load_balancer_listener_list(
         self,
@@ -817,7 +793,7 @@ class NetworkAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/getLoadBalancerListenerList', params=params)
+        return self.get('/getLoadBalancerListenerList', params=params)
 
     def get_load_balancer_rule_list(
         self,
@@ -841,7 +817,7 @@ class NetworkAPI:
         }
         if region_code is not None:
             params['regionCode'] = region_code
-        return self.client.get('/getLoadBalancerRuleList', params=params)
+        return self.get('/getLoadBalancerRuleList', params=params)
 
     def get_load_balancer_listener_certificate_list(
         self,
@@ -866,7 +842,7 @@ class NetworkAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
-        return self.client.get('/getLoadBalancerListenerCertificateList', params=params)
+        return self.get('/getLoadBalancerListenerCertificateList', params=params)
 
     """
     ================================================================
@@ -925,7 +901,7 @@ class NetworkAPI:
                 params[f"sortList.{idx}.sortedBy"] = sorted_by
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
         
-        return self.client.get('/getTargetGroupList', params=params)
+        return self.get('/getTargetGroupList', params=params)
 
     def get_target_group_detail(
         self,
@@ -950,7 +926,7 @@ class NetworkAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
-        return self.client.get('/getTargetGroupDetail', params=params)
+        return self.get('/getTargetGroupDetail', params=params)
 
     def get_target_list(
         self,
@@ -976,7 +952,7 @@ class NetworkAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
-        return self.client.get('/getTargetList', params=params)
+        return self.get('/getTargetList', params=params)
 
     """
     ================================================================
@@ -1007,7 +983,7 @@ class NetworkAPI:
         }
         if domain_id is not None:
             params['domainId'] = domain_id
-        return self.client.get('/ncpdns/domain/monitoring', params=params)
+        return self.get('/ncpdns/domain/monitoring', params=params)
 
     def get_lb_record(
         self,
@@ -1033,7 +1009,7 @@ class NetworkAPI:
             params['searchContent'] = search_content    
         if lb_region_code is not None:
             params['lbRegionCode'] = lb_region_code
-        return self.client.get(f'/ncpdns/lb-record/{platform_type}/{record_type}', params=params)
+        return self.get(f'/ncpdns/lb-record/{platform_type}/{record_type}', params=params)
 
     def get_domain_detail(
         self,
@@ -1050,7 +1026,7 @@ class NetworkAPI:
         """
         
         params = {}
-        return self.client.get(f'/ncpdns/domain/{domain_id}', params=params)
+        return self.get(f'/ncpdns/domain/{domain_id}', params=params)
 
     def get_domain(
         self,
@@ -1075,7 +1051,7 @@ class NetworkAPI:
         }
         if domain_name:
             params['domainName'] = domain_name
-        return self.client.get('/ncpdns/domain', params=params)
+        return self.get('/ncpdns/domain', params=params)
     
     def get_record(
         self,
@@ -1109,4 +1085,4 @@ class NetworkAPI:
         if search_content is not None:
             params['searchContent'] = search_content
         
-        return self.client.get(f'/ncpdns/record/{domain_id}', params=params)
+        return self.get(f'/ncpdns/record/{domain_id}', params=params)

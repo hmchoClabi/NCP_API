@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class CloudLogAnalyticsAPI:
+class CloudLogAnalyticsAPI(BaseNCPAPI):
     """
     Cloud Log Analytics API 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        Cloud Log Analytics API를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     서버 목록 관련 API
@@ -69,7 +61,7 @@ class CloudLogAnalyticsAPI:
             raise ValueError(f'Unsupported svr_type: {svr_type}')
 
 
-        return self.client.get(f'/api/{region_code}-v1/vpc/servers{uri}', params=params)
+        return self.get(f'/api/{region_code}-v1/vpc/servers{uri}', params=params)
     """
     ================================================================
     로그 관련 API
@@ -91,7 +83,7 @@ class CloudLogAnalyticsAPI:
         """
         params = {}
 
-        return self.client.get(f'/api/{region_code}-v1/logs/count/total', params=params)
+        return self.get(f'/api/{region_code}-v1/logs/count/total', params=params)
     
     def get_cla_log_count_recent(
         self,
@@ -109,7 +101,7 @@ class CloudLogAnalyticsAPI:
         """
         params = {}
 
-        return self.client.get(f'/api/{region_code}-v1/logs/count/recent', params=params)
+        return self.get(f'/api/{region_code}-v1/logs/count/recent', params=params)
     
     def get_cla_log_count_interval(
         self,
@@ -140,7 +132,7 @@ class CloudLogAnalyticsAPI:
         if interval is not None:
             params['interval'] = interval
 
-        return self.client.get(f'/api/{region_code}-v1/logs/count/interval', params=params)
+        return self.get(f'/api/{region_code}-v1/logs/count/interval', params=params)
     
     def get_cla_log_count_aggregation(
         self,
@@ -159,7 +151,7 @@ class CloudLogAnalyticsAPI:
         """
         params = {}
 
-        return self.client.get(f'/api/{region_code}-v1/logs/count/aggregation', params=params)
+        return self.get(f'/api/{region_code}-v1/logs/count/aggregation', params=params)
 
     def get_cla_log_search(
         self,
@@ -218,7 +210,7 @@ class CloudLogAnalyticsAPI:
         
 
 
-        return self.client.post(f'/api/{region_code}-v1/logs/search', json_data=json_body)
+        return self.post(f'/api/{region_code}-v1/logs/search', json_data=json_body)
     
 
 
@@ -238,6 +230,6 @@ class CloudLogAnalyticsAPI:
         """
         params = {}
 
-        return self.client.get(f'/api/{region_code}-v1/capacity', params=params)
+        return self.get(f'/api/{region_code}-v1/capacity', params=params)
     
 

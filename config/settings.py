@@ -53,7 +53,7 @@ for env_path in possible_env_paths:
             # print(f"[DEBUG] .env 파일 크기: {file_size} bytes")
             
             if file_size == 0:
-                print(f"경고: .env 파일이 비어있습니다!")
+                # print(f"경고: .env 파일이 비어있습니다!")
                 #print(f".env 파일에 다음 형식으로 내용을 추가해주세요:")
                 #print(f"NCP_ACCESS_KEY=your_access_key")
                 #print(f"NCP_SECRET_KEY=your_secret_key")
@@ -92,15 +92,15 @@ for env_path in possible_env_paths:
                         if key and value:
                             os.environ[key] = value
                             parsed_count += 1
-                            print(f"직접 파싱 성공: {key}=[값 길이: {len(value)}]")
+                            # print(f"직접 파싱 성공: {key}=[값 길이: {len(value)}]")
                     else:
-                        print(f"등호가 없는 라인 {i}: {stripped[:50]}")
+                        pass
                 
                 if parsed_count > 0:
                     # print(f"[DEBUG] 총 {parsed_count}개의 환경 변수를 직접 파싱했습니다.")
                     break  # 성공하면 다른 경로 시도하지 않음
         except Exception as e:
-            print(f"{env_path} 직접 읽기 오류: {e}")
+            # print(f"{env_path} 직접 읽기 오류: {e}")
             import traceback
             traceback.print_exc()
 
@@ -111,9 +111,9 @@ NCP_SECRET_KEY = os.getenv('NCP_SECRET_KEY', '')
 
 # 디버깅: 환경 변수 로드 확인
 if NCP_ACCESS_KEY:
-    print(f"NCP_ACCESS_KEY가 로드되었습니다 (길이: {len(NCP_ACCESS_KEY)})")
+    pass
 else:
-    print("[DEBUG] NCP_ACCESS_KEY가 로드되지 않았습니다.")
+    pass
 
 
 # NCP 리전 설정
@@ -164,9 +164,9 @@ if NCP_API_TYPE == 'gov':
     CERTIFICATE_MANAGER_BASE_URL = 'https://certificatemanager.apigw.gov-ntruss.com'
     #SYSTEM_SERVER_VPC_CW_KEY = os.getenv('GOV_CLOUD_INSIGHT_CW_KEY', '567435234753253376')  # 정부용 vServer 기본값
     #SYSTEM_NKS_CW_KEY = os.getenv('GOV_NKS_CW_KEY', '769285093356343296')  # 정부용 NKS 기본값
-    print(f"정부용(GOV) API 엔드포인트 사용: {API_BASE_URL}")
-    print(f"정부용(GOV) NKS 엔드포인트 사용: {NKS_BASE_URL}")
-    print(f"정부용(GOV) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
+    # print(f"정부용(GOV) API 엔드포인트 사용: {API_BASE_URL}")
+    # print(f"정부용(GOV) NKS 엔드포인트 사용: {NKS_BASE_URL}")
+    # print(f"정부용(GOV) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
 else:
     API_BASE_URL = 'https://ncloud.apigw.ntruss.com'
     BILLING_API_BASE_URL = 'https://billingapi.apigw.ntruss.com/billing/v1'
@@ -194,9 +194,9 @@ else:
     CERTIFICATE_MANAGER_BASE_URL = 'https://certificatemanager.apigw.ntruss.com/api/v1'
     #SYSTEM_SERVER_VPC_CW_KEY = os.getenv('CLOUD_INSIGHT_CW_KEY', '460438474722512896')  # 민간용 vServer 기본값
     #SYSTEM_NKS_CW_KEY = os.getenv('NKS_CW_KEY', '526115048926613504')  # 민간용 NKS 기본값
-    print(f"민간용(PUBLIC) API 엔드포인트 사용: {API_BASE_URL}")
-    print(f"민간용(PUBLIC) NKS 엔드포인트 사용: {NKS_BASE_URL}")
-    print(f"민간용(PUBLIC) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
+    # print(f"민간용(PUBLIC) API 엔드포인트 사용: {API_BASE_URL}")
+    # print(f"민간용(PUBLIC) NKS 엔드포인트 사용: {NKS_BASE_URL}")
+    # print(f"민간용(PUBLIC) Cloud Insight 엔드포인트 사용: {CLOUD_INSIGHT_BASE_URL}")
 
 # API 엔드포인트 설정
 # 쿠버네티스(NKS)는 별도의 게이트웨이 사용
@@ -207,7 +207,6 @@ API_ENDPOINTS: Dict[str, str] = {
     'billing': BILLING_API_BASE_URL,
     'monitoring': CLOUD_INSIGHT_BASE_URL,  # Cloud Insight는 별도 게이트웨이
     'storage': API_BASE_URL,
-    'vpc': API_BASE_URL,
     'loadbalancer': API_BASE_URL,
     'kubernetes': NKS_BASE_URL,  # NKS는 별도 게이트웨이
     'vnas': NAS_BASE_URL,

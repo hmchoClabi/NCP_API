@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class WebServiceMonitorAPI:
+class WebServiceMonitorAPI(BaseNCPAPI):
     """
     Web Service Monitor 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        Web Service Monitor API를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     웹서비스 모니터 관련 API
@@ -37,7 +29,7 @@ class WebServiceMonitorAPI:
         """
         params = {}
 
-        return self.client.get(f'/api/v1/scenarios', params=params)
+        return self.get(f'/api/v1/scenarios', params=params)
 
     def get_wms_monitor_result(
             self,
@@ -80,7 +72,7 @@ class WebServiceMonitorAPI:
         if location_type_codes is not None:
             params['locationTypeCodes'] = location_type_codes
 
-        return self.client.get(f'/api/v1/scenarios/{scenario_id}/results', params=params)
+        return self.get(f'/api/v1/scenarios/{scenario_id}/results', params=params)
     
     
     def get_wms_monitor_result_detail(
@@ -105,7 +97,7 @@ class WebServiceMonitorAPI:
         
         params = {}
 
-        return self.client.get(f'/api/v1/scenarios/{scenario_id}/results/{result_id}', params=params)
+        return self.get(f'/api/v1/scenarios/{scenario_id}/results/{result_id}', params=params)
     
     def get_wms_monitor_detail(
             self,
@@ -124,4 +116,4 @@ class WebServiceMonitorAPI:
         
         params = {}
 
-        return self.client.get(f'/api/v1/scenarios/{scenario_id}', params=params)
+        return self.get(f'/api/v1/scenarios/{scenario_id}', params=params)

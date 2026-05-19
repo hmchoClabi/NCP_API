@@ -4,23 +4,15 @@ Kubernetes 환경 제어 및 관리 기능에 대한 API를 RESTful 형태로 �
 """
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class KubernetesAPI:
+class KubernetesAPI(BaseNCPAPI):
     """
     Kubernetes 리소스 API 클래스
 
     Kubernetes 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        KubernetesAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
   
   
     """
@@ -41,7 +33,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 목록 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters', params=params)
+        return self.get(f'/clusters', params=params)
 
     def get_nks_cluster_detail(
         self,
@@ -57,7 +49,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 상세 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}', params=params)
+        return self.get(f'/clusters/{uuid}', params=params)
 
     def get_nks_cluster_oidc(
         self,
@@ -72,7 +64,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 OIDC 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/oidc', params=params)
+        return self.get(f'/clusters/{uuid}/oidc', params=params)
 
     def get_nks_cluster_ip_acl(
         self,
@@ -87,7 +79,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 IP ACL 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/ip-acl', params=params)
+        return self.get(f'/clusters/{uuid}/ip-acl', params=params)
 
     def get_nks_cluster_iam_access_list(
         self,
@@ -102,7 +94,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 IAM 액세스 목록 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/access-entries', params=params)
+        return self.get(f'/clusters/{uuid}/access-entries', params=params)
 
     def get_nks_cluster_iam_access(
         self,
@@ -118,7 +110,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 IAM 액세스 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/access-entries/{entryUuid}', params=params)
+        return self.get(f'/clusters/{uuid}/access-entries/{entryUuid}', params=params)
 
     def get_nks_cluster_worker_node(
         self,
@@ -133,7 +125,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 워커 노드 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/nodes', params=params)
+        return self.get(f'/clusters/{uuid}/nodes', params=params)
 
     def get_nks_cluster_nodepool_list(
         self,
@@ -152,7 +144,7 @@ class KubernetesAPI:
         params = {}
         if hypervisor_code is not None:
             params['hypervisorCode'] = hypervisor_code
-        return self.client.get(f'/clusters/{uuid}/node-pool', params=params)
+        return self.get(f'/clusters/{uuid}/node-pool', params=params)
 
     def get_nks_kubeconfig(
         self,
@@ -167,7 +159,7 @@ class KubernetesAPI:
             Dict: NKS 클러스터 Kubeconfig 정보 응답 데이터
         """
         params = {}
-        return self.client.get(f'/clusters/{uuid}/kubeconfig', params=params)
+        return self.get(f'/clusters/{uuid}/kubeconfig', params=params)
 
     def get_nks_support_version(
         self,
@@ -187,7 +179,7 @@ class KubernetesAPI:
             params['hypervisorCode'] = hypervisor_code
         if is_regional_support is not None:
             params['isRegionalSupport'] = is_regional_support
-        return self.client.get(f'/option/version', params=params)
+        return self.get(f'/option/version', params=params)
 
     def get_nks_cluster_server_image(
         self,
@@ -204,7 +196,7 @@ class KubernetesAPI:
         params = {}
         if hypervisor_code is not None:
             params['hypervisorCode'] = hypervisor_code
-        return self.client.get(f'/option/server-image', params=params)
+        return self.get(f'/option/server-image', params=params)
 
     def get_nks_cluster_server_spec(
         self,
@@ -229,4 +221,4 @@ class KubernetesAPI:
             params['zoneNo'] = zone_no
         if zone_code is not None:
             params['zoneCode'] = zone_code
-        return self.client.get(f'/option/server-product-code', params=params)
+        return self.get(f'/option/server-product-code', params=params)

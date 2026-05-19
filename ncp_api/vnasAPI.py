@@ -6,23 +6,15 @@ NAS 인스턴스 및 관련 정보를 조회하는 API 모듈입니다.
 
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class VNasAPI:
+class VNasAPI(BaseNCPAPI):
     """
     NAS 리소스 API 클래스
     
     NAS 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        VNasAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     NAS 인스턴스 관련 API
@@ -91,7 +83,7 @@ class VNasAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         
-        return self.client.get('/getNasVolumeInstanceList', params=params)
+        return self.get('/getNasVolumeInstanceList', params=params)
 
     def get_nas_volume_instance_detail(
         self,
@@ -116,7 +108,7 @@ class VNasAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
-        return self.client.get('/getNasVolumeInstanceDetail', params=params)
+        return self.get('/getNasVolumeInstanceDetail', params=params)
 
     def get_nas_volume_access_control_rule_list(
         self,
@@ -142,7 +134,7 @@ class VNasAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
-        return self.client.get('/getNasVolumeAccessControlRuleList', params=params)
+        return self.get('/getNasVolumeAccessControlRuleList', params=params)
     
     
 
@@ -179,7 +171,7 @@ class VNasAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
 
-        return self.client.get('/getNasVolumeInstanceRatingList', params=params)
+        return self.get('/getNasVolumeInstanceRatingList', params=params)
 
 
 
@@ -213,7 +205,7 @@ class VNasAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
 
-        return self.client.get('/getNasVolumeSnapshotConfigurationHistoryList', params=params)
+        return self.get('/getNasVolumeSnapshotConfigurationHistoryList', params=params)
 
     def get_nas_volume_snapshot_list(
             self,
@@ -240,4 +232,4 @@ class VNasAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
-        return self.client.get('/getNasVolumeSnapshotList', params=params)
+        return self.get('/getNasVolumeSnapshotList', params=params)

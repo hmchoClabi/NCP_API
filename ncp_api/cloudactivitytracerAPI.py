@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional, Any
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class CloudActivityTracerAPI:
+class CloudActivityTracerAPI(BaseNCPAPI):
     """
     CloudActivityTracerAPI 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-         초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     CloudActivityTracerAPI Dashboard API
@@ -84,5 +76,5 @@ class CloudActivityTracerAPI:
         if size is not None:
             json_body['size'] = size
 
-        return self.client.post(f'/api/v1/activities', json_data=json_body)
+        return self.post(f'/api/v1/activities', json_data=json_body)
     

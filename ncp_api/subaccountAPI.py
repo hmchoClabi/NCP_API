@@ -1,21 +1,13 @@
 from typing import Dict, List, Optional, Any
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class SubAccountAPI:
+class SubAccountAPI(BaseNCPAPI):
     """
     Cloud Subaccount API 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        Cloud SubAccount API를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     SubAccount API
@@ -51,7 +43,7 @@ class SubAccountAPI:
         if size is not None:
             params['size'] = size
 
-        return self.client.get(f'/api/v1/sub-accounts', params=params)
+        return self.get(f'/api/v1/sub-accounts', params=params)
     
     def get_subaccount_detail(
             self,
@@ -70,7 +62,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/sub-accounts/{subaccount_id}', params=params)
+        return self.get(f'/api/v1/sub-accounts/{subaccount_id}', params=params)
     
     def get_access_key(
             self,
@@ -89,7 +81,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/sub-accounts/{subaccount_id}/access-keys', params=params)
+        return self.get(f'/api/v1/sub-accounts/{subaccount_id}/access-keys', params=params)
     
     def get_login_alias(
             self
@@ -106,7 +98,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/login-alias', params=params)
+        return self.get(f'/api/v1/login-alias', params=params)
     
     def get_session_timeout(
             self
@@ -123,7 +115,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/tenant-settings/sub-account-session-policy', params=params)
+        return self.get(f'/api/v1/tenant-settings/sub-account-session-policy', params=params)
     
     def get_account_password_policy(
             self
@@ -140,7 +132,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/tenant-settings/sub-account-password-policy', params=params)
+        return self.get(f'/api/v1/tenant-settings/sub-account-password-policy', params=params)
     
     def get_account_idle_disable_policy(
             self
@@ -158,7 +150,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/tenant-settings/idle-disable-settings', params=params)
+        return self.get(f'/api/v1/tenant-settings/idle-disable-settings', params=params)
     
     def get_account_last_access(
             self,
@@ -178,7 +170,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/users/{sub_account_id}/last-access-summary', params=params)
+        return self.get(f'/api/v1/users/{sub_account_id}/last-access-summary', params=params)
     
 
     def get_account_accees_rule(
@@ -199,7 +191,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/sub-accounts/{sub_account_id}/access-rules/console', params=params)
+        return self.get(f'/api/v1/sub-accounts/{sub_account_id}/access-rules/console', params=params)
     
     def get_apikey_accees_rule(
             self,
@@ -219,7 +211,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/sub-accounts/{sub_account_id}/access-rules/api', params=params)
+        return self.get(f'/api/v1/sub-accounts/{sub_account_id}/access-rules/api', params=params)
     
     def get_multi_factor_accees_rule(
             self,
@@ -239,7 +231,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/sub-accounts/{sub_account_id}/mfa', params=params)
+        return self.get(f'/api/v1/sub-accounts/{sub_account_id}/mfa', params=params)
     
     def get_account_tag(
             self,
@@ -259,7 +251,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/users/{sub_account_id}/tags', params=params)
+        return self.get(f'/api/v1/users/{sub_account_id}/tags', params=params)
     
     def get_account_info(
             self,
@@ -279,7 +271,7 @@ class SubAccountAPI:
         params = {}
         
 
-        return self.client.get(f'/api/v1/users/{sub_account_id}', params=params)
+        return self.get(f'/api/v1/users/{sub_account_id}', params=params)
     
     def get_account_id_with_no(
             self,
@@ -302,7 +294,7 @@ class SubAccountAPI:
 
         
 
-        return self.client.get(f'/api/v1/sub-accounts-with-no', params=params)
+        return self.get(f'/api/v1/sub-accounts-with-no', params=params)
     
     """
     ================================================================
@@ -336,7 +328,7 @@ class SubAccountAPI:
             params['size'] = size
 
         
-        return self.client.get(f'/api/v1/groups', params=params)
+        return self.get(f'/api/v1/groups', params=params)
     
     def get_account_group_detail(
             self,
@@ -356,7 +348,7 @@ class SubAccountAPI:
         """
         params = {}
              
-        return self.client.get(f'/api/v1/groups/{group_id}', params=params)
+        return self.get(f'/api/v1/groups/{group_id}', params=params)
     
     def get_account_group_tag(
             self,
@@ -376,7 +368,7 @@ class SubAccountAPI:
         """
         params = {}
              
-        return self.client.get(f'/api/v1/groups/{group_id}/tags', params=params)
+        return self.get(f'/api/v1/groups/{group_id}/tags', params=params)
     
     """
     ================================================================
@@ -422,7 +414,7 @@ class SubAccountAPI:
         if type is not None:
             params['type'] = type
              
-        return self.client.get(f'/api/v1/policies', params=params)
+        return self.get(f'/api/v1/policies', params=params)
     
     def get_account_policy_detail(
             self,
@@ -446,7 +438,7 @@ class SubAccountAPI:
         if with_permissions is not None:
             params['withPermissions'] = with_permissions
              
-        return self.client.get(f'/api/v1/policies/{policy_id}', params=params)
+        return self.get(f'/api/v1/policies/{policy_id}', params=params)
     
     def get_account_policy_validation(
             self,
@@ -519,7 +511,7 @@ class SubAccountAPI:
         if description is not None:
             json_body['description'] = description
              
-        return self.client.post(f'/api/v1/policy/validation', json_data=json_body)
+        return self.post(f'/api/v1/policy/validation', json_data=json_body)
 
 
     def get_policy_applied_resource(
@@ -543,7 +535,7 @@ class SubAccountAPI:
         params = {}
         
              
-        return self.client.get(f'/api/v1/policies/{policy_id}/resources', params=params)
+        return self.get(f'/api/v1/policies/{policy_id}/resources', params=params)
     
     def get_policy_tag(
             self,
@@ -565,7 +557,7 @@ class SubAccountAPI:
         params = {}
         
              
-        return self.client.get(f'/api/v1/policies/{policy_id}/tags', params=params)
+        return self.get(f'/api/v1/policies/{policy_id}/tags', params=params)
     
 
     """
@@ -607,7 +599,7 @@ class SubAccountAPI:
         if search_word is not None:
             params['searchWord'] = search_word
              
-        return self.client.get(f'/api/v1/roles', params=params)
+        return self.get(f'/api/v1/roles', params=params)
     
     def get_role_detail(
             self,
@@ -624,7 +616,7 @@ class SubAccountAPI:
         """
         params = {}
              
-        return self.client.get(f'/api/v1/roles/{role_no}', params=params)
+        return self.get(f'/api/v1/roles/{role_no}', params=params)
 
 
     def get_role_applied_entities(
@@ -642,7 +634,7 @@ class SubAccountAPI:
         """
         params = {}
              
-        return self.client.get(f'/api/v1/roles/{role_no}/entities/account', params=params)
+        return self.get(f'/api/v1/roles/{role_no}/entities/account', params=params)
     
     def get_role_tag(
             self,
@@ -659,7 +651,7 @@ class SubAccountAPI:
         """
         params = {}
              
-        return self.client.get(f'/api/v1/{role_no}/tags', params=params)
+        return self.get(f'/api/v1/{role_no}/tags', params=params)
     
     def get_role_switchable_role(
             self,
@@ -684,7 +676,7 @@ class SubAccountAPI:
             params['searchWord'] = search_word
 
              
-        return self.client.get(f'/api/v1/switchable-roles', params=params)
+        return self.get(f'/api/v1/switchable-roles', params=params)
     
 
 

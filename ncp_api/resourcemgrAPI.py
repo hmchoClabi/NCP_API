@@ -5,23 +5,15 @@
 from bisect import insort_right
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class ResourceManagerAPI:
+class ResourceManagerAPI(BaseNCPAPI):
     """
     ResourceManager 리소스 API 클래스
     
     ResourceManager 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        ResourceManagerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     리소스 매니져 관련 API
@@ -53,7 +45,7 @@ class ResourceManagerAPI:
         if page_size:
             params['pageSize'] = page_size
 
-        return self.client.get('/api/v1/groups', params=params)
+        return self.get('/api/v1/groups', params=params)
 
     def get_resource_list(
         self,
@@ -106,4 +98,4 @@ class ResourceManagerAPI:
         if size:
             params['size'] = size
 
-        return self.client.post('/api/v1/resources', json_data=params)
+        return self.post('/api/v1/resources', json_data=params)

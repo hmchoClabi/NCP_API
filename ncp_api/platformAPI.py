@@ -6,17 +6,9 @@ NCP 상품 가격정보, 사용비용, 할인정보 등을 조회하는 기능�
 
 from typing import Dict, List, Optional
 from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
-class PlatformAPI:
-
-    def __init__(self, client: NCPBaseClient):
-        """
-        ServerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+class PlatformAPI(BaseNCPAPI):
     
     """
     ================================================================
@@ -56,7 +48,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
         
-        return self.client.get('/product/getPriceList', params=params)
+        return self.get('/product/getPriceList', params=params)
     
     def get_product_category_list(
         self,
@@ -80,7 +72,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/product/getProductCategoryList', params=params)   
+        return self.get('/product/getProductCategoryList', params=params)   
     
     def get_product_list(
         self,
@@ -129,7 +121,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/product/getProductList', params=params)
+        return self.get('/product/getProductList', params=params)
     
     def get_product_price_list(
         self,
@@ -180,7 +172,7 @@ class PlatformAPI:
             params['responseFormatType'] = responseFormatType
         
 
-        return self.client.get('/product/getProductPriceList', params=params)
+        return self.get('/product/getProductPriceList', params=params)
     
     """
     ================================================================
@@ -248,7 +240,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
                 
-        return self.client.get('/cost/getContractDemandCostList', params=params)
+        return self.get('/cost/getContractDemandCostList', params=params)
     
     def get_contract_summary_list(
         self,
@@ -303,7 +295,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
                 
-        return self.client.get('/cost/getContractSummaryList', params=params
+        return self.get('/cost/getContractSummaryList', params=params
     )
 
     def get_contract_usage_list(
@@ -367,7 +359,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
                 
-        return self.client.get('/cost/getContractUsageList', params=params
+        return self.get('/cost/getContractUsageList', params=params
     )
 
     def get_contract_usage_list_by_daily(
@@ -431,7 +423,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
                 
-        return self.client.get('/cost/getContractUsageListByDaily', params=params
+        return self.get('/cost/getContractUsageListByDaily', params=params
     )
 
     def get_cost_relation_code_list(
@@ -476,7 +468,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/cost/getCostRelationCodeList', params=params)
+        return self.get('/cost/getCostRelationCodeList', params=params)
 
     def get_demand_cost_list(
         self,
@@ -523,7 +515,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/cost/getDemandCostList', params=params)
+        return self.get('/cost/getDemandCostList', params=params)
      
     def get_product_demand_cost_list(
         self,
@@ -577,7 +569,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/cost/getProductDemandCostList', params=params)
+        return self.get('/cost/getProductDemandCostList', params=params)
 
         """
         ================================================================
@@ -604,7 +596,7 @@ class PlatformAPI:
             params['regionCode'] = region_code
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
-        return self.client.get('/region/getRegionList', params=params)
+        return self.get('/region/getRegionList', params=params)
     
     """
     ===============================================================
@@ -648,7 +640,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/discount/getCoinHistoryList', params=params)
+        return self.get('/discount/getCoinHistoryList', params=params)
     
     def get_credit_history_list(
         self,
@@ -700,7 +692,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/discount/getCreditHistoryList', params=params)
+        return self.get('/discount/getCreditHistoryList', params=params)
 
     def get_discount_list(
         self,
@@ -755,7 +747,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/discount/getDiscountList', params=params)
+        return self.get('/discount/getDiscountList', params=params)
 
     def get_product_demand_cost_by_discount_list(
         self,
@@ -806,7 +798,7 @@ class PlatformAPI:
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.get('/discount/getProductDemandCostByDiscountList', params=params)
+        return self.get('/discount/getProductDemandCostByDiscountList', params=params)
 
     def get_product_discount_history_list(
         self,
@@ -859,4 +851,4 @@ class PlatformAPI:
             params['pageSize'] = page_size
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
-        return self.client.get('/discount/getProductDiscountHistoryList', params=params)
+        return self.get('/discount/getProductDiscountHistoryList', params=params)
