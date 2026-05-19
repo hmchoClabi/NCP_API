@@ -30,7 +30,8 @@ class BaseNCPAPI:
         return params
 
     def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return self.client.get(endpoint, params=params)
+        normalized_params = self.build_params(params).build() if params is not None else None
+        return self.client.get(endpoint, params=normalized_params)
 
     def post(
         self,
@@ -38,4 +39,5 @@ class BaseNCPAPI:
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any] | list] = None,
     ) -> Dict[str, Any]:
-        return self.client.post(endpoint, params=params, json_data=json_data)
+        normalized_params = self.build_params(params).build() if params is not None else None
+        return self.client.post(endpoint, params=normalized_params, json_data=json_data)
