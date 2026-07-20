@@ -1,21 +1,14 @@
 from typing import Dict, List, Optional, Any
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class SecurityMonitoringAPI:
+class SecurityMonitoringAPI(BaseNCPAPI):
     """
     SecurityMonitoringAPI 클래스
 
     """
+    ENDPOINT_KEY = "securitymonitoring"
     
-    def __init__(self, client: NCPBaseClient):
-        """
-         초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
     """
     ================================================================
     SecurityMonitoringAPI

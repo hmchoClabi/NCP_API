@@ -1,8 +1,6 @@
 logs/
 *.log
-logs/
-*.log
-logs/
-*.log
-logs/
-*.log
+.env
+__pycache__/
+.venv/
+output/

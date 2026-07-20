@@ -1,17 +1,19 @@
 __all__ = [
     "SubAccountAPI",
-    "VServerAPI",
+    "VserverAPI",
     "PlatformAPI",
     "ContainerAPI",
     "KubernetesAPI",
-    "VNasAPI",
-    "NetworkAPI",
+    "VnasAPI",
+    "GlobaldnsAPI",
     "ResourceManagerAPI",
     "CloudLogAnalyticsAPI",
     "WebServiceMonitorAPI",
     "CloudInsightAPI",
     "CloudActivityTracerAPI",
-    "CertificateMgrAPI"
+    "CertificateMgrAPI",
+    "VpcAPI",
+    "LoadbalancerAPI"
 ]
 
 
@@ -19,9 +21,9 @@ def __getattr__(name):
     if name == "SubAccountAPI":
         from .subaccountAPI import SubAccountAPI
         return SubAccountAPI
-    if name == "VServerAPI":
-        from .vserverAPI import VServerAPI
-        return VServerAPI
+    if name == "VserverAPI":
+        from .vserverAPI import VserverAPI
+        return VserverAPI
     if name == "PlatformAPI":
         from .platformAPI import PlatformAPI
         return PlatformAPI
@@ -31,12 +33,12 @@ def __getattr__(name):
     if name == "KubernetesAPI":
         from .kubernetesAPI import KubernetesAPI
         return KubernetesAPI
-    if name == "VNasAPI":
-        from .vnasAPI import VNasAPI
-        return VNasAPI
-    if name == "NetworkAPI":
-        from .networkAPI import NetworkAPI
-        return NetworkAPI
+    if name == "VnasAPI":
+        from .vnasAPI import VnasAPI
+        return VnasAPI
+    if name == "GlobaldnsAPI":
+        from .globaldnsAPI import GlobaldnsAPI
+        return GlobaldnsAPI
     if name == "ResourceManagerAPI":
         from .resourcemgrAPI import ResourceManagerAPI
         return ResourceManagerAPI
@@ -58,5 +60,11 @@ def __getattr__(name):
     if name == "CertificateMgrAPI":
         from .certificateMgrAPI import CertificateMgrAPI
         return CertificateMgrAPI
+    if name == "VpcAPI":
+        from .vpcAPI import VpcAPI
+        return VpcAPI
+    if name == "LoadbalancerAPI":
+        from .loadbalancerAPI import LoadbalancerAPI
+        return LoadbalancerAPI
 
     raise AttributeError(f"module 'ncp_api' has no attribute '{name}'")

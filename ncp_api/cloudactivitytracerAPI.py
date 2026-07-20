@@ -1,35 +1,28 @@
 from typing import Dict, List, Optional, Any
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class CloudActivityTracerAPI:
+class CloudActivityTracerAPI(BaseNCPAPI):
     """
     CloudActivityTracerAPI 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-         초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "cloudactivitytracer"
+
     """
     ================================================================
     CloudActivityTracerAPI Dashboard API
     ================================================================
     """
-        
+
     def get_activity_list (
         self,
         fromEventTime : Optional[int] = None,
         toEventTime : Optional[int] = None,
         nrn : Optional[str] = None,
-        page : Optional[str] = None,
-        size : Optional[str] = None,
-        
+        page : Optional[int] = None,
+        size : Optional[int] = None,
+
     ) -> Dict:
         
         """

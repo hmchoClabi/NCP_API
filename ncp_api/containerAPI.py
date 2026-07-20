@@ -8,24 +8,18 @@ Container Registry 서비스에서는 레지스트리와 도커 컨테이너 이
 """
 
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class ContainerAPI:
+class ContainerAPI(BaseNCPAPI):
     """
     컨테이너 리소스 API 클래스
     
     컨테이너 인스턴스 및 관련 정보를 조회합니다.
     """
     
-    def __init__(self, client: NCPBaseClient):
-        """
-        ContainerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "containerregistry"
+    
     """
     ================================================================
     컨테이너 레지스트리 관련 API

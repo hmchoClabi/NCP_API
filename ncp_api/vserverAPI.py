@@ -5,24 +5,17 @@
 """
 
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class VServerAPI:
+class VserverAPI(BaseNCPAPI):
     """
     서버 리소스 API 클래스
     
     서버 인스턴스 및 관련 정보를 조회합니다.
     """
     
-    def __init__(self, client: NCPBaseClient):
-        """
-        ServerAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "vserver"
     """
     ================================================================
     서버 인스턴스 관련 API

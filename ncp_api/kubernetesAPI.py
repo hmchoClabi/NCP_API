@@ -3,24 +3,16 @@
 Kubernetes 환경 제어 및 관리 기능에 대한 API를 RESTful 형태로 제공합니다.
 """
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class KubernetesAPI:
+class KubernetesAPI(BaseNCPAPI):
     """
     Kubernetes 리소스 API 클래스
 
     Kubernetes 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        KubernetesAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "kubernetes"
   
   
     """

@@ -5,24 +5,17 @@ NAS 인스턴스 및 관련 정보를 조회하는 API 모듈입니다.
 """
 
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class VNasAPI:
+class VnasAPI(BaseNCPAPI):
     """
     NAS 리소스 API 클래스
     
     NAS 인스턴스 및 관련 정보를 조회합니다.
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        VNasAPI를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "vnas"
+
     """
     ================================================================
     NAS 인스턴스 관련 API

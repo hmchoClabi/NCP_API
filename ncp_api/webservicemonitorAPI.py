@@ -1,21 +1,14 @@
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
 
-class WebServiceMonitorAPI:
+class WebServiceMonitorAPI(BaseNCPAPI):
     """
     Web Service Monitor 클래스
 
     """
-    
-    def __init__(self, client: NCPBaseClient):
-        """
-        Web Service Monitor API를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+
+    ENDPOINT_KEY = "webservicemonitor"
     """
     ================================================================
     웹서비스 모니터 관련 API

@@ -1,21 +1,14 @@
 from typing import Dict, List, Optional
-from utils.common_rest import NCPBaseClient
+from ncp_api.base import BaseNCPAPI
 
-
-class CertificateMgrAPI:
+class CertificateMgrAPI(BaseNCPAPI):
     """
     Cloud CertificateMgr API 클래스
 
     """
     
-    def __init__(self, client: NCPBaseClient):
-        """
-        Cloud CertificateMgr API를 초기화합니다.
-        
-        Args:
-            client: NCPBaseClient 인스턴스
-        """
-        self.client = client
+    ENDPOINT_KEY = "certificatemanager"
+    
     """
     ================================================================
     Certificate MGR V1 API

@@ -285,17 +285,17 @@ class NCPBaseClient:
         logger.debug(f"  - Headers: {request_headers}")
 
         if json_data is not None:
-            logger.info(f"  - Request Body (JSON): {json_data}")
+            logger.debug(f"  - Request Body (JSON): {json_data}")
             logger.debug(
                 f"  - Request Body (JSON, full): "
                 f"{json.dumps(json_data, ensure_ascii=False, indent=2)}"
             )
         elif data is not None:
-            logger.info(f"  - Request Body (Data): {data}")
+            logger.debug(f"  - Request Body (Data): {data}")
             logger.debug(f"  - Request Body (Data, full): {data}")
 
         if files:
-            logger.info(f"  - Request Files: {list(files.keys())}")
+            logger.debug(f"  - Request Files: {list(files.keys())}")
 
         if params:
             logger.debug(f"  - Query Params: {params}")
@@ -540,22 +540,22 @@ class NCPBaseClient:
             if isinstance(json_response, list):
                 logger.info(f"  - Response Type: List (length: {len(json_response)})")
                 if len(json_response) > 0:
-                    logger.info(f"  - First Item Type: {type(json_response[0])}")
+                    logger.debug(f"  - First Item Type: {type(json_response[0])}")
                     if isinstance(json_response[0], (list, tuple)):
-                        logger.info(f"  - First Item: {json_response[0]}")
+                        logger.debug(f"  - First Item: {json_response[0]}")
                     elif isinstance(json_response[0], dict):
                         logger.info(f"  - First Item Keys: {list(json_response[0].keys())}")
-                        logger.info(f"  - First Item: {json_response[0]}")
+                        logger.debug(f"  - First Item: {json_response[0]}")
                 logger.debug(f"  - Full Response (List): {json.dumps(json_response, ensure_ascii=False, indent=2)[:1000]}...")
             elif isinstance(json_response, dict):
                 logger.info(f"  - Response Type: Dict")
                 logger.info(f"  - Response Keys: {list(json_response.keys())}")
                 response_str = json.dumps(json_response, ensure_ascii=False, indent=2)
                 if len(response_str) > 1000:
-                    logger.info(f"  - Response Body (first 1000 chars): {response_str[:1000]}...")
+                    # logger.info(f"  - Response Body (first 1000 chars): {response_str[:1000]}...")
                     logger.debug(f"  - Full Response Body: {response_str}")
                 else:
-                    logger.info(f"  - Response Body: {response_str}")
+                    logger.debug(f"  - Response Body: {response_str}")
             else:
                 logger.info(f"  - Response Type: {type(json_response)}")
                 logger.info(f"  - Response: {json_response}")
