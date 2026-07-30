@@ -10,7 +10,6 @@ import hashlib
 import base64
 from datetime import datetime
 from typing import Dict, Optional
-from urllib.parse import quote
 
 
 class NCPAuth:

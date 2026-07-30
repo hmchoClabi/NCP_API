@@ -89,27 +89,6 @@ class CloudInsightAPI(BaseNCPAPI):
 
         return self.client.get_binary(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets/{widget_id}', params=params, headers={'Accept': 'image/png'})
     
-    def get_dashboard_widget_list(
-            self,
-            dashboard_id : str
-
-    ) -> Dict:
-        
-        """
-        대시보드의 위젯 목록을 조회합니다.
-
-        args:
-            dashboard_id : 대시보드 아이디
-
-        Returns:
-            Dict: 대시보드의 위젯 목록을 조회합니다.
-                
-        """
-        params = {}
-
-        return self.client.get(f'/cw_fea/real/cw/api/chart/dashboard/{dashboard_id}/widgets', params=params)
-    
-        
     """
     ================================================================
     CloudInsight Event API
@@ -163,14 +142,18 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body['onlyFetchUnCloseEvent'] = only_fetch_un_close_event
 
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/search', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/event/search',
+            json_data=json_body,
+            retry_safe=True,
+        )
 
     def get_search_event_by_id(
             self,
             start_time: int, 
             end_time: int,
             rule_id: int,
-            event_id: int,
+            event_id: str,
             query: Optional[str] = None,
             page_no: Optional[int] = None,
             page_size: Optional[int] = None,
@@ -211,7 +194,11 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body['onlyFetchUnCloseEvent'] = only_fetch_un_close_event
 
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/searchById', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/event/searchById',
+            json_data=json_body,
+            retry_safe=True,
+        )
 
 
     def get_search_event_count_console(
@@ -239,7 +226,11 @@ class CloudInsightAPI(BaseNCPAPI):
             'endTime' : end_time
         }
 
-        return self.client.post(f'/cw_fea/real/cw/api/event/searchEventCountConsole', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/event/searchEventCountConsole',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
     """
@@ -490,7 +481,12 @@ class CloudInsightAPI(BaseNCPAPI):
         }
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/metric/group/related', json_data=metric_group_ids, params=params)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/rule/group/metric/group/related',
+            json_data=metric_group_ids,
+            params=params,
+            retry_safe=True,
+        )
     
     def get_rule_group_by_monitor_group_ids(
             self,
@@ -541,7 +537,12 @@ class CloudInsightAPI(BaseNCPAPI):
         }
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/monitor/group/related', json_data=monitor_group_ids, params=params)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/rule/group/monitor/group/related',
+            json_data=monitor_group_ids,
+            params=params,
+            retry_safe=True,
+        )
 
 
     def get_rule_group_list(
@@ -602,7 +603,11 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body['search'] = search
         
 
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/ruleGrp/query', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/rule/group/ruleGrp/query',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_search_metric_list(
             self,
@@ -653,7 +658,11 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body['dimensionsSelectedList'] = dimensions_selected_list           
         
       
-        return self.client.post(f'/cw_fea/real/cw/api/rule/group/metric/search', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/rule/group/metric/search',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
 
@@ -688,7 +697,11 @@ class CloudInsightAPI(BaseNCPAPI):
              
         
       
-        return self.client.post(f'/cw_fea/real/cw/api/schema/extended/status', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/schema/extended/status',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_product_schema(
             self,
@@ -1110,7 +1123,11 @@ class CloudInsightAPI(BaseNCPAPI):
         if prod is not None:
             params['prod'] = prod
         
-        return self.client.post(f'/cw_fea/real/cw/api/servers/top', params=params)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/servers/top',
+            params=params,
+            retry_safe=True,
+        )
     
     """
     ================================================================
@@ -1148,16 +1165,19 @@ class CloudInsightAPI(BaseNCPAPI):
             Dict: 
                 data	Array	-	조회 결과   데이터 포인트(Unix Timestamp 형식), 데이터 값 형태로 표시
         """
+        if time_start is None or time_end is None:
+            raise ValueError(
+                "time_start와 time_end는 모두 필수입니다."
+            )
+
         json_body = {
             'cw_key' : cw_key,
             'metric' : metric,
-            'dimensions' : dimensions
+            'dimensions' : dimensions,
+            'timeStart' : time_start,
+            'timeEnd' : time_end,
         }
 
-        if time_start is not None:
-            json_body['timeStart'] = time_start
-        if time_end is not None:
-            json_body['timeEnd'] = time_end
         if product_name is not None:
             json_body['productName'] = product_name
         if interval is not None:
@@ -1167,7 +1187,11 @@ class CloudInsightAPI(BaseNCPAPI):
         if query_aggregation is not None:
             json_body['queryAggregation'] = query_aggregation
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/query', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/data/query',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_query_data_multiple (
         self,
@@ -1205,7 +1229,11 @@ class CloudInsightAPI(BaseNCPAPI):
             'metricInfoList' : metric_info_list
         }
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/query/multiple', json_data=json_body)
+        return self.client.post(
+            f'/cw_fea/real/cw/api/data/query/multiple',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
     def get_query_widget_data_preview  (
@@ -1257,5 +1285,8 @@ class CloudInsightAPI(BaseNCPAPI):
             'metricsInfo' : metrics_info
         }
         
-        return self.client.post(f'/cw_fea/real/cw/api/data/chart/preview', json_data=json_body)
-    
+        return self.client.post(
+            f'/cw_fea/real/cw/api/data/chart/preview',
+            json_data=json_body,
+            retry_safe=True,
+        )

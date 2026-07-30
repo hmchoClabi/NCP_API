@@ -3,14 +3,41 @@ from typing import Any, Dict, List, Optional
 
 
 class InsightEventNormalizer:
+    def __init__(self) -> None:
+        self.last_errors: List[Dict[str, Any]] = []
+
     def normalize(
         self,
         raw_events: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        return [
-            self._normalize_event(event)
-            for event in raw_events
-        ]
+        self.last_errors = []
+        result = []
+
+        if not isinstance(raw_events, list):
+            self._record_error(
+                index=None,
+                message="이벤트 목록이 list 형식이 아닙니다.",
+            )
+            return result
+
+        for index, event in enumerate(raw_events):
+            if not isinstance(event, dict):
+                self._record_error(
+                    index=index,
+                    message="이벤트 항목이 object 형식이 아닙니다.",
+                )
+                continue
+
+            try:
+                result.append(self._normalize_event(event))
+            except Exception as exc:
+                self._record_error(
+                    index=index,
+                    message="이벤트 항목 정규화에 실패했습니다.",
+                    exc=exc,
+                )
+
+        return result
 
     def group_events(
         self,
@@ -20,6 +47,9 @@ class InsightEventNormalizer:
         result: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
         for event in events:
+            if not isinstance(event, dict):
+                continue
+
             group_key = self._get_group_key(
                 event=event,
                 group_by=group_by,
@@ -60,7 +90,7 @@ class InsightEventNormalizer:
         self,
         event: Dict[str, Any],
     ) -> Dict[str, Any]:
-        dimension = event.get("dimension") or {}
+        dimension = self._normalize_dimension(event.get("dimension"))
 
         resource_id = self._extract_resource_id(
             event=event,
@@ -126,3 +156,52 @@ class InsightEventNormalizer:
                 return str(value)
 
         return None
+
+    def _normalize_dimension(self, value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+
+        if not isinstance(value, list):
+            return {}
+
+        result: Dict[str, Any] = {}
+
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+
+            name = (
+                item.get("dim")
+                or item.get("name")
+                or item.get("dimension")
+            )
+            item_value = (
+                item.get("val")
+                if item.get("val") is not None
+                else item.get("value")
+            )
+
+            if name and item_value is not None:
+                result[str(name)] = item_value
+
+        return result
+
+    def _record_error(
+        self,
+        index: Optional[int],
+        message: str,
+        exc: Optional[Exception] = None,
+    ) -> None:
+        error: Dict[str, Any] = {
+            "normalizer": self.__class__.__name__,
+            "stage": "normalize_event",
+            "message": message,
+        }
+
+        if index is not None:
+            error["item_index"] = index
+
+        if exc is not None:
+            error["exception_type"] = type(exc).__name__
+
+        self.last_errors.append(error)

@@ -513,7 +513,11 @@ class SubAccountAPI(BaseNCPAPI):
         if description is not None:
             json_body['description'] = description
              
-        return self.client.post(f'/api/v1/policy/validation', json_data=json_body)
+        return self.client.post(
+            f'/api/v1/policy/validation',
+            json_data=json_body,
+            retry_safe=True,
+        )
 
 
     def get_policy_applied_resource(
@@ -653,7 +657,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {}
              
-        return self.client.get(f'/api/v1/{role_no}/tags', params=params)
+        return self.client.get(f'/api/v1/roles/{role_no}/tags', params=params)
     
     def get_role_switchable_role(
             self,
@@ -679,7 +683,8 @@ class SubAccountAPI(BaseNCPAPI):
 
              
         return self.client.get(f'/api/v1/switchable-roles', params=params)
-    
 
-
-    
+    # 기존 오탈자 이름은 호환성을 위해 유지하고 올바른 별칭을 제공합니다.
+    get_account_access_rule = get_account_accees_rule
+    get_apikey_access_rule = get_apikey_accees_rule
+    get_multi_factor_access_rule = get_multi_factor_accees_rule

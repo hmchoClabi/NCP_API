@@ -7,8 +7,7 @@ Global DNS 인스턴스 및 관련 정보를 조회하는 API 모듈입니다.
 
 """
 
-from bisect import insort_right
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 
@@ -31,23 +30,41 @@ class GlobaldnsAPI(BaseNCPAPI):
 
     def get_dns_domain_query(
         self,
-        base_time_unix: str,
-        domain_id: Optional[int] = None
+        base_time_unix: Optional[str] = None,
+        domain_id: Optional[int] = None,
+        base_time_unit: Optional[str] = None,
     ) -> Dict:
         """
         Global DNS 도메인 쿼리를 조회합니다.
 
         args:
-            str base_time_unix: 시간 간격 (MINUTE_1 | MINUTE_5 | MINUTE_30 | HOUR_3 | DAY_1)
+            str base_time_unix: 기존 호환용 시간 간격
+            str base_time_unit: 시간 간격 (MINUTE_1 | MINUTE_5 | MINUTE_30 | HOUR_3 | DAY_1)
             int domain_id: 도메인 ID
             responseFormatType: 응답 형식(json, xml)
 
         Returns:
             Dict: Global DNS 도메인 쿼리 응답
         """
-        params = { 
-            'baseTimeUnix': base_time_unix,
-            
+        if (
+            base_time_unix is not None
+            and base_time_unit is not None
+            and base_time_unix != base_time_unit
+        ):
+            raise ValueError(
+                "base_time_unix와 base_time_unit에 "
+                "서로 다른 값을 지정할 수 없습니다."
+            )
+        selected_time_unit = (
+            base_time_unit
+            if base_time_unit is not None
+            else base_time_unix
+        )
+        if selected_time_unit is None:
+            raise ValueError("base_time_unit은 필수입니다.")
+
+        params = {
+            'baseTimeUnit': selected_time_unit,
         }
         if domain_id is not None:
             params['domainId'] = domain_id
@@ -144,7 +161,6 @@ class GlobaldnsAPI(BaseNCPAPI):
             Dict: Global DNS 도메인 레코드 응답
         """
         params = {
-            'domainId': domain_id,
             'page' : page,
             'size' : size      
         }

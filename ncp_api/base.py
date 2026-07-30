@@ -29,6 +29,10 @@ class BaseNCPAPI:
             return
 
         self.credentials = credentials or get_default_credentials()
+        if not self.credentials.access_key:
+            raise ValueError("NCP access_key가 비어 있습니다.")
+        if not self.credentials.secret_key:
+            raise ValueError("NCP secret_key가 비어 있습니다.")
 
         base_url = self._resolve_base_url(self.credentials)
 
@@ -73,73 +77,3 @@ class BaseNCPAPI:
             )
 
         return base_url
-
-# class BaseNCPAPI:
-#     ENDPOINT_KEY: str = ""
-
-#     def __init__(
-#         self,
-#         credentials: NCPCredentials | None = None,
-#         client: NCPBaseClient | None = None,
-#     ):
-
-#         print("=" * 60)
-#         print(f"API CLASS           : {self.__class__.__name__}")
-#         print(f"ENDPOINT_KEY        : {self.ENDPOINT_KEY}")
-
-#         if client is not None:
-#             print("CUSTOM CLIENT MODE")
-#             self.client = client
-#             return
-
-#         if not self.ENDPOINT_KEY:
-#             raise ValueError(
-#                 f"{self.__class__.__name__} ENDPOINT_KEY가 없습니다."
-#             )
-
-#         credentials = credentials or get_default_credentials()
-
-#         self.credentials = credentials
-
-#         print(f"API TYPE            : {credentials.api_type}")
-#         print(f"REGION              : {credentials.region}")
-
-#         endpoints = build_api_endpoints(
-#             api_type=credentials.api_type,
-#             region=credentials.region,
-#         )
-
-#         print("-" * 60)
-#         # print("AVAILABLE ENDPOINTS")
-
-#         # for key, value in endpoints.items():
-#         #     print(f"{key:<25} -> {value}")
-
-#         # print("-" * 60)
-
-#         try:
-#             base_url = endpoints[self.ENDPOINT_KEY]
-
-#         except KeyError as e:
-
-#             print("=" * 60)
-#             print("ENDPOINT LOOKUP FAILED")
-#             print(f"REQUESTED KEY : {self.ENDPOINT_KEY}")
-#             print(f"AVAILABLE     : {list(endpoints.keys())}")
-#             print("=" * 60)
-
-#             raise ValueError(
-#                 f"endpoint 설정을 찾을 수 없습니다. "
-#                 f"api_type={credentials.api_type}, "
-#                 f"region={credentials.region}, "
-#                 f"endpoint_key={self.ENDPOINT_KEY}"
-#             ) from e
-
-#         print(f"SELECTED BASE URL   : {base_url}")
-#         print("=" * 60)
-
-#         self.client = NCPBaseClient(
-#             access_key=credentials.access_key,
-#             secret_key=credentials.secret_key,
-#             base_url=base_url,
-#         )

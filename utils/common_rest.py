@@ -6,9 +6,11 @@ RESTful API 공용 클라이언트 모듈
 
 import json
 import logging
+import numbers
 import time
+from collections.abc import Mapping
 from typing import Dict, Any, Optional, List, Union
-from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
 
 from ncp_api.auth import NCPAuth
@@ -16,6 +18,195 @@ from config.settings import API_TIMEOUT, API_RETRY_COUNT
 
 
 logger = logging.getLogger(__name__)
+
+_REDACTED = "***REDACTED***"
+_SENSITIVE_KEY_NAMES = {
+    "authorization",
+    "credential",
+    "credentials",
+    "cookie",
+    "key",
+    "password",
+    "passwd",
+    "secret",
+    "setcookie",
+    "token",
+}
+_SENSITIVE_KEY_FRAGMENTS = (
+    "accesskey",
+    "apikey",
+    "authorization",
+    "credential",
+    "privatekey",
+    "secret",
+    "signature",
+    "token",
+)
+_RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
+
+
+def _normalized_key(value: Any) -> str:
+    return "".join(character for character in str(value).lower() if character.isalnum())
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    normalized = _normalized_key(key)
+    return (
+        normalized in _SENSITIVE_KEY_NAMES
+        or any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
+    )
+
+
+def _redact_value(value: Any) -> Any:
+    """로그용 데이터에서 자격 증명으로 보이는 값을 재귀적으로 제거합니다."""
+    if isinstance(value, Mapping):
+        return {
+            key: _REDACTED if _is_sensitive_key(key) else _redact_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<{type(value).__name__} length={len(value)}>"
+    if isinstance(value, str):
+        # 구조를 알 수 없는 raw 문자열은 일부만 출력해도 비밀이 노출될 수 있습니다.
+        return f"<str length={len(value)}>"
+    return value
+
+
+def _safe_json(value: Any, limit: int = 1000) -> str:
+    redacted = _redact_value(value)
+    rendered = json.dumps(
+        redacted,
+        ensure_ascii=False,
+        default=lambda item: f"<{type(item).__name__}>",
+    )
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[:limit]}..."
+
+
+def _safe_url(url: str, include_query: bool) -> str:
+    """userinfo를 제거하고 선택적으로 마스킹된 query만 포함한 로그용 URL을 만듭니다."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+
+    query = ""
+    if include_query and parsed.query:
+        query = urlencode(
+            [
+                (key, _REDACTED if _is_sensitive_key(key) else value)
+                for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            ],
+            doseq=True,
+        )
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            netloc,
+            parsed.path,
+            parsed.params,
+            query,
+            "",
+        )
+    )
+
+
+def safe_exception_message(exc: BaseException) -> str:
+    """예외 문자열에 포함된 URL의 userinfo/query/fragment를 제거한다."""
+    message = str(exc)
+    words = message.split()
+    sanitized_words = []
+
+    for word in words:
+        prefix = ""
+        candidate = word
+
+        while candidate and candidate[0] in "([<{\"'":
+            prefix += candidate[0]
+            candidate = candidate[1:]
+
+        suffix = ""
+        while candidate and candidate[-1] in ")]>},.;:\"'":
+            suffix = candidate[-1] + suffix
+            candidate = candidate[:-1]
+
+        lower_candidate = candidate.lower()
+        absolute_indexes = [
+            index
+            for marker in ("https://", "http://")
+            if (index := lower_candidate.find(marker)) >= 0
+        ]
+
+        if absolute_indexes:
+            url_index = min(absolute_indexes)
+            candidate = (
+                candidate[:url_index]
+                + _safe_url(
+                    candidate[url_index:],
+                    include_query=False,
+                )
+            )
+        elif "?" in candidate or "#" in candidate:
+            path_index = candidate.find("/")
+
+            if path_index < 0:
+                sanitized_words.append(prefix + candidate + suffix)
+                continue
+
+            relative_candidate = candidate[path_index:]
+            parsed_candidate = urlparse(relative_candidate)
+            safe_relative = urlunparse(
+                (
+                    "",
+                    "",
+                    parsed_candidate.path,
+                    parsed_candidate.params,
+                    "",
+                    "",
+                )
+            )
+            candidate = candidate[:path_index] + safe_relative
+
+        sanitized_words.append(prefix + candidate + suffix)
+
+    return " ".join(sanitized_words)
+
+
+def _validate_positive_number(value: Any, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+
+
+def _validate_retry_count(value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("retry_count must be a positive integer")
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parsed = urlparse(url)
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("base_url and absolute endpoints must be valid HTTP(S) URLs")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("base_url and absolute endpoints must use a valid port") from exc
+    effective_port = port or (443 if parsed.scheme.lower() == "https" else 80)
+    return parsed.scheme.lower(), parsed.hostname.rstrip(".").lower(), effective_port
 
 
 class NCPBaseClient:
@@ -42,8 +233,15 @@ class NCPBaseClient:
             secret_key: NCP Secret Key
             base_url: API 기본 URL
             timeout: 요청 타임아웃 (초)
-            retry_count: 재시도 횟수
+            retry_count: 최대 요청 횟수(1 이상)
         """
+        _validate_positive_number(timeout, "timeout")
+        _validate_retry_count(retry_count)
+        base_parts = urlparse(base_url)
+        _origin(base_url)
+        if base_parts.query or base_parts.fragment:
+            raise ValueError("base_url must not contain a query string or fragment")
+
         self.auth = NCPAuth(access_key, secret_key)
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
@@ -51,53 +249,6 @@ class NCPBaseClient:
         self.session = requests.Session()
     
 
-    # .N 형태를 자동변환하려고 시도했으나 API가 너무 더러워서 그냥 각 API에서 생성해서 던지는 방식으로 변환환
-    # def _prepare_params(self, params: Optional[Union[Dict, List]]) -> str:
-    #     """
-    #     파라미터를 쿼리 스트링으로 변환합니다.
-    #     리스트와 딕셔너리 타입을 지원합니다.
-        
-    #     Args:
-    #         params: 파라미터 딕셔너리 또는 리스트
-        
-    #     Returns:
-    #         str: 쿼리 스트링
-    #     """
-    #     if not params:
-    #         return ''
-        
-    #     # 리스트 타입인 경우 처리
-    #     if isinstance(params, list):
-    #         # 리스트를 딕셔너리로 변환 (인덱스 기반)
-    #         params = {str(i): v for i, v in enumerate(params)}
-        
-    #     # 딕셔너리 타입 처리
-    #     if isinstance(params, dict):
-    #         # 중첩된 딕셔너리나 리스트를 JSON 문자열로 변환
-    #         processed_params = {}
-    #             # NCP 도메인 여부 판단
-    #         is_ncp_api = (
-    #             'ntruss.com' in self.base_url or
-    #             'gov-ntruss.com' in self.base_url
-    #         )
-
-    #         for key, value in params.items():
-    #             # ✅ NCP 전용: list 타입을 param.1=value 형태로 변환
-    #             if is_ncp_api and isinstance(value, list):
-    #                 for idx, v in enumerate(value, 1):
-    #                     processed_params[f"{key}.{idx}"] = str(v)
-    #             elif isinstance(value, (dict, list)):
-    #                 # 복잡한 타입은 JSON 문자열로 변환
-    #                 processed_params[key] = json.dumps(value, ensure_ascii=False)
-    #             elif isinstance(value, bool):
-    #                 # 불린 타입은 소문자 문자열로 변환
-    #                 processed_params[key] = str(value).lower()
-    #             else:
-    #                 processed_params[key] = str(value)
-            
-    #         return urlencode(processed_params)
-        
-    #     return ''
     def _prepare_params(self, params: Optional[Union[Dict, List]]) -> str:
         """
         파라미터를 쿼리 스트링으로 변환합니다.
@@ -191,42 +342,69 @@ class NCPBaseClient:
         json_data: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         files: Optional[Dict] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
+        retry_safe: bool = False,
     ) -> requests.Response:
         """
         HTTP 요청을 실행합니다.
+
+        동일한 base origin의 상대/절대 URL만 허용합니다. ``json_data``는
+        ``data``/``files``와 함께 사용할 수 없으며, multipart 요청에서는
+        ``files``와 form field용 dict ``data`` 조합만 허용합니다.
         """
 
-        if endpoint.startswith('http') or endpoint.startswith('https'):
+        method = method.upper()
+        endpoint_parts = urlparse(endpoint)
+        is_absolute = bool(endpoint_parts.scheme or endpoint_parts.netloc)
+        if is_absolute:
+            if not endpoint_parts.scheme or not endpoint_parts.netloc:
+                raise ValueError("absolute endpoint must include scheme and host")
+            if _origin(endpoint) != _origin(self.base_url):
+                raise ValueError(
+                    "absolute endpoint origin must match the configured base_url"
+                )
             url = endpoint
         else:
             endpoint = endpoint.lstrip('/')
             url = f"{self.base_url}/{endpoint}"
 
+        has_files = bool(files)
+        if json_data is not None and (data is not None or has_files):
+            raise ValueError("json_data cannot be combined with data or files")
+        if has_files and data is not None and not isinstance(data, dict):
+            raise ValueError("files can only be combined with dict form data")
+
         # 파라미터 처리
         query_string = self._prepare_params(params)
-        if query_string:
-            url = f"{url}?{query_string}"
-
-        # URI 추출
         parsed_url = urlparse(url)
+        merged_query = "&".join(
+            part for part in (parsed_url.query, query_string) if part
+        )
+        parsed_url = parsed_url._replace(query=merged_query, fragment="")
+        url = urlunparse(parsed_url)
+
+        # URI 추출 및 실제 전송 query와 동일한 문자열로 서명
         uri = parsed_url.path
-        if parsed_url.query:
-            uri = f"{uri}?{parsed_url.query}"
+        if merged_query:
+            uri = f"{uri}?{merged_query}"
 
         # 헤더 준비
         request_headers = self._prepare_headers(
             method,
             uri,
             custom_headers=headers,
-            query_string=query_string if not parsed_url.query else None
+            query_string=None,
         )
 
         request_timeout = timeout if timeout is not None else self.timeout
+        _validate_positive_number(request_timeout, "timeout")
 
         request_kwargs = {
             'headers': request_headers,
-            'timeout': request_timeout
+            'timeout': request_timeout,
+            # NCP 전용 인증 헤더가 다른 origin의 Location으로 전달되지 않게
+            # 자동 redirect를 금지합니다.
+            'allow_redirects': False,
         }
 
         # ============================================================
@@ -238,19 +416,25 @@ class NCPBaseClient:
             request_kwargs['json'] = json_data
 
         # 2. 파일 업로드 요청
-        elif files:
+        elif has_files:
             # requests가 multipart boundary를 자동 생성해야 하므로 제거
-            if 'Content-Type' in request_headers:
-                del request_headers['Content-Type']
-
-        request_kwargs['files'] = files
-
-        if data and isinstance(data, dict):
-            request_kwargs['data'] = data
+            for header_name in list(request_headers):
+                if header_name.lower() == 'content-type':
+                    del request_headers[header_name]
+            request_kwargs['files'] = files
+            if data is not None:
+                request_kwargs['data'] = data
 
         # 3. 일반 data 요청
         elif data is not None:
-            content_type = request_headers.get('Content-Type', '').lower()
+            content_type = next(
+                (
+                    value.lower()
+                    for key, value in request_headers.items()
+                    if key.lower() == 'content-type'
+                ),
+                '',
+            )
 
             # form-urlencoded
             if 'application/x-www-form-urlencoded' in content_type:
@@ -280,183 +464,86 @@ class NCPBaseClient:
         # 로깅
         # ============================================================
 
-        logger.info(f"[API Request] {method} {url}")
-        logger.debug(f"  - Full URL: {url}")
-        logger.debug(f"  - Headers: {request_headers}")
+        logger.info("[API Request] %s %s", method, _safe_url(url, include_query=False))
+        logger.debug("  - URL: %s", _safe_url(url, include_query=True))
+        logger.debug("  - Headers: %s", _safe_json(request_headers))
 
         if json_data is not None:
-            logger.debug(f"  - Request Body (JSON): {json_data}")
-            logger.debug(
-                f"  - Request Body (JSON, full): "
-                f"{json.dumps(json_data, ensure_ascii=False, indent=2)}"
-            )
+            logger.debug("  - Request Body (JSON): %s", _safe_json(json_data))
         elif data is not None:
-            logger.debug(f"  - Request Body (Data): {data}")
-            logger.debug(f"  - Request Body (Data, full): {data}")
+            logger.debug("  - Request Body (Data): %s", _safe_json(data))
 
-        if files:
-            logger.debug(f"  - Request Files: {list(files.keys())}")
+        if has_files:
+            logger.debug(
+                "  - Request File Fields: %s",
+                [_REDACTED if _is_sensitive_key(key) else key for key in files],
+            )
 
         if params:
-            logger.debug(f"  - Query Params: {params}")
+            logger.debug("  - Query Params: %s", _safe_json(params))
 
         # ============================================================
         # 요청 실행
         # ============================================================
 
-        last_exception = None
+        can_retry = method in _RETRYABLE_METHODS or retry_safe
+        max_attempts = self.retry_count if can_retry else 1
+        last_exception: Optional[requests.RequestException] = None
 
-        for attempt in range(self.retry_count):
+        for attempt in range(max_attempts):
             try:
                 response = self.session.request(method, url, **request_kwargs)
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    raise requests.HTTPError(
+                        "redirect responses are not allowed",
+                        response=response,
+                    )
                 response.raise_for_status()
                 return response
 
             except requests.RequestException as e:
                 last_exception = e
+                status_code = e.response.status_code if e.response is not None else None
+                is_transient_http_error = (
+                    status_code == 429
+                    or (status_code is not None and 500 <= status_code <= 599)
+                )
+                is_connection_error = isinstance(
+                    e,
+                    (requests.ConnectionError, requests.Timeout),
+                )
+                should_retry = (
+                    can_retry
+                    and (is_transient_http_error or is_connection_error)
+                    and attempt < max_attempts - 1
+                )
 
-                if attempt < self.retry_count - 1:
+                if should_retry:
                     wait_time = 2 ** attempt
                     logger.warning(
-                        f"Request failed "
-                        f"(attempt {attempt + 1}/{self.retry_count}): {e}"
+                        "Transient request failure "
+                        "(method=%s, status=%s, attempt=%s/%s)",
+                        method,
+                        status_code if status_code is not None else type(e).__name__,
+                        attempt + 1,
+                        max_attempts,
                     )
-                    logger.info(f"Retrying in {wait_time} seconds...")
+                    logger.info("Retrying in %s seconds...", wait_time)
                     time.sleep(wait_time)
                 else:
                     logger.error(
-                        f"Request failed after {self.retry_count} attempts: {e}"
+                        "Request failed "
+                        "(method=%s, status=%s, attempts=%s)",
+                        method,
+                        status_code if status_code is not None else type(e).__name__,
+                        attempt + 1,
                     )
+                    raise
 
+        # retry_count는 생성 시 1 이상으로 검증되므로 방어적 경로입니다.
+        if last_exception is None:
+            raise RuntimeError("request failed before an attempt was made")
         raise last_exception
-    
-    #기존 코드에서 Data가 모조건 JSON으로 변경되는 문제 해결 
-    # def _make_request(
-    #     self,
-    #     method: str,
-    #     endpoint: str,
-    #     params: Optional[Union[Dict, List]] = None,
-    #     data: Optional[Union[Dict, List, str, bytes]] = None,
-    #     json_data: Optional[Union[Dict, List]] = None,
-    #     headers: Optional[Dict[str, str]] = None,
-    #     files: Optional[Dict] = None,
-    #     timeout: Optional[int] = None
-    # ) -> requests.Response:
-    #     """
-    #     HTTP 요청을 실행합니다.
-        
-    #     Args:
-    #         method: HTTP 메서드 (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
-    #         endpoint: API 엔드포인트 경로
-    #         params: 쿼리 파라미터 (dict, list 지원)
-    #         data: 요청 본문 데이터 (form 데이터, 문자열, 바이트)
-    #         json_data: JSON 요청 본문 데이터 (dict, list 지원)
-    #         headers: 커스텀 헤더
-    #         files: 파일 업로드용 파일 딕셔너리
-    #         timeout: 요청 타임아웃 (초)
-        
-    #     Returns:
-    #         requests.Response: HTTP 응답 객체
-        
-    #     Raises:
-    #         requests.RequestException: 요청 실패 시
-    #     """
-
-    #     if endpoint.startswith('http') or endpoint.startswith('https'):
-    #         url = endpoint
-    #         endpoint_for_auth = url
-    #     else:
-    #         # 엔드포인트 정규화
-    #         endpoint = endpoint.lstrip('/')
-    #         url = f"{self.base_url}/{endpoint}"
-    #         endpoint_for_auth = url
-        
-    #     # 파라미터 처리
-    #     query_string = self._prepare_params(params)
-    #     if query_string:
-    #         url = f"{url}?{query_string}"
-        
-    #     # URI 추출 (인증용)
-    #     parsed_url = urlparse(url)
-    #     uri = parsed_url.path
-    #     if parsed_url.query:
-    #         uri = f"{uri}?{parsed_url.query}"
-        
-    #     # 헤더 준비
-    #     request_headers = self._prepare_headers(
-    #         method,
-    #         uri,
-    #         custom_headers=headers,
-    #         query_string=query_string if not parsed_url.query else None
-    #     )
-        
-    #     # 타임아웃 설정
-    #     request_timeout = timeout if timeout is not None else self.timeout
-        
-    #     # 요청 데이터 준비
-    #     request_kwargs = {
-    #         'headers': request_headers,
-    #         'timeout': request_timeout
-    #     }
-    #     # ============================================================
-    #     # 요청 Body 처리
-    #     # ============================================================
-        
-    #     # 명시적 JSON 데이터 요청
-    #     if json_data is not None:
-    #         request_kwargs['json'] = json_data
-    #         # JSON 요청 시 Content-Type이 이미 설정되어 있음
-        
-
-    #     # Form 데이터 처리
-    #     elif data is not None and not files:
-    #         if isinstance(data, (dict, list)):
-    #             # 딕셔너리나 리스트인 경우 JSON으로 처리
-    #             request_kwargs['json'] = data
-    #         else:
-    #             # 문자열이나 바이트인 경우 그대로 전송
-    #             request_kwargs['data'] = data
-        
-    #     # 파일 업로드 처리
-    #     if files:
-    #         # 파일 업로드 시 Content-Type을 multipart/form-data로 설정
-    #         if 'Content-Type' in request_headers:
-    #             del request_headers['Content-Type']
-    #         request_kwargs['files'] = files
-    #         if data and isinstance(data, dict):
-    #             request_kwargs['data'] = data
-        
-    #     # 로깅 (상세 디버깅)
-    #     logger.info(f"[API Request] {method} {url}")
-    #     logger.debug(f"  - Full URL: {url}")
-    #     logger.debug(f"  - Headers: {request_headers}")
-    #     if json_data:
-    #         logger.info(f"  - Request Body (JSON): {json_data}")
-    #         logger.debug(f"  - Request Body (JSON, full): {json.dumps(json_data, ensure_ascii=False, indent=2)}")
-    #     elif data:
-    #         logger.info(f"  - Request Body (Data): {data}")
-    #         logger.debug(f"  - Request Body (Data, full): {data}")
-    #     if params:
-    #         logger.debug(f"  - Query Params: {params}")
-        
-    #     # 요청 실행 (재시도 로직 포함)
-    #     last_exception = None
-    #     for attempt in range(self.retry_count):
-    #         try:
-    #             response = self.session.request(method, url, **request_kwargs)
-    #             response.raise_for_status()
-    #             return response
-    #         except requests.RequestException as e:
-    #             last_exception = e
-    #             if attempt < self.retry_count - 1:
-    #                 wait_time = 2 ** attempt  # 지수 백오프
-    #                 logger.warning(f"Request failed (attempt {attempt + 1}/{self.retry_count}): {e}")
-    #                 logger.info(f"Retrying in {wait_time} seconds...")
-    #                 time.sleep(wait_time)
-    #             else:
-    #                 logger.error(f"Request failed after {self.retry_count} attempts: {e}")
-        
-    #     raise last_exception
     
     def request(
         self,
@@ -467,8 +554,9 @@ class NCPBaseClient:
         json_data: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         files: Optional[Dict] = None,
-        timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+        timeout: Optional[int] = None,
+        retry_safe: bool = False,
+    ) -> Any:
         """
         API 요청을 실행하고 응답을 반환합니다.
         
@@ -483,13 +571,17 @@ class NCPBaseClient:
             headers: 커스텀 헤더
             files: 파일 업로드용 파일 딕셔너리
             timeout: 요청 타임아웃 (초)
+            retry_safe: 읽기 전용 POST처럼 안전한 요청의 재시도 허용 여부
         
         Returns:
-            Dict[str, Any]: JSON 응답을 파싱한 딕셔너리
+            Any: JSON은 디코딩된 값(dict/list/scalar), XML·텍스트는
+            ``{"text": ..., "status_code": ...}``, 빈 본문은
+            ``{"status_code": ..., "empty": True}``
         
         Raises:
             requests.RequestException: 요청 실패 시
-            json.JSONDecodeError: JSON 파싱 실패 시
+            requests.exceptions.JSONDecodeError: JSON Content-Type 응답의
+                JSON 파싱 실패 시
         
         Examples:
             # GET 요청
@@ -516,13 +608,20 @@ class NCPBaseClient:
             json_data=json_data,
             headers=headers,
             files=files,
-            timeout=timeout
+            timeout=timeout,
+            retry_safe=retry_safe,
         )
         
         # 응답 로깅 (상세 디버깅)
-        logger.info(f"[API Response] Status: {response.status_code}")
-        logger.debug(f"  - Response Headers: {dict(response.headers)}")
-        logger.debug(f"  - Response URL: {response.url}")
+        logger.info("[API Response] Status: %s", response.status_code)
+        logger.debug(
+            "  - Response Headers: %s",
+            _safe_json(dict(response.headers)),
+        )
+        logger.debug(
+            "  - Response URL: %s",
+            _safe_url(response.url or "", include_query=True),
+        )
         
         # 빈 body 처리
         if not response.text.strip():
@@ -532,39 +631,41 @@ class NCPBaseClient:
                 'empty': True
             }
 
-        # JSON 응답 파싱
-        try:
+        content_type = response.headers.get("Content-Type", "").lower()
+        is_json = "application/json" in content_type or "+json" in content_type
+        is_xml = (
+            "application/xml" in content_type
+            or "text/xml" in content_type
+            or "+xml" in content_type
+        )
+        is_text = content_type.startswith("text/") and not is_xml
+
+        if is_text or is_xml:
+            logger.info("  - Response Type: %s", "XML" if is_xml else "Text")
+            logger.debug("  - Response Body: <text length=%s>", len(response.text))
+            return {'text': response.text, 'status_code': response.status_code}
+
+        if is_json:
             json_response = response.json()
-            # 응답 구조 디버깅
-            # Cloud Insight API는 리스트를 반환할 수 있음
-            if isinstance(json_response, list):
-                logger.info(f"  - Response Type: List (length: {len(json_response)})")
-                if len(json_response) > 0:
-                    logger.debug(f"  - First Item Type: {type(json_response[0])}")
-                    if isinstance(json_response[0], (list, tuple)):
-                        logger.debug(f"  - First Item: {json_response[0]}")
-                    elif isinstance(json_response[0], dict):
-                        logger.info(f"  - First Item Keys: {list(json_response[0].keys())}")
-                        logger.debug(f"  - First Item: {json_response[0]}")
-                logger.debug(f"  - Full Response (List): {json.dumps(json_response, ensure_ascii=False, indent=2)[:1000]}...")
-            elif isinstance(json_response, dict):
-                logger.info(f"  - Response Type: Dict")
-                logger.info(f"  - Response Keys: {list(json_response.keys())}")
-                response_str = json.dumps(json_response, ensure_ascii=False, indent=2)
-                if len(response_str) > 1000:
-                    # logger.info(f"  - Response Body (first 1000 chars): {response_str[:1000]}...")
-                    logger.debug(f"  - Full Response Body: {response_str}")
-                else:
-                    logger.debug(f"  - Response Body: {response_str}")
-            else:
-                logger.info(f"  - Response Type: {type(json_response)}")
-                logger.info(f"  - Response: {json_response}")
-            return json_response
-        except json.JSONDecodeError as e:
-            # JSON이 아닌 경우 텍스트 반환
-            logger.error(f"JSON 파싱 실패: {e}")
-            logger.error(f"Response Text: {response.text[:500]}")
-            return {'text': response.text, 'status_code': response.status_code, 'error': 'json_decode_error'}
+        else:
+            # Content-Type이 없거나 일반 바이너리인 기존 API와의 호환을 위해
+            # 먼저 JSON을 시도하고, 유효하지 않으면 텍스트 envelope를 반환합니다.
+            try:
+                json_response = response.json()
+            except requests.exceptions.JSONDecodeError:
+                logger.info("  - Response Type: Text")
+                logger.debug("  - Response Body: <text length=%s>", len(response.text))
+                return {'text': response.text, 'status_code': response.status_code}
+
+        if isinstance(json_response, list):
+            logger.info("  - Response Type: List (length: %s)", len(json_response))
+        elif isinstance(json_response, dict):
+            logger.info("  - Response Type: Dict")
+            logger.info("  - Response Keys: %s", list(json_response.keys()))
+        else:
+            logger.info("  - Response Type: %s", type(json_response).__name__)
+        logger.debug("  - Response Body: %s", _safe_json(json_response))
+        return json_response
     
     # 편의 메서드들
     def get(
@@ -573,7 +674,7 @@ class NCPBaseClient:
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """GET 요청을 실행합니다."""
         return self.request('GET', endpoint, params=params, headers=headers, timeout=timeout)
     
@@ -608,8 +709,9 @@ class NCPBaseClient:
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         files: Optional[Dict] = None,
-        timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+        timeout: Optional[int] = None,
+        retry_safe: bool = False,
+    ) -> Any:
         """POST 요청을 실행합니다."""
         return self.request(
             'POST', endpoint,
@@ -618,7 +720,8 @@ class NCPBaseClient:
             params=params,
             headers=headers,
             files=files,
-            timeout=timeout
+            timeout=timeout,
+            retry_safe=retry_safe,
         )
     
     def put(
@@ -629,7 +732,7 @@ class NCPBaseClient:
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """PUT 요청을 실행합니다."""
         return self.request(
             'PUT', endpoint,
@@ -648,7 +751,7 @@ class NCPBaseClient:
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """PATCH 요청을 실행합니다."""
         return self.request(
             'PATCH', endpoint,
@@ -665,7 +768,7 @@ class NCPBaseClient:
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """DELETE 요청을 실행합니다."""
         return self.request('DELETE', endpoint, params=params, headers=headers, timeout=timeout)
     

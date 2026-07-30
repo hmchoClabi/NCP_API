@@ -5,12 +5,19 @@
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from datetime import datetime
+from typing import Tuple
 from dateutil.relativedelta import relativedelta
 from zoneinfo import ZoneInfo
 import calendar
- 
+
+
+KST = ZoneInfo("Asia/Seoul")
+
+
+def _now_kst_naive() -> datetime:
+    """기존 naive 반환 계약을 유지하면서 날짜 기준은 KST로 통일합니다."""
+    return datetime.now(KST).replace(tzinfo=None)
 
 @dataclass
 class DateTimeAPI:
@@ -32,7 +39,7 @@ def get_current_month_range() -> Tuple[datetime, datetime]:
     Returns:
         Tuple[datetime, datetime]: (시작일, 종료일) 튜플
     """
-    today = datetime.now()
+    today = _now_kst_naive()
     start_date = datetime(today.year, today.month, 1)
     
     # 다음 달 1일에서 1일을 빼서 현재 달의 마지막 날을 구함
@@ -49,7 +56,7 @@ def get_previous_month_range() -> Tuple[datetime, datetime]:
     Returns:
         Tuple[datetime, datetime]: (시작일, 종료일) 튜플
     """
-    today = datetime.now()
+    today = _now_kst_naive()
     prev_month = today - relativedelta(months=1)
     
     start_date = datetime(prev_month.year, prev_month.month, 1)
@@ -119,72 +126,12 @@ def get_month_name(year: int, month: int) -> str:
     return f"{year}년 {month:02d}월"
 
 
-# def build_reporting_period(
-#     range_type: str = 'previous_month',
-#     year: Optional[int] = None,
-#     month: Optional[int] = None,
-#     start_date_str: Optional[str] = None,
-#     end_date_str: Optional[str] = None
-# ) -> ReportingPeriod:
-#     """
-#     보고 기간 정보를 생성합니다.
-#     """
-#     range_type = (range_type or 'previous_month').lower()
-    
-#     if start_date_str and end_date_str:
-#         current_start = parse_date(start_date_str).replace(hour=0, minute=0, second=0)
-#         end_date = parse_date(end_date_str)
-#         current_end = end_date.replace(hour=23, minute=59, second=59)
-#         suffix = " (사용자 지정)" if range_type == 'custom' else ''
-#         label = f"{current_start.strftime('%Y-%m-%d')} ~ {current_end.strftime('%Y-%m-%d')}{suffix}"
-#     elif year is not None and month is not None:
-#         current_start, current_end = get_month_range(year, month)
-#         label = get_month_name(year, month)
-#     elif range_type == 'previous_day':
-#         yesterday = (datetime.now() - timedelta(days=1)).date()
-#         current_start = datetime(yesterday.year, yesterday.month, yesterday.day, 0, 0, 0)
-#         current_end = datetime(yesterday.year, yesterday.month, yesterday.day, 23, 59, 59)
-#         label = f"{yesterday.strftime('%Y-%m-%d')} (전일)"
-#     elif range_type == 'previous_week':
-#         today = datetime.now().date()
-#         current_week_start = today - timedelta(days=today.weekday())
-#         previous_week_start = current_week_start - timedelta(days=7)
-#         previous_week_end = current_week_start - timedelta(days=1)
-#         current_start = datetime(previous_week_start.year, previous_week_start.month, previous_week_start.day, 0, 0, 0)
-#         current_end = datetime(previous_week_end.year, previous_week_end.month, previous_week_end.day, 23, 59, 59)
-#         label = f"{previous_week_start.strftime('%Y-%m-%d')} ~ {previous_week_end.strftime('%Y-%m-%d')} (전주)"
-#     elif range_type == 'custom':
-#         raise ValueError("커스텀 기간을 사용하려면 --start-date와 --end-date를 모두 지정해야 합니다.")
-#     else:
-#         target = datetime.now() - relativedelta(months=1) if range_type == 'previous_month' else datetime.now()
-#         current_start, current_end = get_month_range(target.year, target.month)
-#         label = get_month_name(target.year, target.month)
-    
-#     period_delta = current_end - current_start
-#     previous_end = current_start - timedelta(seconds=1)
-#     previous_start = previous_end - period_delta
-    
-#     file_key = f"{current_start.strftime('%Y%m%d')}_{current_end.strftime('%Y%m%d')}"
-    
-#     return ReportingPeriod(
-#         label=label,
-#         file_key=file_key,
-#         current_start=current_start,
-#         current_end=current_end,
-#         previous_start=previous_start,
-#         previous_end=previous_end
-#     )
-
-
-
 def get_unix_time_stamp(
     date_str: str,
     format_str: str = "%Y-%m-%d %H:%M:%S"
 ) -> int:
 
-    kst = ZoneInfo("Asia/Seoul")
-
     dt = datetime.strptime(date_str, format_str)
-    dt = dt.replace(tzinfo=kst)
+    dt = dt.replace(tzinfo=KST)
 
     return int(dt.timestamp() * 1000)

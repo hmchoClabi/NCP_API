@@ -11,9 +11,10 @@ __all__ = [
     "WebServiceMonitorAPI",
     "CloudInsightAPI",
     "CloudActivityTracerAPI",
+    "SecurityMonitoringAPI",
     "CertificateMgrAPI",
     "VpcAPI",
-    "LoadbalancerAPI"
+    "LoadbalancerAPI",
 ]
 
 

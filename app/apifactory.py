@@ -13,6 +13,7 @@ from ncp_api import (
     WebServiceMonitorAPI,
     CloudInsightAPI,
     CloudActivityTracerAPI,
+    SecurityMonitoringAPI,
     CertificateMgrAPI,
     VpcAPI,
     LoadbalancerAPI,
@@ -40,6 +41,7 @@ class APIFactory:
             "web_service_monitor": WebServiceMonitorAPI,
             "cloud_insight": CloudInsightAPI,
             "cloud_activity_tracer": CloudActivityTracerAPI,
+            "security_monitoring": SecurityMonitoringAPI,
             "certificate_manager": CertificateMgrAPI,
             "vpc": VpcAPI,
             "loadbalancer": LoadbalancerAPI,
@@ -69,6 +71,11 @@ class APIFactory:
         생성된 API 객체 캐시를 초기화합니다.
         """
 
+        for api in self._cache.values():
+            session = getattr(getattr(api, "client", None), "session", None)
+            close = getattr(session, "close", None)
+            if callable(close):
+                close()
         self._cache.clear()
 
     def available_apis(self) -> list[str]:

@@ -77,7 +77,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         if malwareType is not None:
             json_body['malwareType'] = malwareType
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getAVList', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getAVList',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
 
@@ -147,7 +151,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         if targetIp is not None:
             json_body['targetIp'] = targetIp
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getDDoSList', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getDDoSList',
+            json_data=json_body,
+            retry_safe=True,
+        )
 
     def get_ddos_event_detail (
         self,
@@ -177,7 +185,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getDDoSEventDetail', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getDDoSEventDetail',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_ids_list(
         self, 
@@ -227,7 +239,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         if targetIp is not None:
             json_body['targetIp'] = targetIp
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIDSList', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getIDSList',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_ids_event_detail (
         self,
@@ -257,7 +273,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIDSEventDetail', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getIDSEventDetail',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
     def get_ips_list(
         self, 
@@ -342,7 +362,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         
         
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getIPSList', json_data=json_body)
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getIPSList',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
     def get_waf_list(
@@ -423,9 +447,9 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body['attackIp'] = attackIp
         if targetIp is not None:
             json_body['targetIp'] = targetIp
-                
 
-        return self.client.post(f'/vsecuritymonitoring/v1/getWAFList', json_data=json_body)
-     
-
-    
+        return self.client.post(
+            f'/vsecuritymonitoring/v1/getWAFList',
+            json_data=json_body,
+            retry_safe=True,
+        )

@@ -77,5 +77,9 @@ class CloudActivityTracerAPI(BaseNCPAPI):
         if size is not None:
             json_body['size'] = size
 
-        return self.client.post(f'/api/v1/activities', json_data=json_body)
+        return self.client.post(
+            f'/api/v1/activities',
+            json_data=json_body,
+            retry_safe=True,
+        )
     

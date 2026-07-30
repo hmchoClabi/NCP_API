@@ -40,7 +40,8 @@ class VserverAPI(BaseNCPAPI):
         page_size: Optional[int] = None,
         sorted_by: Optional[str] = None,
         sort_order: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = 'json',
+        server_instance_no_list: Optional[List[str]] = None,
         
     ) -> Dict:
         """
@@ -67,6 +68,17 @@ class VserverAPI(BaseNCPAPI):
         Returns:
             Dict: 서버 인스턴스 목록 응답
         """
+        if server_instance_no_list is not None:
+            if (
+                server_instanece_no_list is not None
+                and server_instanece_no_list != server_instance_no_list
+            ):
+                raise ValueError(
+                    "server_instanece_no_list와 server_instance_no_list에 "
+                    "서로 다른 값을 지정할 수 없습니다."
+                )
+            server_instanece_no_list = server_instance_no_list
+
         params = {'responseFormatType': responseFormatType}  # JSON 형식 명시
         if region_code is not None:
             params['regionCode'] = region_code
@@ -97,14 +109,18 @@ class VserverAPI(BaseNCPAPI):
             params['fabricClusterNo'] = fabric_cluster_no
         if fabric_cluster_mode is not None:
             params['fabricClusterMode'] = fabric_cluster_mode
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
         if sorted_by is not None:
-            params['sortBy'] = sorted_by
+            params['sortedBy'] = sorted_by
         if sort_order is not None:
-            params['sortOrder'] = sort_order
+            params['sortingOrder'] = sort_order
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         
@@ -190,7 +206,11 @@ class VserverAPI(BaseNCPAPI):
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
 
-        return self.client.post('/vserver/v2/getRootPasswordServerInstanceList', params=params)
+        return self.client.post(
+            '/vserver/v2/getRootPasswordServerInstanceList',
+            params=params,
+            retry_safe=True,
+        )
 
     """
     ================================================================
@@ -254,6 +274,10 @@ class VserverAPI(BaseNCPAPI):
         if platform_category_code_list is not None:
             for idx, platform_type_category_code in enumerate(platform_category_code_list, start=1):
                 params[f'platformCategoryCodeList.{idx}'] = platform_type_category_code
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -336,12 +360,16 @@ class VserverAPI(BaseNCPAPI):
         if platform_type_code_list is not None:
             for idx, platform_type_code in enumerate(platform_type_code_list, start=1):
                 params[f'platformTypeCodeList.{idx}'] = platform_type_code
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
         if sorted_by is not None:
-            params['sortBy'] = sorted_by
+            params['sortedBy'] = sorted_by
         if sorting_order is not None:
             params['sortingOrder'] = sorting_order
         if responseFormatType is not None:
@@ -349,9 +377,9 @@ class VserverAPI(BaseNCPAPI):
         
         return self.client.get('/vserver/v2/getMemberServerImageInstanceList', params=params)
 
-    def get_member_server_instance_detail(
+    def get_member_server_image_instance_detail(
         self,
-        member_server_instance_no: str,
+        member_server_image_instance_no: str,
         region_code: Optional[str] = None,
         responseFormatType: Optional[str] = 'json'
     ) -> Dict:
@@ -359,14 +387,14 @@ class VserverAPI(BaseNCPAPI):
         내 서버 이미지 인스턴스 상세 정보를 조회합니다. KVM기반은 지원하지 않습니다.
         
         Args:
-            member_server_instance_no: 내 서버 이미지 인스턴스 번호
+            member_server_image_instance_no: 내 서버 이미지 인스턴스 번호
             region_code: 리전 코드(선택사항)
         
         Returns:
             Dict: 내 서버 이미지 인스턴스 상세 정보 응답
         """
         params = {
-            'memberServerInstanceNo': member_server_instance_no
+            'memberServerImageInstanceNo': member_server_image_instance_no
         }
         if region_code is not None:
             params['regionCode'] = region_code
@@ -375,6 +403,19 @@ class VserverAPI(BaseNCPAPI):
 
         
         return self.client.get('/vserver/v2/getMemberServerImageInstanceDetail', params=params)
+
+    def get_member_server_instance_detail(
+        self,
+        member_server_instance_no: str,
+        region_code: Optional[str] = None,
+        responseFormatType: Optional[str] = 'json'
+    ) -> Dict:
+        """기존 공개 이름을 유지하는 호환 별칭입니다."""
+        return self.get_member_server_image_instance_detail(
+            member_server_image_instance_no=member_server_instance_no,
+            region_code=region_code,
+            responseFormatType=responseFormatType,
+        )
     """
     ================================================================
     블록 스토리지 관련 API
@@ -510,12 +551,12 @@ class VserverAPI(BaseNCPAPI):
 
     def getBlockStorageVolumeTypeList(
         self,
-        region_code: Optional[str],
-        zone_code: Optional[str],
-        block_storage_volume_type_code_list: Optional[list[str]],
-        hypervisor_type_code_list: Optional[list[str]],
-        server_spec_code: Optional[str],
-        is_base_storage_available: Optional[str],
+        region_code: Optional[str] = None,
+        zone_code: Optional[str] = None,
+        block_storage_volume_type_code_list: Optional[list[str]] = None,
+        hypervisor_type_code_list: Optional[list[str]] = None,
+        server_spec_code: Optional[str] = None,
+        is_base_storage_available: Optional[str] = None,
         responseFormatType: Optional[str] = 'json'
     ) -> Dict:
         """
@@ -557,6 +598,9 @@ class VserverAPI(BaseNCPAPI):
             params['responseFormatType'] = responseFormatType
         
         return self.client.get('/vserver/v2/getBlockStorageVolumeTypeList', params=params)
+
+    # 기존 camelCase 공개 이름은 유지하면서 PEP 8 이름도 제공합니다.
+    get_block_storage_volume_type_list = getBlockStorageVolumeTypeList
     
 
 
@@ -856,6 +900,9 @@ class VserverAPI(BaseNCPAPI):
             Returns:
                 Dict: 초기화 스크립트 상세
         """
+        if init_script_no is None or not str(init_script_no).strip():
+            raise ValueError("init_script_no는 필수입니다.")
+
         params = {}
         if region_code is not None:
             params['regionCode'] = region_code
@@ -887,7 +934,10 @@ class VserverAPI(BaseNCPAPI):
         server_name:  Optional[str] = None,
         page_no:  Optional[int] = None, 
         page_size:  Optional[int] = None,  
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = 'json',
+        subnet_name: Optional[str] = None,
+        network_interface_no_list: Optional[List[str]] = None,
+        network_interface_status_code: Optional[str] = None,
     ) -> Dict:
         """
         네트워크 인터페이스 인스턴스 목록을 조회합니다.
@@ -908,20 +958,51 @@ class VserverAPI(BaseNCPAPI):
         Returns:
             Dict: 네트워크 인터페이스 인스턴스 목록 응답
         """
+        if subnet_name is not None:
+            if sub_name is not None and sub_name != subnet_name:
+                raise ValueError(
+                    "sub_name과 subnet_name에 서로 다른 값을 지정할 수 없습니다."
+                )
+            sub_name = subnet_name
+        if network_interface_no_list is not None:
+            if (
+                network_interface_instance_no_list is not None
+                and network_interface_instance_no_list
+                != network_interface_no_list
+            ):
+                raise ValueError(
+                    "network_interface_instance_no_list와 "
+                    "network_interface_no_list에 서로 다른 값을 지정할 수 없습니다."
+                )
+            network_interface_instance_no_list = network_interface_no_list
+        if network_interface_status_code is not None:
+            if (
+                network_interface_instance_status_code is not None
+                and network_interface_instance_status_code
+                != network_interface_status_code
+            ):
+                raise ValueError(
+                    "network_interface_instance_status_code와 "
+                    "network_interface_status_code에 서로 다른 값을 지정할 수 없습니다."
+                )
+            network_interface_instance_status_code = (
+                network_interface_status_code
+            )
+
         params = {}      
         if region_code is not None:
             params['regionCode'] = region_code
         if sub_name is not None:
-            params['subName'] = sub_name
+            params['subnetName'] = sub_name
         if network_interface_instance_no_list is not None:
             for idx, network_interface_instance_no in enumerate(network_interface_instance_no_list, start=1):
                 params[f'networkInterfaceNoList.{idx}'] = network_interface_instance_no
         if network_interface_name is not None:
             params['networkInterfaceName'] = network_interface_name
         if network_interface_instance_status_code is not None:
-            params['networkInterfaceInstanceStatusCode'] = network_interface_instance_status_code
+            params['networkInterfaceStatusCode'] = network_interface_instance_status_code
         if ip is not None:
-            params['ipAddress'] = ip
+            params['ip'] = ip
         if secondary_ip_list is not None:
             for idx, secondary_ip in enumerate(secondary_ip_list, start=1):
                 params[f'secondaryIpList.{idx}'] = secondary_ip
@@ -933,6 +1014,10 @@ class VserverAPI(BaseNCPAPI):
             params['deviceName'] = device_name
         if server_name is not None:
             params['serverName'] = server_name
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -941,7 +1026,29 @@ class VserverAPI(BaseNCPAPI):
             params['responseFormatType'] = responseFormatType    
         
         return self.client.get('/vserver/v2/getNetworkInterfaceList', params=params)
-    
+
+    get_network_interface_list = get_network_interface_instance_list
+
+    def get_network_interface_detail(
+        self,
+        network_interface_no: str,
+        region_code: Optional[str] = None,
+        responseFormatType: Optional[str] = 'json'
+    ) -> Dict:
+        """네트워크 인터페이스 상세 정보를 조회합니다."""
+        params = {
+            'networkInterfaceNo': network_interface_no
+        }
+        if region_code is not None:
+            params['regionCode'] = region_code
+        if responseFormatType is not None:
+            params['responseFormatType'] = responseFormatType
+
+        return self.client.get(
+            '/vserver/v2/getNetworkInterfaceDetail',
+            params=params,
+        )
+
     def get_network_interface_instance_detail(
         self,
         network_interface_instance_no: str,
@@ -958,15 +1065,11 @@ class VserverAPI(BaseNCPAPI):
         Returns:
             Dict: 네트워크 인터페이스 인스턴스 상세 정보 응답
         """
-        params = {
-            'networkInterfaceInstanceNo': network_interface_instance_no
-        }
-        if region_code:
-            params['regionCode'] = region_code
-        if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType    
-        
-        return self.client.get('/vserver/v2/getNetworkInterfaceDetail', params=params)  
+        return self.get_network_interface_detail(
+            network_interface_no=network_interface_instance_no,
+            region_code=region_code,
+            responseFormatType=responseFormatType,
+        )
     
     def get_flow_log_configuration_list(
         self,
@@ -984,6 +1087,9 @@ class VserverAPI(BaseNCPAPI):
         Returns:
             Dict: 플로우 로그 구성 목록 응답
         """
+        if not network_interface_no_list:
+            raise ValueError("network_interface_no_list는 필수입니다.")
+
         params = {}
         if region_code:
             params['regionCode'] = region_code
@@ -1116,7 +1222,7 @@ class VserverAPI(BaseNCPAPI):
         region_code: Optional[str] = None,
         fabric_cluster_pool_no: Optional[str] = None,
         fabric_cluster_pool_name: Optional[str] = None,
-        fabric_cluster_no_list: Optional[str] = None,
+        fabric_cluster_no_list: Optional[List[str]] = None,
         fabric_cluster_name: Optional[str] = None,
         zone_code: Optional[str] = None,
         vpc_no: Optional[str] = None,

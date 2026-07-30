@@ -1,6 +1,12 @@
 from typing import Dict
 
 
+SUPPORTED_REGIONS = {
+    "gov": frozenset({"KR", "KRS"}),
+    "public": frozenset({"KR", "SGN", "JPN"}),
+}
+
+
 BASE_ENDPOINTS: Dict[str, Dict[str, str]] = {
     "gov": {
         "ncloud": "https://ncloud.apigw.gov-ntruss.com",
@@ -32,7 +38,35 @@ BASE_ENDPOINTS: Dict[str, Dict[str, str]] = {
 }
 
 
+def _validated_api_type_and_region(api_type: str, region: str) -> tuple[str, str]:
+    if not isinstance(api_type, str) or not api_type.strip():
+        raise ValueError("api_type은 비어 있지 않은 문자열이어야 합니다.")
+    if not isinstance(region, str) or not region.strip():
+        raise ValueError("region은 비어 있지 않은 문자열이어야 합니다.")
+
+    normalized_api_type = api_type.strip().lower()
+    normalized_region = region.strip().upper()
+
+    if normalized_api_type not in BASE_ENDPOINTS:
+        supported = ", ".join(sorted(BASE_ENDPOINTS))
+        raise ValueError(
+            f"지원하지 않는 api_type입니다: {api_type!r} (지원값: {supported})"
+        )
+
+    supported_regions = SUPPORTED_REGIONS[normalized_api_type]
+    if normalized_region not in supported_regions:
+        supported = ", ".join(sorted(supported_regions))
+        raise ValueError(
+            "지원하지 않는 region입니다: "
+            f"{region!r} (api_type={normalized_api_type}, 지원값: {supported})"
+        )
+
+    return normalized_api_type, normalized_region
+
+
 def get_containerregistry_endpoint(api_type: str, region: str) -> str:
+    api_type, region = _validated_api_type_and_region(api_type, region)
+
     if api_type == "gov":
         if region == "KRS":
             return "https://gov-ncr.apigw.gov-ntruss.com/ncr/krs"
@@ -48,6 +82,8 @@ def get_containerregistry_endpoint(api_type: str, region: str) -> str:
 
 
 def get_kubernetes_endpoint(api_type: str, region: str) -> str:
+    api_type, region = _validated_api_type_and_region(api_type, region)
+
     if api_type == "gov":
         if region == "KRS":
             return "https://nks.apigw.gov-ntruss.com/vnks/krs-v2"
@@ -63,8 +99,7 @@ def get_kubernetes_endpoint(api_type: str, region: str) -> str:
 
 
 def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
-    if api_type not in BASE_ENDPOINTS:
-        raise ValueError(f"지원하지 않는 api_type입니다: {api_type}")
+    api_type, region = _validated_api_type_and_region(api_type, region)
 
     base = BASE_ENDPOINTS[api_type]
     ncloud = base["ncloud"]

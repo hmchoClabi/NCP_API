@@ -4,3 +4,9 @@ logs/
 __pycache__/
 .venv/
 output/
+reports/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

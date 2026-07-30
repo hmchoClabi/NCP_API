@@ -2,8 +2,7 @@
     ResourceManager 리소스 API 모듈
 """
 
-from bisect import insort_right
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 
@@ -24,27 +23,44 @@ class ResourceManagerAPI(BaseNCPAPI):
         self,
         group_name: Optional[str] = None,
         page_index: Optional[int] = None,
-        page_size: Optional[int] = None
+        page_size: Optional[int] = None,
+        page: Optional[int] = None,
+        size: Optional[int] = None,
     ) -> Dict:
         """
         리소스 매니져 그룹 목록을 조회합니다.
 
         args:
             str group_name: 그룹 이름 (선택사항)
-            int page_index: 페이지 인덱스 (선택사항)
-            int page_size: 페이지 크기 (선택사항)
+            int page_index: 기존 호환용 페이지 번호
+            int page_size: 기존 호환용 페이지 크기
+            int page: 페이지 번호 (선택사항)
+            int size: 페이지 크기 (선택사항)
 
         Returns:
             Dict: 리소스 매니져 그룹 목록 응답
         """
         params = {}
 
-        if group_name:
+        if page is not None:
+            if page_index is not None and page_index != page:
+                raise ValueError(
+                    "page_index와 page에 서로 다른 값을 지정할 수 없습니다."
+                )
+            page_index = page
+        if size is not None:
+            if page_size is not None and page_size != size:
+                raise ValueError(
+                    "page_size와 size에 서로 다른 값을 지정할 수 없습니다."
+                )
+            page_size = size
+
+        if group_name is not None:
             params['groupName'] = group_name
-        if page_index:
-            params['pageIndex'] = page_index
-        if page_size:
-            params['pageSize'] = page_size
+        if page_index is not None:
+            params['page'] = page_index
+        if page_size is not None:
+            params['size'] = page_size
 
         return self.client.get('/api/v1/groups', params=params)
 
@@ -56,7 +72,7 @@ class ResourceManagerAPI(BaseNCPAPI):
         resource_type : Optional[str] = None,
         resource_id : Optional[str] = None,
         resource_name : Optional[str] = None,
-        tag : Optional[str] = None, 
+        tag : Optional[list[dict[str, str]]] = None,
         group_name : Optional[str] = None,
         page : Optional[int] = None,
         size : Optional[int] = None
@@ -70,7 +86,7 @@ class ResourceManagerAPI(BaseNCPAPI):
             str resource_type: 리소스 유형 (선택사항)
             str resource_id: 리소스 아이디 (선택사항)
             str resource_name: 리소스 이름 (선택사항)
-            str tag: 태그 (선택사항)
+            list tag: tagKey와 tagValue 객체로 구성된 태그 목록 (선택사항)
             str group_name: 그룹 이름 (선택사항)
             int page: 페이지 번호 (선택사항)
             int size: 페이지 크기 (선택사항)
@@ -78,25 +94,29 @@ class ResourceManagerAPI(BaseNCPAPI):
             Dict: 리소스 목록 응답
         """
         params = {}
-        if nrn:
+        if nrn is not None:
             params['nrn'] = nrn
-        if product_name:
+        if product_name is not None:
             params['productName'] = product_name
-        if region_code:
+        if region_code is not None:
             params['regionCode'] = region_code
-        if resource_type:
+        if resource_type is not None:
             params['resourceType'] = resource_type
-        if resource_id:
+        if resource_id is not None:
             params['resourceId'] = resource_id
-        if resource_name:
+        if resource_name is not None:
             params['resourceName'] = resource_name
-        if tag:
+        if tag is not None:
             params['tag'] = tag
-        if group_name:
+        if group_name is not None:
             params['groupName'] = group_name
-        if page:
+        if page is not None:
             params['page'] = page
-        if size:
+        if size is not None:
             params['size'] = size
 
-        return self.client.post('/api/v1/resources', json_data=params)
+        return self.client.post(
+            '/api/v1/resources',
+            json_data=params,
+            retry_safe=True,
+        )

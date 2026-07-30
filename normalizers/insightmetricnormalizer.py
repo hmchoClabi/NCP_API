@@ -1,4 +1,5 @@
 import logging
+import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
@@ -8,9 +9,23 @@ logger = logging.getLogger(__name__)
 class InsightMetricNormalizer:
     OS_MOUNT_POINTS = {
         "/",
+        "/bin",
         "/root",
         "/boot",
         "/boot/efi",
+        "/etc",
+        "/home",
+        "/lib",
+        "/lib64",
+        "/opt",
+        "/sbin",
+        "/srv",
+        "/tmp",
+        "/usr",
+        "/var",
+        "/etc/hostname",
+        "/etc/hosts",
+        "/etc/resolv.conf",
     }
 
     def __init__(
@@ -29,6 +44,21 @@ class InsightMetricNormalizer:
         response: Any,
         stat_name: str,
     ) -> None:
+        if isinstance(response, dict):
+            response = (
+                response.get("metrics")
+                or response.get("data")
+                or response.get("result")
+                or []
+            )
+
+            if isinstance(response, dict):
+                response = (
+                    response.get("metrics")
+                    or response.get("items")
+                    or []
+                )
+
         if not isinstance(response, list):
             logger.warning("Cloud Insight 응답이 list가 아닙니다: %s", response)
             return
@@ -37,8 +67,12 @@ class InsightMetricNormalizer:
             if not isinstance(item, dict):
                 continue
 
-            dimensions = item.get("dimensions") or {}
-            instance_no = dimensions.get("instanceNo")
+            dimensions = self._normalize_dimensions(
+                item.get("dimensions")
+            )
+            instance_no = self._normalize_id(
+                dimensions.get("instanceNo")
+            )
             metric_name = item.get("metric")
             dps = item.get("dps") or []
 
@@ -47,7 +81,7 @@ class InsightMetricNormalizer:
 
             values = self._extract_dps_values(dps)
 
-            raw_metrics[instance_no][metric_name][stat_name].append(
+            raw_metrics[instance_no][str(metric_name)][stat_name].append(
                 {
                     "values": values,
                     "dimensions": dimensions,
@@ -88,7 +122,7 @@ class InsightMetricNormalizer:
         result = []
 
         for server in servers:
-            instance_no = server.get("server_id")
+            instance_no = self._normalize_id(server.get("server_id"))
             metric_data = raw_metrics.get(instance_no, {})
 
             report = self._create_base_report(server)
@@ -252,6 +286,10 @@ class InsightMetricNormalizer:
         entry: Dict[str, Any],
     ) -> Optional[str]:
         dimensions = entry.get("dimensions") or {}
+
+        if not isinstance(dimensions, dict):
+            dimensions = self._normalize_dimensions(dimensions)
+
         mount_name = dimensions.get("mnt_nm")
 
         if mount_name is None:
@@ -263,7 +301,18 @@ class InsightMetricNormalizer:
         self,
         mount_name: str,
     ) -> bool:
-        return mount_name in self.OS_MOUNT_POINTS
+        normalized = mount_name.strip().replace("\\", "/")
+
+        if len(normalized) > 1:
+            normalized = normalized.rstrip("/")
+
+        if normalized in self.OS_MOUNT_POINTS:
+            return True
+
+        if normalized.startswith("/boot/"):
+            return True
+
+        return bool(re.match(r"^[cC]:(?:/.*)?$", normalized))
 
     def _collect_metric_values(
         self,
@@ -294,3 +343,39 @@ class InsightMetricNormalizer:
             return round(max(values), 2)
 
         return None
+
+    def _normalize_dimensions(self, value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+
+        if not isinstance(value, list):
+            return {}
+
+        result: Dict[str, Any] = {}
+
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+
+            name = (
+                item.get("dim")
+                or item.get("name")
+                or item.get("dimension")
+            )
+            item_value = (
+                item.get("val")
+                if item.get("val") is not None
+                else item.get("value")
+            )
+
+            if name and item_value is not None:
+                result[str(name)] = item_value
+
+        return result
+
+    def _normalize_id(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        return normalized or None

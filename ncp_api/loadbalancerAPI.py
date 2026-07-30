@@ -27,7 +27,8 @@ class LoadbalancerAPI(BaseNCPAPI):
         page_size: Optional[int] = None,
         sortlist_sorted_by: Optional[List[str]] = None,
         sortlist_sorting_order: Optional[List[str]] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = 'json',
+        load_balancer_type_code: Optional[str] = None,
     ) -> Dict:
         """
         Load Balancer 인스턴스 목록을 조회합니다.
@@ -35,12 +36,13 @@ class LoadbalancerAPI(BaseNCPAPI):
         args:
             str region_code: 리전 코드(선택사항)
             str vpc_no: VPC 번호(선택사항)
-            str load_balancer_code: Load Balancer 코드(선택사항) (APPLICATION | NETWORK | NETWORK_PROXY)
+            str load_balancer_code: 기존 호환용 Load Balancer 타입 코드
+            str load_balancer_type_code: Load Balancer 타입 코드(선택사항) (APPLICATION | NETWORK | NETWORK_PROXY)
             str load_balancer_network_type_code: Load Balancer 네트워크 타입 코드(선택사항) (PUBLIC | PRIVATE)
             list load_balancer_instance_no_list: Load Balancer 인스턴스 번호 리스트(선택사항)
             int page_no: 페이지 번호(선택사항)
             int page_size: 페이지 크기(선택사항)
-            list sortlist_sorted_by: 정렬 기준 리스트(선택사항) (loadBalancerInstanceName)
+            list sortlist_sorted_by: 정렬 기준 리스트(선택사항) (loadBalancerName)
             list sortlist_sorting_order: 정렬 순서 리스트(선택사항) (ASC | DESC)
             responseFormatType: 응답 포맷 타입 (json 또는 xml, 기본값: json)
 
@@ -54,26 +56,44 @@ class LoadbalancerAPI(BaseNCPAPI):
             params['regionCode'] = region_code
         if vpc_no is not None:
             params['vpcNo'] = vpc_no
-        if load_balancer_code is not None:
-            params['loadBalancerCode'] = load_balancer_code
+        if (
+            load_balancer_code is not None
+            and load_balancer_type_code is not None
+            and load_balancer_code != load_balancer_type_code
+        ):
+            raise ValueError(
+                "load_balancer_code와 load_balancer_type_code에 "
+                "서로 다른 값을 지정할 수 없습니다."
+            )
+        selected_type_code = (
+            load_balancer_type_code
+            if load_balancer_type_code is not None
+            else load_balancer_code
+        )
+        if selected_type_code is not None:
+            params['loadBalancerTypeCode'] = selected_type_code
         if load_balancer_network_type_code is not None:
             params['loadBalancerNetworkTypeCode'] = load_balancer_network_type_code
         if load_balancer_instance_no_list is not None:
             for idx, load_balancer_instance_no in enumerate(load_balancer_instance_no_list, start=1):
                 params[f'loadBalancerInstanceNoList.{idx}'] = load_balancer_instance_no
+        if page_no is not None and page_size is None:
+            raise ValueError("page_no를 지정할 때는 page_size도 지정해야 합니다.")
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
-        if sortlist_sorted_by and sortlist_sorting_order:
+        if sortlist_sorted_by is not None and sortlist_sorting_order is not None:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
-
-            for idx, (sorted_by, sorting_order) in enumerate(
-                zip(sortlist_sorted_by, sortlist_sorting_order),
-                start=1
-            ):
+        if sortlist_sorted_by is not None:
+            for idx, sorted_by in enumerate(sortlist_sorted_by, start=1):
                 params[f"sortList.{idx}.sortedBy"] = sorted_by
+        if sortlist_sorting_order is not None:
+            for idx, sorting_order in enumerate(
+                sortlist_sorting_order,
+                start=1,
+            ):
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
 
         return self.client.get('/getLoadBalancerInstanceList', params=params)
@@ -226,19 +246,23 @@ class LoadbalancerAPI(BaseNCPAPI):
         if target_group_no_list is not None:
             for idx, target_group_no in enumerate(target_group_no_list, start=1):
                 params[f'targetGroupNoList.{idx}'] = target_group_no
+        if page_no is not None and page_size is None:
+            raise ValueError("page_no를 지정할 때는 page_size도 지정해야 합니다.")
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
-        if sortlist_sorted_by and sortlist_sorting_order:
+        if sortlist_sorted_by is not None and sortlist_sorting_order is not None:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
-
-            for idx, (sorted_by, sorting_order) in enumerate(
-                zip(sortlist_sorted_by, sortlist_sorting_order),
-                start=1
-            ):
+        if sortlist_sorted_by is not None:
+            for idx, sorted_by in enumerate(sortlist_sorted_by, start=1):
                 params[f"sortList.{idx}.sortedBy"] = sorted_by
+        if sortlist_sorting_order is not None:
+            for idx, sorting_order in enumerate(
+                sortlist_sorting_order,
+                start=1,
+            ):
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
         
         return self.client.get('/getTargetGroupList', params=params)

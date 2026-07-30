@@ -44,7 +44,7 @@ class CloudLogAnalyticsAPI(BaseNCPAPI):
 
         if svr_type == 'vm':
             uri = ''
-        elif svr_type == 'cdbmy':
+        elif svr_type in ('cdbmy', 'cdb4my'):
             uri = '/mysql'
         elif svr_type == 'cdb4mongo':
             uri = '/mongodb'
@@ -138,7 +138,7 @@ class CloudLogAnalyticsAPI(BaseNCPAPI):
     def get_cla_log_count_aggregation(
         self,
         region_code : str,
-        type : Optional[str] = None
+        type : str
     ) -> Dict:
         """
         Cloud Log Analytics 서비스에서 수집한 로그 수를 서버 로그 유형별로 조회합니다.
@@ -150,7 +150,9 @@ class CloudLogAnalyticsAPI(BaseNCPAPI):
         Returns:
             Dict: Cloud Log Analytics 서비스에서 수집한 로그 수를 서버 로그 유형별로 조회합니다.
         """
-        params = {}
+        params = {
+            'type': type
+        }
 
         return self.client.get(f'/api/{region_code}-v1/logs/count/aggregation', params=params)
 
@@ -211,7 +213,11 @@ class CloudLogAnalyticsAPI(BaseNCPAPI):
         
 
 
-        return self.client.post(f'/api/{region_code}-v1/logs/search', json_data=json_body)
+        return self.client.post(
+            f'/api/{region_code}-v1/logs/search',
+            json_data=json_body,
+            retry_safe=True,
+        )
     
 
 

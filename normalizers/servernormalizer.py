@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.common_utils import bytes_to_gb, bytes_to_mb
 
@@ -29,7 +29,10 @@ class ServerNormalizer:
         nic_map = {}
 
         for nic in raw_nics:
-            nic_id = nic.get("networkInterfaceNo")
+            if not isinstance(nic, dict):
+                continue
+
+            nic_id = self._normalize_id(nic.get("networkInterfaceNo"))
 
             if nic_id:
                 nic_map[nic_id] = nic
@@ -43,7 +46,10 @@ class ServerNormalizer:
         storage_map = defaultdict(list)
 
         for storage in raw_storages:
-            server_id = storage.get("serverInstanceNo")
+            if not isinstance(storage, dict):
+                continue
+
+            server_id = self._normalize_id(storage.get("serverInstanceNo"))
 
             if server_id:
                 storage_map[server_id].append(storage)
@@ -59,7 +65,11 @@ class ServerNormalizer:
         result = []
 
         for server in raw_servers:
+            if not isinstance(server, dict):
+                continue
+
             server_id = server.get("serverInstanceNo")
+            normalized_server_id = self._normalize_id(server_id)
 
             raw_nics = self._get_server_raw_nics(
                 server=server,
@@ -76,7 +86,7 @@ class ServerNormalizer:
                 nics[0] if nics else {},
             )
 
-            raw_storages = storage_map.get(server_id, [])
+            raw_storages = storage_map.get(normalized_server_id, [])
 
             storages = [
                 self._normalize_storage(storage)
@@ -116,7 +126,6 @@ class ServerNormalizer:
                     "hypervisor_type": hypervisor_type.get("codeName"),
                     "server_image_no": server.get("serverImageNo"),
                     "event_list": server.get("eventList", []),
-
                     # 원본 보존
                     "raw_server": server,
                     "raw_nics": raw_nics,
@@ -133,13 +142,16 @@ class ServerNormalizer:
     ) -> List[Dict[str, Any]]:
         nic_ids = server.get("networkInterfaceNoList", [])
 
+        if not isinstance(nic_ids, (list, tuple, set)):
+            nic_ids = [nic_ids] if nic_ids else []
+
         if not nic_ids and server.get("nicInstanceNo"):
             nic_ids = [server.get("nicInstanceNo")]
 
         result = []
 
         for nic_id in nic_ids:
-            nic = nic_map.get(nic_id)
+            nic = nic_map.get(self._normalize_id(nic_id))
 
             if nic:
                 result.append(nic)
@@ -152,6 +164,9 @@ class ServerNormalizer:
     ) -> Dict[str, Any]:
         primary_ip = nic.get("ip")
         secondary_ips = nic.get("secondaryIpList", [])
+
+        if not isinstance(secondary_ips, list):
+            secondary_ips = []
 
         all_private_ips = []
 
@@ -170,7 +185,14 @@ class ServerNormalizer:
             "secondary_ips": secondary_ips,
             "all_private_ips": all_private_ips,
             "subnet_id": nic.get("subnetNo"),
-            "acg_ids": nic.get("accessControlGroupNoList", []),
+            "acg_ids": (
+                nic.get("accessControlGroupNoList", [])
+                if isinstance(
+                    nic.get("accessControlGroupNoList", []),
+                    list,
+                )
+                else []
+            ),
             "raw": nic,
         }
 
@@ -248,3 +270,10 @@ class ServerNormalizer:
                 data_storages.append(storage)
 
         return os_storages, data_storages
+
+    def _normalize_id(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        return normalized or None

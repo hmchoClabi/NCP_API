@@ -1,10 +1,16 @@
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.common_rest import safe_exception_message
+from utils.response_validation import validate_collection_response
+
 
 class BillingCollector:
+    MAX_PAGES = 10_000
+
     def __init__(self, api_factory: Any):
         self.api_factory = api_factory
         self.platform_api = self.api_factory.get("platform")
+        self.last_errors: List[Dict[str, Any]] = []
 
     def collect_raw(
         self,
@@ -17,6 +23,7 @@ class BillingCollector:
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
     ) -> Dict[str, Any]:
+        self.last_errors = []
 
         common_params = {
             "member_no_list": member_no_list,
@@ -26,38 +33,50 @@ class BillingCollector:
 
         raw: Dict[str, Any] = {}
 
-        raw["demand_cost"] = self.collect_paged(
-            self.platform_api.get_demand_cost_list,
+        raw["demand_cost"] = self._collect_paged_source(
+            source="demand_cost",
+            func=self.platform_api.get_demand_cost_list,
+            expected_keys=("demandCostList",),
             start_month=demand_month,
             end_month=demand_month,
             **common_params,
         )
 
-        raw["product_demand_cost"] = self.collect_paged(
-            self.platform_api.get_product_demand_cost_list,
+        raw["product_demand_cost"] = self._collect_paged_source(
+            source="product_demand_cost",
+            func=self.platform_api.get_product_demand_cost_list,
+            expected_keys=("productDemandCostList",),
+            comparison_required=True,
             start_month=demand_month,
             end_month=demand_month,
             **common_params,
         )
 
-        raw["contract_demand_cost"] = self.collect_paged(
-            self.platform_api.get_contract_demand_cost_list,
+        raw["contract_demand_cost"] = self._collect_paged_source(
+            source="contract_demand_cost",
+            func=self.platform_api.get_contract_demand_cost_list,
+            expected_keys=("contractDemandCostList", "ContractDemandCostList"),
             start_month=demand_month,
             end_month=demand_month,
             region_code=region_code,
             **common_params,
         )
 
-        raw["daily_usage"] = self.collect_paged(
-            self.platform_api.get_contract_usage_list_by_daily,
+        raw["daily_usage"] = self._collect_paged_source(
+            source="daily_usage",
+            func=self.platform_api.get_contract_usage_list_by_daily,
+            expected_keys=("contractUsageListByDaily",),
+            comparison_required=True,
             use_start_date=use_start_date,
             use_end_date=use_end_date,
             region_code=region_code,
             **common_params,
         )
 
-        raw["contract_usage"] = self.collect_paged(
-            self.platform_api.get_contract_usage_list,
+        raw["contract_usage"] = self._collect_paged_source(
+            source="contract_usage",
+            func=self.platform_api.get_contract_usage_list,
+            expected_keys=("contractList",),
             start_month=demand_month,
             end_month=demand_month,
             region_code=region_code,
@@ -66,26 +85,36 @@ class BillingCollector:
 
         price_no_list = self.extract_price_no_list(raw["daily_usage"])
 
-        raw["price_list"] = self.collect_price_list(
-            price_no_list=price_no_list,
-            pay_currency_code=pay_currency_code,
+        raw["price_list"] = self._collect_source(
+            source="price_list",
+            operation=lambda: self.collect_price_list(
+                price_no_list=price_no_list,
+                pay_currency_code=pay_currency_code,
+            ),
+            comparison_required=True,
         )
 
-        raw["product_price_list"] = self.collect_paged(
-            self.platform_api.get_product_price_list,
+        raw["product_price_list"] = self._collect_paged_source(
+            source="product_price_list",
+            func=self.platform_api.get_product_price_list,
+            expected_keys=("productPriceList",),
             region_code=region_code,
             pay_currency_code=pay_currency_code,
         )
 
-        raw["product_demand_cost_by_discount"] = self.collect_paged(
-            self.platform_api.get_product_demand_cost_by_discount_list,
+        raw["product_demand_cost_by_discount"] = self._collect_paged_source(
+            source="product_demand_cost_by_discount",
+            func=self.platform_api.get_product_demand_cost_by_discount_list,
+            expected_keys=("productDemandCostByDiscountList",),
             start_month=demand_month,
             end_month=demand_month,
             **common_params,
         )
 
-        raw["discount_list"] = self.collect_paged(
-            self.platform_api.get_discount_list,
+        raw["discount_list"] = self._collect_paged_source(
+            source="discount_list",
+            func=self.platform_api.get_discount_list,
+            expected_keys=("discountList",),
             start_month=demand_month,
             end_month=demand_month,
             is_valid_discount=False,
@@ -94,21 +123,30 @@ class BillingCollector:
 
         discount_no_list = self.extract_discount_no_list(raw["discount_list"])
 
-        raw["credit_history"] = self.collect_credit_history(
-            demand_month=demand_month,
-            discount_no_list=discount_no_list,
-            **common_params,
+        raw["credit_history"] = self._collect_source(
+            source="credit_history",
+            operation=lambda: self.collect_credit_history(
+                demand_month=demand_month,
+                discount_no_list=discount_no_list,
+                **common_params,
+            ),
         )
 
-        raw["product_discount_history"] = self.collect_product_discount_history(
-            demand_month=demand_month,
-            discount_no_list=discount_no_list,
-            **common_params,
+        raw["product_discount_history"] = self._collect_source(
+            source="product_discount_history",
+            operation=lambda: self.collect_product_discount_history(
+                demand_month=demand_month,
+                discount_no_list=discount_no_list,
+                **common_params,
+            ),
         )
 
-        raw["coin_history"] = self.collect_coin_history(
-            discount_no_list=discount_no_list,
-            **common_params,
+        raw["coin_history"] = self._collect_source(
+            source="coin_history",
+            operation=lambda: self.collect_coin_history(
+                discount_no_list=discount_no_list,
+                **common_params,
+            ),
         )
 
         raw["_meta"] = {
@@ -121,9 +159,71 @@ class BillingCollector:
             "discount_no_count": len(discount_no_list),
             "price_no_list": price_no_list,
             "discount_no_list": discount_no_list,
+            "collection_errors": list(self.last_errors),
         }
 
         return raw
+
+    def _collect_paged_source(
+        self,
+        *,
+        source: str,
+        func: Callable[..., Dict[str, Any]],
+        expected_keys: tuple[str, ...],
+        comparison_required: bool = False,
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        return self._collect_source(
+            source=source,
+            comparison_required=comparison_required,
+            operation=lambda: self._collect_and_validate_pages(
+                source=source,
+                func=func,
+                expected_keys=expected_keys,
+                **kwargs,
+            ),
+        )
+
+    def _collect_and_validate_pages(
+        self,
+        *,
+        source: str,
+        func: Callable[..., Dict[str, Any]],
+        expected_keys: tuple[str, ...],
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        pages = self.collect_paged(func, **kwargs)
+        for response in pages:
+            validate_collection_response(
+                response,
+                expected_keys=expected_keys,
+                api_name=source,
+            )
+        return pages
+
+    def _collect_source(
+        self,
+        *,
+        source: str,
+        operation: Callable[[], List[Dict[str, Any]]],
+        comparison_required: bool = False,
+    ) -> List[Dict[str, Any]]:
+        try:
+            return operation()
+        except Exception as exc:
+            self.last_errors.append(
+                {
+                    "collector": self.__class__.__name__,
+                    "stage": "collection",
+                    "target_type": "billing",
+                    "api": source,
+                    "source": source,
+                    "comparison_required": comparison_required,
+                    "exception_type": type(exc).__name__,
+                    "message": safe_exception_message(exc),
+                }
+            )
+            return []
 
     def collect_paged(
         self,
@@ -131,24 +231,47 @@ class BillingCollector:
         page_size: int = 1000,
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        if page_size <= 0:
+            raise ValueError("page_size는 1 이상이어야 합니다.")
+
         pages: List[Dict[str, Any]] = []
         page_no = 1
 
         while True:
+            if page_no > self.MAX_PAGES:
+                raise RuntimeError(
+                    f"Billing API 페이지 수가 안전 한도({self.MAX_PAGES})를 초과했습니다."
+                )
+
             response = func(
                 page_no=page_no,
                 page_size=page_size,
                 **kwargs,
             )
+            if not isinstance(response, dict):
+                raise TypeError(
+                    "Billing API 페이지 응답은 dict여야 합니다: "
+                    f"page_no={page_no}, type={type(response).__name__}"
+                )
 
             pages.append(response)
 
             total_rows = self.find_first_value(response, "totalRows")
 
-            if not total_rows:
+            if total_rows in (None, ""):
                 break
 
-            if page_no * page_size >= int(total_rows):
+            try:
+                total_rows_int = int(total_rows)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"유효하지 않은 totalRows 값입니다: {total_rows!r}"
+                ) from exc
+
+            if total_rows_int < 0:
+                raise ValueError(f"totalRows는 음수일 수 없습니다: {total_rows_int}")
+
+            if page_no * page_size >= total_rows_int:
                 break
 
             page_no += 1
@@ -166,12 +289,16 @@ class BillingCollector:
         pages: List[Dict[str, Any]] = []
 
         for chunk in self.chunk(price_no_list, 99):
-            pages.append(
-                self.platform_api.get_price_list(
-                    price_no_list=chunk,
-                    pay_currency_code=pay_currency_code,
-                )
+            response = self.platform_api.get_price_list(
+                price_no_list=chunk,
+                pay_currency_code=pay_currency_code,
             )
+            validate_collection_response(
+                response,
+                expected_keys=("priceList",),
+                api_name="price_list",
+            )
+            pages.append(response)
 
         return pages
 
@@ -184,13 +311,19 @@ class BillingCollector:
         if not discount_no_list:
             return []
 
-        return self.collect_paged(
+        pages = self.collect_paged(
             self.platform_api.get_credit_history_list,
             start_month=demand_month,
             end_month=demand_month,
             discount_no_list=discount_no_list,
             **kwargs,
         )
+        self._validate_page_list(
+            pages,
+            expected_keys=("creditHistoryList",),
+            api_name="credit_history",
+        )
+        return pages
 
     def collect_product_discount_history(
         self,
@@ -201,13 +334,19 @@ class BillingCollector:
         if not discount_no_list:
             return []
 
-        return self.collect_paged(
+        pages = self.collect_paged(
             self.platform_api.get_product_discount_history_list,
             start_month=demand_month,
             end_month=demand_month,
             discount_no_list=discount_no_list,
             **kwargs,
         )
+        self._validate_page_list(
+            pages,
+            expected_keys=("productDiscountHistoryList",),
+            api_name="product_discount_history",
+        )
+        return pages
 
     def collect_coin_history(
         self,
@@ -217,12 +356,31 @@ class BillingCollector:
         if not discount_no_list:
             return []
 
-        return [
-            self.platform_api.get_coin_history_list(
-                discount_no_list=discount_no_list,
-                **kwargs,
+        pages = self.collect_paged(
+            self.platform_api.get_coin_history_list,
+            discount_no_list=discount_no_list,
+            **kwargs,
+        )
+        self._validate_page_list(
+            pages,
+            expected_keys=("coinHistoryList",),
+            api_name="coin_history",
+        )
+        return pages
+
+    def _validate_page_list(
+        self,
+        pages: List[Dict[str, Any]],
+        *,
+        expected_keys: tuple[str, ...],
+        api_name: str,
+    ) -> None:
+        for response in pages:
+            validate_collection_response(
+                response,
+                expected_keys=expected_keys,
+                api_name=api_name,
             )
-        ]
 
     def extract_price_no_list(
         self,
@@ -330,5 +488,7 @@ class BillingCollector:
         values: List[str],
         size: int,
     ):
+        if size <= 0:
+            raise ValueError("chunk size는 1 이상이어야 합니다.")
         for idx in range(0, len(values), size):
             yield values[idx:idx + size]

@@ -1,16 +1,43 @@
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class ActivityTracerEventNormalizer:
+    def __init__(self) -> None:
+        self.last_errors: List[Dict[str, Any]] = []
+
     def normalize(
         self,
         raw_events: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        return [
-            self._normalize_event(event)
-            for event in raw_events
-        ]
+        self.last_errors = []
+        result = []
+
+        if not isinstance(raw_events, list):
+            self._record_error(
+                index=None,
+                message="이벤트 목록이 list 형식이 아닙니다.",
+            )
+            return result
+
+        for index, event in enumerate(raw_events):
+            if not isinstance(event, dict):
+                self._record_error(
+                    index=index,
+                    message="이벤트 항목이 object 형식이 아닙니다.",
+                )
+                continue
+
+            try:
+                result.append(self._normalize_event(event))
+            except Exception as exc:
+                self._record_error(
+                    index=index,
+                    message="이벤트 항목 정규화에 실패했습니다.",
+                    exc=exc,
+                )
+
+        return result
 
     def group_events(
         self,
@@ -20,6 +47,9 @@ class ActivityTracerEventNormalizer:
         result: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
         for event in events:
+            if not isinstance(event, dict):
+                continue
+
             group_key = self._get_group_key(
                 event=event,
                 group_by=group_by,
@@ -71,6 +101,9 @@ class ActivityTracerEventNormalizer:
     ) -> Dict[str, Any]:
         product_data = event.get("productData") or {}
 
+        if not isinstance(product_data, dict):
+            product_data = {}
+
         return {
             "event_id": event.get("historyId"),
             "nrn": event.get("nrn"),
@@ -108,3 +141,23 @@ class ActivityTracerEventNormalizer:
             # 원본 보존
             "raw": event,
         }
+
+    def _record_error(
+        self,
+        index: Optional[int],
+        message: str,
+        exc: Optional[Exception] = None,
+    ) -> None:
+        error: Dict[str, Any] = {
+            "normalizer": self.__class__.__name__,
+            "stage": "normalize_event",
+            "message": message,
+        }
+
+        if index is not None:
+            error["item_index"] = index
+
+        if exc is not None:
+            error["exception_type"] = type(exc).__name__
+
+        self.last_errors.append(error)

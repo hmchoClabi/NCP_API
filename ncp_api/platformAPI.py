@@ -10,6 +10,19 @@ from ncp_api.base import BaseNCPAPI
 class PlatformAPI(BaseNCPAPI):
 
     ENDPOINT_KEY = "platform"
+
+    @staticmethod
+    def _add_numbered_params(
+        params: Dict,
+        name: str,
+        values: Optional[List[str]],
+    ) -> None:
+        """NCP의 ``parameter.N`` 목록 형식으로 쿼리를 구성합니다."""
+        if values is None:
+            return
+        for idx, value in enumerate(values, start=1):
+            params[f"{name}.{idx}"] = value
+
     """
     ================================================================
     LIST PRICE APIs
@@ -347,7 +360,7 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
+            params['isPartner'] = str(is_parent).lower()
         if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if contract_no is not None:
@@ -411,8 +424,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if contract_type_code:
             params['contractTypeCode'] = contract_type_code
@@ -493,8 +506,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if contract_no:
             params['contractNo'] = contract_no
@@ -566,8 +579,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if contract_no:
             params['contractNo'] = contract_no
@@ -716,8 +729,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
@@ -784,8 +797,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if product_demand_type_code:
             params['productDemandTypeCode'] = product_demand_type_code
@@ -839,11 +852,13 @@ class PlatformAPI(BaseNCPAPI):
 
     def get_coin_history_list(
         self,
-        discount_no_list: List[str],
+        discount_no_list: Optional[List[str]] = None,
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = 'json',
+        page_no: Optional[int] = None,
+        page_size: Optional[int] = None,
     ) -> Dict:
         """
         계정에 부여된 코인의 현황과 사용 이력을 조회합니다.
@@ -873,14 +888,17 @@ class PlatformAPI(BaseNCPAPI):
 
         """
         params = {}
-        for idx, discount_no in enumerate(discount_no_list, start=1):
-            params[f'discountNoList.{idx}'] = discount_no
+        self._add_numbered_params(params, 'discountNoList', discount_no_list)
+        if page_no is not None:
+            params['pageNo'] = page_no
+        if page_size is not None:
+            params['pageSize'] = page_size
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")  
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
+            params['isPartner'] = str(is_parent).lower()
         if member_no_list:
             for idx, member_no in enumerate(member_no_list, start=1):
                 params[f'memberNoList.{idx}'] = member_no
@@ -891,9 +909,9 @@ class PlatformAPI(BaseNCPAPI):
     
     def get_credit_history_list(
         self,
-        start_month: str,
-        end_month: str,
-        discount_no_list: List[str],
+        start_month: Optional[str] = None,
+        end_month: Optional[str] = None,
+        discount_no_list: Optional[List[str]] = None,
         page_no: Optional[int] = None,
         page_size: Optional[int] = None,
         is_organization: Optional[bool] = None,
@@ -928,11 +946,11 @@ class PlatformAPI(BaseNCPAPI):
                     usedCredit	Double	Required	사용 크레딧
                     remainingCredit	Double	Required	남은 크레딧
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-         
-        }
+        params = {}
+        if start_month is not None:
+            params['startMonth'] = start_month
+        if end_month is not None:
+            params['endMonth'] = end_month
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -945,8 +963,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType
@@ -955,8 +973,8 @@ class PlatformAPI(BaseNCPAPI):
 
     def get_discount_list(
         self,
-        start_month: str,
-        end_month: str,
+        start_month: Optional[str] = None,
+        end_month: Optional[str] = None,
         page_no: Optional[int] = None,
         page_size: Optional[int] = None,
         is_organization: Optional[bool] = None,
@@ -995,18 +1013,19 @@ class PlatformAPI(BaseNCPAPI):
                 validityEndMonth	String	Required	적용 종료 월
                 payCurrency	CommonCode	Required	결제 통화
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-        }
+        params = {}
+        if start_month is not None:
+            params['startMonth'] = start_month
+        if end_month is not None:
+            params['endMonth'] = end_month
 
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if discount_type_code:
             params['discountTypeCode'] = discount_type_code
@@ -1101,8 +1120,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if product_demand_type_code_list:
             for idx, product_demand_type_code in enumerate(product_demand_type_code_list, start=1):
@@ -1161,8 +1180,8 @@ class PlatformAPI(BaseNCPAPI):
         if is_organization is not None:
             params['isOrganization'] = str(is_organization).lower()
         if is_parent is not None:
-            params['isParent'] = str(is_parent).lower()
-        if member_no_list:
+            params['isPartner'] = str(is_parent).lower()
+        if member_no_list is not None:
             params['memberNoList'] = member_no_list
         if start_month:
             params['startMonth'] = start_month

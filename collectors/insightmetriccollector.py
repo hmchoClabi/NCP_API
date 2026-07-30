@@ -3,8 +3,11 @@ import pprint
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
+from zoneinfo import ZoneInfo
 
 from normalizers.insightmetricnormalizer import InsightMetricNormalizer
+from utils.common_rest import safe_exception_message
+from utils.response_validation import validate_collection_response
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,7 @@ class InsightMetricCollector:
         "interval": "Min5",
         "dimensions": {"type": "fs"},
     }
+    KST = ZoneInfo("Asia/Seoul")
 
     def __init__(self, api_factory: Any, debug: bool = False):
         self.api_factory = api_factory
@@ -51,6 +55,9 @@ class InsightMetricCollector:
 
         self._cw_key_map: Optional[Dict[str, str]] = None
         self._filesystem_mount_candidates: Optional[Set[str]] = None
+        self._filesystem_mount_candidates_by_instance: Dict[str, Set[str]] = {}
+        self._supports_mount_dimension_filter: Optional[bool] = None
+        self.last_errors: List[Dict[str, Any]] = []
 
     def collect(
         self,
@@ -59,20 +66,26 @@ class InsightMetricCollector:
         end_time: int,
     ) -> List[Dict[str, Any]]:
         logger.info("인사이트 metric 데이터 수집을 시작합니다.")
+        self.last_errors = []
+        eligible_servers = self._filter_servers_for_period(
+            servers=servers,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
         try:
-            if not servers:
+            if not eligible_servers:
                 logger.warning("서버 목록이 없어 인사이트 metric 수집을 건너뜁니다.")
                 return []
 
-            metric_queries = self._build_metric_queries(servers)
+            metric_queries = self._build_metric_queries(eligible_servers)
 
             if not metric_queries:
                 logger.warning("조회할 Cloud Insight metric 정보가 없습니다.")
-                return self.normalizer.build_empty_reports(servers)
+                return self.normalizer.build_empty_reports(eligible_servers)
 
             self._debug_insight_request(
-                servers=servers,
+                servers=eligible_servers,
                 start_time=start_time,
                 end_time=end_time,
                 metric_queries=metric_queries,
@@ -86,15 +99,23 @@ class InsightMetricCollector:
 
             result = self.normalizer.build_report_metrics(
                 raw_metrics=raw_metrics,
-                servers=servers,
+                servers=eligible_servers,
             )
 
             logger.info("인사이트 metric 데이터 수집이 완료되었습니다.")
             return result
 
-        except Exception:
-            logger.exception("인사이트 metric 데이터 수집 중 오류가 발생했습니다.")
-            return []
+        except Exception as exc:
+            logger.error(
+                "인사이트 metric 데이터 수집 중 오류가 발생했습니다: %s",
+                safe_exception_message(exc),
+            )
+            self._record_error(
+                stage="collect",
+                api="cloud_insight",
+                exc=exc,
+            )
+            return self.normalizer.build_empty_reports(eligible_servers)
 
     def _build_metric_queries(
         self,
@@ -104,12 +125,18 @@ class InsightMetricCollector:
 
         if not server_cw_key:
             logger.error("%s cw_key를 찾을 수 없습니다.", self.SERVER_PROD_NAME)
+            self._record_error(
+                stage="schema_lookup",
+                api="get_system_schema_key_list",
+                product_key=None,
+                message=f"{self.SERVER_PROD_NAME} cw_key를 찾을 수 없습니다.",
+            )
             return []
 
         metric_queries = []
 
         for server in servers:
-            instance_no = server.get("server_id")
+            instance_no = self._normalize_id(server.get("server_id"))
 
             if not instance_no:
                 logger.warning("server_id가 없는 서버는 제외됩니다: %s", server)
@@ -162,7 +189,21 @@ class InsightMetricCollector:
         prod_key: str,
         instance_no: str,
     ) -> List[Dict[str, Any]]:
-        mount_points = self._get_filesystem_mount_candidates(prod_key)
+        try:
+            mount_points = self._get_filesystem_mount_candidates(
+                prod_key,
+                instance_no=instance_no,
+            )
+        except Exception as exc:
+            self._record_error(
+                stage="filesystem_discovery",
+                api="get_search_metric_list",
+                exc=exc,
+                target_id=instance_no,
+                product_key=prod_key,
+                metric=self.FILESYSTEM_METRIC["metric"],
+            )
+            return []
 
         if not mount_points:
             logger.warning("filesystem mnt_nm 후보가 없어 fs_usert 조회를 건너뜁니다.")
@@ -221,11 +262,63 @@ class InsightMetricCollector:
 
         for stat_name, payloads in queries_by_stat.items():
             for chunk in self._chunk_list(payloads, self.MAX_QUERY_SIZE):
-                response = insight_api.get_query_data_multiple(
-                    time_start=start_time,
-                    time_end=end_time,
-                    metric_info_list=chunk,
-                )
+                try:
+                    response = insight_api.get_query_data_multiple(
+                        time_start=start_time,
+                        time_end=end_time,
+                        metric_info_list=chunk,
+                    )
+                except Exception as exc:
+                    target_ids = sorted(
+                        {
+                            str(payload.get("dimensions", {}).get("instanceNo"))
+                            for payload in chunk
+                            if payload.get("dimensions", {}).get("instanceNo")
+                            is not None
+                        }
+                    )
+                    metric_names = sorted(
+                        {
+                            str(payload.get("metric"))
+                            for payload in chunk
+                            if payload.get("metric") is not None
+                        }
+                    )
+                    self._record_error(
+                        stage="query",
+                        api="get_query_data_multiple",
+                        exc=exc,
+                        target_id=",".join(target_ids) or None,
+                        product_key=(
+                            str(chunk[0].get("prodKey"))
+                            if chunk and chunk[0].get("prodKey") is not None
+                            else None
+                        ),
+                        metric=",".join(metric_names) or None,
+                        stat_name=stat_name,
+                    )
+                    continue
+
+                try:
+                    validate_collection_response(
+                        response,
+                        expected_keys=("metrics", "items"),
+                        allow_list=True,
+                        api_name="get_query_data_multiple",
+                    )
+                except Exception as exc:
+                    self._record_error(
+                        stage="response",
+                        api="get_query_data_multiple",
+                        product_key=(
+                            str(chunk[0].get("prodKey"))
+                            if chunk and chunk[0].get("prodKey") is not None
+                            else None
+                        ),
+                        stat_name=stat_name,
+                        exc=exc,
+                    )
+                    continue
 
                 self.normalizer.merge_metric_response(
                     raw_metrics=raw_metrics,
@@ -238,19 +331,85 @@ class InsightMetricCollector:
     def _get_filesystem_mount_candidates(
         self,
         prod_key: str,
+        instance_no: Optional[str] = None,
     ) -> Set[str]:
-        if self._filesystem_mount_candidates is not None:
+        normalized_instance_no = self._normalize_id(instance_no)
+
+        if (
+            normalized_instance_no
+            and normalized_instance_no
+            in self._filesystem_mount_candidates_by_instance
+        ):
+            return self._filesystem_mount_candidates_by_instance[
+                normalized_instance_no
+            ]
+
+        if (
+            not normalized_instance_no
+            and self._filesystem_mount_candidates is not None
+        ):
             return self._filesystem_mount_candidates
 
         insight_api = self.api_factory.get("cloud_insight")
 
-        response = self._search_metric_list(
-            insight_api=insight_api,
-            prod_key=prod_key,
-        )
+        response = None
+
+        if normalized_instance_no and self._supports_mount_dimension_filter is not False:
+            try:
+                response = self._search_metric_list(
+                    insight_api=insight_api,
+                    prod_key=prod_key,
+                    instance_no=normalized_instance_no,
+                )
+                self._supports_mount_dimension_filter = True
+            except TypeError:
+                # 오래된 래퍼나 테스트 대역이 dimension 필터를 받지 않는
+                # 경우에는 기존 전역 조회 계약으로 안전하게 되돌아간다.
+                self._supports_mount_dimension_filter = False
+
+        if response is None:
+            if self._filesystem_mount_candidates is not None:
+                return self._filesystem_mount_candidates
+
+            response = self._search_metric_list(
+                insight_api=insight_api,
+                prod_key=prod_key,
+                instance_no=None,
+            )
 
         metric_items = self._extract_metric_items(response)
-        mount_points = set()
+        mount_points = self._extract_mount_points(
+            metric_items=metric_items,
+            instance_no=(
+                normalized_instance_no
+                if self._supports_mount_dimension_filter
+                else None
+            ),
+        )
+
+        if normalized_instance_no and self._supports_mount_dimension_filter:
+            self._filesystem_mount_candidates_by_instance[
+                normalized_instance_no
+            ] = mount_points
+        else:
+            self._filesystem_mount_candidates = mount_points
+
+        logger.info(
+            "filesystem mnt_nm 후보 %s개를 캐싱했습니다"
+            " (instanceNo=%s): %s",
+            len(mount_points),
+            normalized_instance_no or "all",
+            sorted(mount_points),
+        )
+
+        return mount_points
+
+    def _extract_mount_points(
+        self,
+        metric_items: List[Dict[str, Any]],
+        instance_no: Optional[str],
+    ) -> Set[str]:
+        mount_points: Set[str] = set()
 
         for item in metric_items:
             metric_name = (
@@ -262,7 +421,18 @@ class InsightMetricCollector:
             if metric_name != self.FILESYSTEM_METRIC["metric"]:
                 continue
 
-            for dimension in item.get("dimensions") or []:
+            dimensions = item.get("dimensions") or []
+
+            if isinstance(dimensions, dict):
+                dimensions = [
+                    {"dim": name, "val": value}
+                    for name, value in dimensions.items()
+                ]
+
+            item_instance_ids = set()
+            item_mount_points = set()
+
+            for dimension in dimensions:
                 if not isinstance(dimension, dict):
                     continue
 
@@ -272,35 +442,55 @@ class InsightMetricCollector:
                     or dimension.get("dimension")
                 )
 
-                dim_value = (
-                    dimension.get("val")
-                    or dimension.get("value")
-                    or dimension.get("dimensionValue")
-                )
+                dim_value = dimension.get("val")
+
+                if dim_value is None:
+                    dim_value = dimension.get("value")
+
+                if dim_value is None:
+                    dim_value = dimension.get("dimensionValue")
 
                 if dim_name == "mnt_nm" and dim_value:
-                    mount_points.add(str(dim_value))
+                    item_mount_points.add(str(dim_value))
 
-        self._filesystem_mount_candidates = mount_points
+                if dim_name in {"instanceNo", "serverInstanceNo"}:
+                    normalized_value = self._normalize_id(dim_value)
 
-        logger.info(
-            "filesystem mnt_nm 후보 %s개를 캐싱했습니다: %s",
-            len(mount_points),
-            sorted(mount_points),
-        )
+                    if normalized_value:
+                        item_instance_ids.add(normalized_value)
 
-        return self._filesystem_mount_candidates
+            if (
+                instance_no
+                and item_instance_ids
+                and instance_no not in item_instance_ids
+            ):
+                continue
+
+            mount_points.update(item_mount_points)
+
+        return mount_points
 
     def _search_metric_list(
         self,
         insight_api: Any,
         prod_key: str,
+        instance_no: Optional[str] = None,
     ) -> Any:
+        kwargs: Dict[str, Any] = {"prod_key": prod_key}
+
+        if instance_no:
+            kwargs["dimensions_selected_list"] = [
+                {
+                    "name": "instanceNo",
+                    "values": [instance_no],
+                }
+            ]
+
         if hasattr(insight_api, "get_search_metric_list"):
-            return insight_api.get_search_metric_list(prod_key=prod_key)
+            return insight_api.get_search_metric_list(**kwargs)
 
         if hasattr(insight_api, "search_metric_list"):
-            return insight_api.search_metric_list(prod_key=prod_key)
+            return insight_api.search_metric_list(**kwargs)
 
         raise AttributeError(
             "CloudInsightAPI에 get_search_metric_list(prod_key) 메서드가 필요합니다."
@@ -310,6 +500,12 @@ class InsightMetricCollector:
         self,
         response: Any,
     ) -> List[Dict[str, Any]]:
+        validate_collection_response(
+            response,
+            expected_keys=("metrics", "metricList", "items"),
+            allow_list=True,
+            api_name="get_search_metric_list",
+        )
         if isinstance(response, list):
             return [item for item in response if isinstance(item, dict)]
 
@@ -350,6 +546,16 @@ class InsightMetricCollector:
 
         insight_api = self.api_factory.get("cloud_insight")
         response = insight_api.get_system_schema_key_list()
+        validate_collection_response(
+            response,
+            expected_keys=(
+                "items",
+                "schemaList",
+                "systemSchemaList",
+            ),
+            allow_list=True,
+            api_name="get_system_schema_key_list",
+        )
 
         if isinstance(response, list):
             schema_items = response
@@ -364,13 +570,32 @@ class InsightMetricCollector:
         else:
             schema_items = []
 
-        self._cw_key_map = {
-            item.get("prodName"): item.get("cw_key")
-            for item in schema_items
-            if isinstance(item, dict)
-            and item.get("prodName")
-            and item.get("cw_key")
-        }
+        if isinstance(schema_items, dict):
+            schema_items = (
+                schema_items.get("items")
+                or schema_items.get("schemaList")
+                or schema_items.get("systemSchemaList")
+                or []
+            )
+
+        if not isinstance(schema_items, list):
+            schema_items = []
+
+        self._cw_key_map = {}
+
+        for item in schema_items:
+            if not isinstance(item, dict):
+                continue
+
+            prod_name = item.get("prodName") or item.get("productName")
+            cw_key = (
+                item.get("cw_key")
+                or item.get("cwKey")
+                or item.get("prodKey")
+            )
+
+            if prod_name and cw_key:
+                self._cw_key_map[str(prod_name)] = str(cw_key)
 
         logger.info(
             "Cloud Insight cw_key %s개를 캐싱했습니다.",
@@ -384,8 +609,189 @@ class InsightMetricCollector:
         items: List[Any],
         size: int,
     ) -> Iterable[List[Any]]:
+        if size <= 0:
+            raise ValueError("chunk size는 1 이상이어야 합니다.")
+
         for i in range(0, len(items), size):
             yield items[i:i + size]
+
+    def _filter_servers_for_period(
+        self,
+        servers: List[Dict[str, Any]],
+        start_time: int,
+        end_time: int,
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(servers, list):
+            self._record_error(
+                stage="period_filter",
+                api="local",
+                message="서버 목록이 list 형식이 아닙니다.",
+            )
+            return []
+
+        result = []
+
+        for index, server in enumerate(servers):
+            if not isinstance(server, dict):
+                self._record_error(
+                    stage="period_filter",
+                    api="local",
+                    message=f"서버 항목 {index}가 object 형식이 아닙니다.",
+                )
+                continue
+
+            create_value = server.get("create_date")
+
+            if create_value is None:
+                raw_server = server.get("raw_server")
+
+                if isinstance(raw_server, dict):
+                    create_value = raw_server.get("createDate")
+
+            create_time = self._to_timestamp_ms(create_value)
+
+            if create_value is not None and create_time is None:
+                self._record_error(
+                    stage="period_filter",
+                    api="local",
+                    target_id=self._normalize_id(server.get("server_id")),
+                    message=(
+                        "서버 생성일을 해석하지 못해 기간 필터 없이 "
+                        f"포함했습니다: {create_value}"
+                    ),
+                    severity="warning",
+                )
+
+            if create_time is not None and create_time > end_time:
+                self._record_error(
+                    stage="period_filter",
+                    api="local",
+                    target_id=self._normalize_id(server.get("server_id")),
+                    message=(
+                        "조회 종료일 이후 생성된 현재 서버를 "
+                        "과거 메트릭 조회에서 제외했습니다."
+                    ),
+                    severity="warning",
+                )
+                continue
+
+            if create_time is not None and create_time > start_time:
+                self._record_error(
+                    stage="period_filter",
+                    api="local",
+                    target_id=self._normalize_id(server.get("server_id")),
+                    message=(
+                        "서버가 조회 시작일 이후 생성되어 해당 서버의 "
+                        "메트릭은 생성 시점 이후의 부분 기간만 포함합니다."
+                    ),
+                    severity="warning",
+                )
+
+            result.append(server)
+
+        return result
+
+    def _to_timestamp_ms(self, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            return int(numeric if abs(numeric) >= 10**11 else numeric * 1000)
+
+        parsed: Optional[datetime] = None
+
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            normalized = value.strip()
+
+            if not normalized:
+                return None
+
+            try:
+                numeric = float(normalized)
+                return int(
+                    numeric if abs(numeric) >= 10**11 else numeric * 1000
+                )
+            except ValueError:
+                pass
+
+            try:
+                parsed = datetime.fromisoformat(
+                    normalized.replace("Z", "+00:00")
+                )
+            except ValueError:
+                for date_format in (
+                    "%b %d, %Y, %I:%M:%S %p",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y/%m/%d %H:%M:%S",
+                ):
+                    try:
+                        parsed = datetime.strptime(normalized, date_format)
+                        break
+                    except ValueError:
+                        continue
+
+        if parsed is None:
+            return None
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=self.KST)
+
+        return int(parsed.timestamp() * 1000)
+
+    def _normalize_id(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        return normalized or None
+
+    def _record_error(
+        self,
+        stage: str,
+        api: str,
+        exc: Optional[Exception] = None,
+        target_id: Optional[str] = None,
+        product_key: Optional[str] = None,
+        metric: Optional[str] = None,
+        stat_name: Optional[str] = None,
+        message: Optional[str] = None,
+        severity: str = "error",
+    ) -> None:
+        error: Dict[str, Any] = {
+            "collector": self.__class__.__name__,
+            "stage": stage,
+            "target_type": "server",
+            "api": api,
+            "severity": severity,
+            "message": (
+                message
+                or (
+                    safe_exception_message(exc)
+                    if exc
+                    else "알 수 없는 오류"
+                )
+            ),
+        }
+
+        if target_id:
+            error["target_id"] = target_id
+
+        if product_key:
+            error["product_key"] = product_key
+
+        if metric:
+            error["metric"] = metric
+
+        if stat_name:
+            error["stat_name"] = stat_name
+
+        if exc is not None:
+            error["exception_type"] = type(exc).__name__
+
+        self.last_errors.append(error)
 
     def _debug_insight_request(
         self,

@@ -7,21 +7,31 @@ from collectors import (
 )
 from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
+from utils.common_rest import safe_exception_message
 from utils.data_utils import get_unix_time_stamp
 
 import json
+import calendar
+import os
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 
 class ReportRunner:
+    KST = ZoneInfo("Asia/Seoul")
 
-    def __init__(self):
+    def __init__(self, output_dir: Optional[str] = None):
         self.api_factory = APIFactory()
+        self.output_dir = str(
+            output_dir
+            or os.getenv("REPORT_OUTPUT_DIR")
+            or "./output/report"
+        )
 
     def get_month_range(self) -> Dict[str, Any]:
-        today = date.today()
+        today = self._today_kst()
 
         first_day_this_month = today.replace(day=1)
         last_day_prev_month = first_day_this_month - timedelta(days=1)
@@ -85,6 +95,14 @@ class ReportRunner:
     ) -> Dict[str, Any]:
         start_dt = f"{start:%Y-%m-%d} 00:00:00"
         end_dt = f"{end:%Y-%m-%d} 23:59:59"
+        is_full_month = (
+            start.year == end.year
+            and start.month == end.month
+            and start.day == 1
+            and end.day == calendar.monthrange(end.year, end.month)[1]
+        )
+        first_day_current_month = self._today_kst().replace(day=1)
+        is_closed_month = is_full_month and end < first_day_current_month
 
         return {
             "period_type": period_type,
@@ -96,7 +114,12 @@ class ReportRunner:
             "use_end_date": f"{end:%Y%m%d}",
             "billing_month": f"{start:%Y%m}",
             "file_suffix": f"{start:%Y%m%d}_{end:%Y%m%d}",
+            "is_full_month": is_full_month,
+            "is_closed_month": is_closed_month,
         }
+
+    def _today_kst(self) -> date:
+        return datetime.now(self.KST).date()
 
     def run(
         self,
@@ -116,6 +139,7 @@ class ReportRunner:
 
         server_collector = ServerCollector(api_factory=self.api_factory)
         server_data = server_collector.collect()
+        server_errors = list(getattr(server_collector, "last_errors", []))
 
         insight_data, insight_metric_errors = self.collect_insight_metrics(
             server_data=server_data,
@@ -131,62 +155,139 @@ class ReportRunner:
             start_time=period["start_time"],
             end_time=period["end_time"],
         )
-
-        billing_collector = BillingCollector(api_factory=self.api_factory)
-
-        billing_raw = billing_collector.collect_raw(
-            use_start_date=period["use_start_date"],
-            use_end_date=period["use_end_date"],
-            demand_month=period["billing_month"],
-            region_code="KR",
-            pay_currency_code="KRW",
+        activity_errors = list(
+            getattr(activity_collector, "last_errors", [])
         )
 
-        self.save_json_file(
-            data=billing_raw,
-            output_dir="./output/report",
-            filename=f"billing_raw_{period['file_suffix']}.json",
+        all_insight_errors = self._merge_error_lists(
+            insight_metric_errors,
+            insight_event_errors,
+        )
+        all_collection_errors = self._merge_error_lists(
+            server_errors,
+            all_insight_errors,
+            activity_errors,
         )
 
-        billing_result = BillingNormalizer().normalize(
-            raw_data=billing_raw,
-            current_month=period["billing_month"],
-            billing_month=period["billing_month"],
-            use_end_date=period["use_end_date"],
+        # Billing이 실패하더라도 먼저 완료된 수집 결과는 보존한다.
+        self.print_server_metric_summary(
+            insight_data,
+            file_suffix=period["file_suffix"],
         )
-
-        self.save_json_file(
-            data=billing_result,
-            output_dir="./output/report",
-            filename=f"billing_result_{period['file_suffix']}.json",
-        )
-
-        all_insight_errors = []
-        all_insight_errors.extend(insight_metric_errors)
-        all_insight_errors.extend(insight_event_errors)
-
-        self.print_server_metric_summary(insight_data)
         self.print_insight_event_summary(insight_events)
-        self.print_insight_error_summary(all_insight_errors)
-        self.print_network_usage_summary(billing_result.get("network_usage_summary", []))
-        self.print_billing_summary(billing_result)
-        self.print_usage_summary(billing_result.get("usage_summary", []))
-
+        self.print_insight_error_summary(
+            all_insight_errors,
+            file_suffix=period["file_suffix"],
+        )
         self.save_json_file(
             data={
                 "events": insight_events,
                 "grouped_events": insight_grouped_events,
                 "errors": insight_event_errors,
             },
-            output_dir="./output/report",
+            output_dir=self.output_dir,
             filename=f"cloud_insight_events_{period['file_suffix']}.json",
         )
 
         self.save_json_file(
             data=activity_data,
-            output_dir="./output/report",
+            output_dir=self.output_dir,
             filename=f"activity_tracer_events_{period['file_suffix']}.json",
         )
+
+        self.save_json_file(
+            data=activity_errors,
+            output_dir=self.output_dir,
+            filename=f"activity_tracer_errors_{period['file_suffix']}.json",
+        )
+
+        self.save_json_file(
+            data=all_collection_errors,
+            output_dir=self.output_dir,
+            filename=f"collection_errors_{period['file_suffix']}.json",
+        )
+
+        billing_collector = None
+        billing_stage = "collection"
+
+        try:
+            billing_collector = BillingCollector(
+                api_factory=self.api_factory
+            )
+            billing_raw = billing_collector.collect_raw(
+                use_start_date=period["use_start_date"],
+                use_end_date=period["use_end_date"],
+                demand_month=period["billing_month"],
+                region_code="KR",
+                pay_currency_code="KRW",
+            )
+            billing_errors = list(
+                getattr(billing_collector, "last_errors", [])
+            )
+            all_collection_errors = self._merge_error_lists(
+                all_collection_errors,
+                billing_errors,
+            )
+            self.save_json_file(
+                data=all_collection_errors,
+                output_dir=self.output_dir,
+                filename=(
+                    f"collection_errors_{period['file_suffix']}.json"
+                ),
+            )
+            self.save_json_file(
+                data=billing_raw,
+                output_dir=self.output_dir,
+                filename=f"billing_raw_{period['file_suffix']}.json",
+            )
+
+            billing_stage = "normalization"
+            billing_result = BillingNormalizer().normalize(
+                raw_data=billing_raw,
+                current_month=period["billing_month"],
+                billing_month=period["billing_month"],
+                use_end_date=period["use_end_date"],
+                comparison_enabled=bool(
+                    period.get("is_closed_month", False)
+                ),
+            )
+            self.save_json_file(
+                data=billing_result,
+                output_dir=self.output_dir,
+                filename=f"billing_result_{period['file_suffix']}.json",
+            )
+        except Exception as exc:
+            billing_failure = {
+                "collector": (
+                    "BillingCollector"
+                    if billing_stage == "collection"
+                    else "BillingNormalizer"
+                ),
+                "stage": billing_stage,
+                "target_type": "billing",
+                "api": "platform",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+            all_collection_errors = self._merge_error_lists(
+                all_collection_errors,
+                getattr(billing_collector, "last_errors", []),
+                [billing_failure],
+            )
+            self.save_json_file(
+                data=all_collection_errors,
+                output_dir=self.output_dir,
+                filename=(
+                    f"collection_errors_{period['file_suffix']}.json"
+                ),
+            )
+            raise
+
+        self.print_network_usage_summary(
+            billing_result.get("network_usage_summary", [])
+        )
+        self.print_billing_summary(billing_result)
+        self.print_usage_summary(billing_result.get("usage_summary", []))
 
     def print_period_summary(self, period: Dict[str, Any]) -> None:
         print("\n" + "=" * 80)
@@ -214,10 +315,15 @@ class ReportRunner:
             insight_data = insight_result.get("metrics", [])
             insight_errors = insight_result.get("errors", [])
         else:
-            insight_data = insight_result
+            insight_data = insight_result if isinstance(insight_result, list) else []
             insight_errors = []
 
-        return insight_data, insight_errors
+        collector_errors = getattr(insight_collector, "last_errors", [])
+
+        return insight_data, self._merge_error_lists(
+            insight_errors,
+            collector_errors,
+        )
 
     def collect_insight_events(
         self,
@@ -234,15 +340,176 @@ class ReportRunner:
             end_time=period["end_time"],
         )
 
-        insight_events = insight_event_result.get("events", [])
-        insight_grouped_events = insight_event_result.get("grouped_events", {})
-        insight_event_errors = insight_event_result.get("errors", [])
+        insight_events: List[Dict[str, Any]] = []
+        insight_grouped_events: Dict[str, List[Dict[str, Any]]] = {}
+        insight_event_errors: List[Dict[str, Any]] = []
+
+        if isinstance(insight_event_result, list):
+            insight_events = self._dict_records(insight_event_result)
+        elif isinstance(insight_event_result, dict):
+            is_envelope = (
+                "grouped_events" in insight_event_result
+                or isinstance(insight_event_result.get("events"), list)
+            )
+
+            if is_envelope:
+                insight_events = self._dict_records(
+                    insight_event_result.get("events", [])
+                )
+                insight_grouped_events = self._grouped_event_map(
+                    insight_event_result.get("grouped_events", {})
+                )
+                insight_event_errors = self._dict_records(
+                    insight_event_result.get("errors", [])
+                )
+            else:
+                # InsightEventCollector의 기존 공개 계약은 그룹 맵이다.
+                # 이를 그대로 수용하면서 보고서용 평탄 이벤트도 복원한다.
+                insight_grouped_events = self._grouped_event_map(
+                    insight_event_result
+                )
+
+        collector_events = self._dict_records(
+            getattr(insight_event_collector, "last_events", [])
+        )
+
+        if not insight_events:
+            insight_events = (
+                collector_events
+                or self._flatten_grouped_events(insight_grouped_events)
+            )
+
+        insight_events = self._deduplicate_events(insight_events)
+
+        if not insight_grouped_events and insight_events:
+            normalizer = getattr(insight_event_collector, "normalizer", None)
+
+            if normalizer is not None and hasattr(normalizer, "group_events"):
+                insight_grouped_events = normalizer.group_events(insight_events)
+            else:
+                insight_grouped_events = self._fallback_group_events(
+                    insight_events
+                )
+
+        insight_event_errors = self._merge_error_lists(
+            insight_event_errors,
+            getattr(insight_event_collector, "last_errors", []),
+        )
 
         return insight_events, insight_grouped_events, insight_event_errors
+
+    def _dict_records(self, value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+
+        return [item for item in value if isinstance(item, dict)]
+
+    def _grouped_event_map(
+        self,
+        value: Any,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if not isinstance(value, dict):
+            return {}
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+
+        for group_key, group_events in value.items():
+            events = self._dict_records(group_events)
+
+            if isinstance(group_events, list):
+                result[str(group_key)] = events
+
+        return result
+
+    def _flatten_grouped_events(
+        self,
+        grouped_events: Dict[str, List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        events = []
+
+        for group_events in grouped_events.values():
+            events.extend(self._dict_records(group_events))
+
+        return self._deduplicate_events(events)
+
+    def _deduplicate_events(
+        self,
+        events: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        seen = set()
+
+        for event in self._dict_records(events):
+            event_id = (
+                event.get("event_id")
+                or event.get("eventId")
+                or event.get("historyId")
+                or event.get("id")
+            )
+            identity = (
+                f"id:{event_id}"
+                if event_id is not None and str(event_id).strip()
+                else "row:" + json.dumps(
+                    event,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+            )
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+            result.append(event)
+
+        return result
+
+    def _fallback_group_events(
+        self,
+        events: List[Dict[str, Any]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        result: Dict[str, List[Dict[str, Any]]] = {}
+
+        for event in events:
+            group_key = (
+                event.get("resource_id")
+                or event.get("resource_name")
+                or event.get("prod_key")
+                or "unknown"
+            )
+            result.setdefault(str(group_key), []).append(event)
+
+        return result
+
+    def _merge_error_lists(
+        self,
+        *error_lists: Any,
+    ) -> List[Dict[str, Any]]:
+        result = []
+        seen = set()
+
+        for error_list in error_lists:
+            for error in self._dict_records(error_list):
+                identity = json.dumps(
+                    error,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+
+                if identity in seen:
+                    continue
+
+                seen.add(identity)
+                result.append(error)
+
+        return result
 
     def print_server_metric_summary(
         self,
         insight_data: List[Dict[str, Any]],
+        file_suffix: Optional[str] = None,
     ) -> None:
         print()
         print("=" * 80)
@@ -251,11 +518,13 @@ class ReportRunner:
 
         if not insight_data:
             print("서버 메트릭 없음")
-            return
 
         summaries = []
 
-        for item in insight_data:
+        for item in insight_data or []:
+            if not isinstance(item, dict):
+                continue
+
             summary = {
                 key: value
                 for key, value in item.items()
@@ -283,9 +552,19 @@ class ReportRunner:
 
         self.save_json_file(
             data=summaries,
-            output_dir="./output/report",
-            filename="server_metric_summary.json",
+            output_dir=self.output_dir,
+            filename=(
+                f"server_metric_summary_{file_suffix}.json"
+                if file_suffix
+                else "server_metric_summary.json"
+            ),
         )
+        if file_suffix:
+            self.save_json_file(
+                data=summaries,
+                output_dir=self.output_dir,
+                filename="server_metric_summary.json",
+            )
 
     def print_insight_event_summary(
         self,
@@ -353,6 +632,7 @@ class ReportRunner:
     def print_insight_error_summary(
         self,
         insight_errors: List[Dict[str, Any]],
+        file_suffix: Optional[str] = None,
     ) -> None:
         print()
         print("=" * 80)
@@ -361,9 +641,11 @@ class ReportRunner:
 
         if not insight_errors:
             print("Cloud Insight 수집 오류 없음")
-            return
 
-        for error in insight_errors:
+        for error in insight_errors or []:
+            if not isinstance(error, dict):
+                continue
+
             target = (
                 error.get("target_name")
                 or error.get("target_id")
@@ -385,10 +667,20 @@ class ReportRunner:
             )
 
         self.save_json_file(
-            data=insight_errors,
-            output_dir="./output/report",
-            filename="cloud_insight_errors.json",
+            data=self._dict_records(insight_errors),
+            output_dir=self.output_dir,
+            filename=(
+                f"cloud_insight_errors_{file_suffix}.json"
+                if file_suffix
+                else "cloud_insight_errors.json"
+            ),
         )
+        if file_suffix:
+            self.save_json_file(
+                data=self._dict_records(insight_errors),
+                output_dir=self.output_dir,
+                filename="cloud_insight_errors.json",
+            )
 
     def print_network_usage_summary(
         self,

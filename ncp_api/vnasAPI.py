@@ -73,14 +73,18 @@ class VnasAPI(BaseNCPAPI):
             params['isEventConfiguration'] = is_event_configuration
         if is_snapshot_configuration is not None:
             params['isSnapshotConfiguration'] = is_snapshot_configuration
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
             params['pageSize'] = page_size
         if sort_by is not None:
-            params['sortBy'] = sort_by
+            params['sortedBy'] = sort_by
         if sort_order is not None:
-            params['sortOrder'] = sort_order
+            params['sortingOrder'] = sort_order
         if responseFormatType is not None:
             params['responseFormatType'] = responseFormatType  # JSON 형식 명시
         

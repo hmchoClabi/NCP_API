@@ -143,8 +143,12 @@ class VpcAPI(BaseNCPAPI):
             params['usageTypeCode'] = usage_type_code
         if network_acl_no is not None:
             params['networkAclNo'] = network_acl_no
+        if page is not None and page_size is None:
+            raise ValueError(
+                "page를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page is not None:
-            params['page'] = page
+            params['pageNo'] = page
         if page_size is not None:
             params['pageSize'] = page_size
         if subnet_status_code is not None:
@@ -224,6 +228,10 @@ class VpcAPI(BaseNCPAPI):
         if network_acl_no_list is not None:
             for idx, network_acl_no in enumerate(network_acl_no_list, start=1):
                 params[f'networkAclNoList.{idx}'] = network_acl_no
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -516,6 +524,10 @@ class VpcAPI(BaseNCPAPI):
             params['vpcPeeringName'] = vpc_peering_name
         if vpc_peering_instance_status_code is not None:
             params['vpcPeeringInstanceStatusCode'] = vpc_peering_instance_status_code
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -523,7 +535,7 @@ class VpcAPI(BaseNCPAPI):
         if sorted_by is not None:
             params['sortedBy'] = sorted_by
         if sort_order is not None:
-            params['sortOrder'] = sort_order
+            params['sortingOrder'] = sort_order
         return self.client.get('/getVpcPeeringInstanceList', params=params)
         
     def get_vpc_peering_instance_detail(
@@ -600,6 +612,10 @@ class VpcAPI(BaseNCPAPI):
             params['supportedSubnetTypeCode'] = supported_subnet_type_code
         if vpc_no is not None:
             params['vpcNo'] = vpc_no
+        if page_no is not None and page_size is None:
+            raise ValueError(
+                "page_no를 지정할 때는 page_size도 지정해야 합니다."
+            )
         if page_no is not None:
             params['pageNo'] = page_no
         if page_size is not None:
@@ -607,7 +623,7 @@ class VpcAPI(BaseNCPAPI):
         if sorted_by is not None:
             params['sortedBy'] = sorted_by
         if sort_order is not None:
-            params['sortOrder'] = sort_order
+            params['sortingOrder'] = sort_order
         return self.client.get('/getRouteTableList', params=params)
 
     def get_route_table_detail(
@@ -687,4 +703,3 @@ class VpcAPI(BaseNCPAPI):
             params['regionCode'] = region_code
         return self.client.get('/getRouteTableSubnetList', params=params)
 
-   

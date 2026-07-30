@@ -37,9 +37,9 @@ class WebServiceMonitorAPI(BaseNCPAPI):
             scenario_id : str,
             from_time : int,
             to_time : int,
-            type : int,
-            result_status = Optional[str],
-            location_type_codes = Optional[str]
+            type : str,
+            result_status: Optional[str] = None,
+            location_type_codes: Optional[str] = None
   
 
     ) -> Dict:
@@ -96,7 +96,9 @@ class WebServiceMonitorAPI(BaseNCPAPI):
                 
         """    
         
-        params = {}
+        params = {
+            'type': type
+        }
 
         return self.client.get(f'/api/v1/scenarios/{scenario_id}/results/{result_id}', params=params)
     
