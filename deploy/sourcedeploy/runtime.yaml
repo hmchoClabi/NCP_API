@@ -31,7 +31,7 @@ spec:
       serviceAccountName: ncp-report
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
-      
+
       imagePullSecrets:
         - name: ncp-registry
       securityContext:
@@ -216,7 +216,7 @@ spec:
       serviceAccountName: ncp-report
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
-      
+
       imagePullSecrets:
         - name: ncp-registry
       securityContext:
@@ -369,7 +369,7 @@ spec:
       serviceAccountName: ncp-report
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 1800
-      
+
       imagePullSecrets:
         - name: ncp-registry
       securityContext:
@@ -540,7 +540,7 @@ spec:
       serviceAccountName: ncp-report
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 1800
-      
+
       imagePullSecrets:
         - name: ncp-registry
       securityContext:

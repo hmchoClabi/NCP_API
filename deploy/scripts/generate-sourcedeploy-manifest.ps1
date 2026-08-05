@@ -32,6 +32,12 @@ $content = $content.Replace(
     "app.kubernetes.io/managed-by: Helm",
     "app.kubernetes.io/managed-by: SourceDeploy"
 )
+$content = [Text.RegularExpressions.Regex]::Replace(
+    $content,
+    '[ \t]+(?=\r?$)',
+    '',
+    [Text.RegularExpressions.RegexOptions]::Multiline
+)
 if ($content -notmatch '\$\{registry_endpoint\}/ncp-report:latest') {
     throw "SourceDeploy registry placeholder was not rendered."
 }
