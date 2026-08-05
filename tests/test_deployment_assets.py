@@ -111,6 +111,22 @@ def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
     assert "namespace: ncp-report" in manifest
 
 
+def test_pilot_ingress_uses_small_public_alb():
+    pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
+    ingress = (CHART / "templates" / "ingress.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "loadBalancerSize: small" in pilot_values
+    assert "networkType: public" in pilot_values
+    assert 'subnetId: "315758"' in pilot_values
+    assert "alb.ingress.kubernetes.io/load-balancer-size" in ingress
+    assert "alb.ingress.kubernetes.io/healthcheck-path" in ingress
+    assert "cookieSecure: true" in (
+        CHART / "values-production.yaml"
+    ).read_text(encoding="utf-8")
+
+
 def test_secret_preparation_excludes_global_ncp_credentials():
     script = (
         ROOT / "deploy" / "scripts" / "prepare-kubernetes-secrets.ps1"

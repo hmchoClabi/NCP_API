@@ -110,7 +110,7 @@ spec:
                   name: {{ $root.Values.existingSecret }}
                   key: WEB_SECRET_KEY
             - name: WEB_COOKIE_SECURE
-              value: {{ ternary "true" "false" $root.Values.ingress.enabled | quote }}
+              value: {{ ternary "true" "false" $root.Values.web.cookieSecure | quote }}
             {{- end }}
             {{- if eq $component.name "scheduler" }}
             - name: SCHEDULER_POLL_SECONDS

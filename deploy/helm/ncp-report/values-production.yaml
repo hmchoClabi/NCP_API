@@ -18,6 +18,7 @@ database:
 
 web:
   replicas: 2
+  cookieSecure: true
   autoscaling:
     enabled: true
     minReplicas: 2

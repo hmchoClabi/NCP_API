@@ -27,6 +27,7 @@ database:
 
 web:
   replicas: 1
+  cookieSecure: false
   autoscaling:
     enabled: false
     minReplicas: 1
@@ -76,6 +77,11 @@ ingress:
   className: alb
   host: report.example.com
   certificateNo: ""
+  networkType: public
+  loadBalancerSize: small
+  loadBalancerName: ""
+  subnetId: ""
+  healthcheckPath: /health/ready
   annotations: {}
 
 storageClass:

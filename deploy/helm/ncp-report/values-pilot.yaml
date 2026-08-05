@@ -26,9 +26,14 @@ web:
     targetCPUUtilizationPercentage: 70
 
 ingress:
-  enabled: false
-  host: report.example.com
+  enabled: true
+  host: ""
   certificateNo: ""
+  networkType: public
+  loadBalancerSize: small
+  loadBalancerName: architect-report-alb
+  subnetId: "315758"
+  healthcheckPath: /health/ready
 
 storageClass:
   create: true

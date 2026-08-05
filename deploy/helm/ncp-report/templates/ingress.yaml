@@ -3,10 +3,20 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "ncp-report.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ncp-report.labels" . | nindent 4 }}
   annotations:
     alb.ingress.kubernetes.io/listen-ports: {{ ternary "[{\"HTTP\":80},{\"HTTPS\":443}]" "[{\"HTTP\":80}]" (ne .Values.ingress.certificateNo "") | quote }}
+    alb.ingress.kubernetes.io/network-type: {{ .Values.ingress.networkType | quote }}
+    alb.ingress.kubernetes.io/load-balancer-size: {{ .Values.ingress.loadBalancerSize | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath | quote }}
+    {{- with .Values.ingress.loadBalancerName }}
+    alb.ingress.kubernetes.io/load-balancer-name: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.ingress.subnetId }}
+    alb.ingress.kubernetes.io/subnet-id: {{ . | quote }}
+    {{- end }}
     {{- if .Values.ingress.certificateNo }}
     alb.ingress.kubernetes.io/ssl-certificate-no: {{ .Values.ingress.certificateNo | quote }}
     alb.ingress.kubernetes.io/ssl-min-version: TLSV12
@@ -19,8 +29,7 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -29,4 +38,7 @@ spec:
                 name: {{ include "ncp-report.fullname" . }}-web
                 port:
                   number: {{ .Values.service.port }}
+      {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
 {{- end }}
