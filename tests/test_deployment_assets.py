@@ -100,7 +100,10 @@ def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
         ROOT / "deploy" / "sourcedeploy" / "runtime.yaml"
     ).read_text(encoding="utf-8")
 
-    assert manifest.count("kind: Deployment") == 4
+    top_level_deployments = sum(
+        line == "kind: Deployment" for line in manifest.splitlines()
+    )
+    assert top_level_deployments == 4
     assert "kind: HorizontalPodAutoscaler" in manifest
     assert '${registry_endpoint}/ncp-report:latest' in manifest
     assert "kind: Job" not in manifest
