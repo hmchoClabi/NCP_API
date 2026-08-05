@@ -25,13 +25,13 @@ if (-not (Test-Path -LiteralPath $ValuesFile)) {
     throw "Values file not found."
 }
 
-$remoteLine = git ls-remote sourcecommit refs/heads/main
+$remoteLine = git ls-remote sourcecommit refs/heads/master
 if ($LASTEXITCODE -ne 0 -or -not $remoteLine) {
-    throw "Unable to verify SourceCommit main."
+    throw "Unable to verify SourceCommit master."
 }
 $remoteRevision = ($remoteLine -split '\s+')[0].ToLowerInvariant()
 if ($remoteRevision -ne $SourceRevision) {
-    throw "Requested revision does not match SourceCommit main."
+    throw "Requested revision does not match SourceCommit master."
 }
 
 & $Helm upgrade --install $Release .\deploy\helm\ncp-report `

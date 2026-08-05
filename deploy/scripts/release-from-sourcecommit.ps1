@@ -1,6 +1,6 @@
 param(
     [string]$Remote = "sourcecommit",
-    [string]$Branch = "main",
+    [string]$Branch = "master",
     [string]$Registry = "architect-ncp-report.kr.ncr.ntruss.com",
     [string]$Namespace = "ncp-report",
     [string]$Release = "ncp-report",

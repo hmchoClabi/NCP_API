@@ -137,5 +137,5 @@ def test_normal_release_does_not_build_images_locally():
     assert "AllowLocalBuild" in legacy
     assert "Local image builds are disabled" in legacy
     assert "docker build" not in deployment.lower()
-    assert "git ls-remote sourcecommit refs/heads/main" in deployment
+    assert "git ls-remote sourcecommit refs/heads/master" in deployment
     assert "--atomic --wait" in deployment

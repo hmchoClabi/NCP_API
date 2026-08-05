@@ -30,7 +30,7 @@ git remote -v
 
 ## Release procedure
 
-Review and commit changes before release:
+Review and commit changes on `master` before release:
 
 ```powershell
 git status
