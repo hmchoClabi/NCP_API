@@ -3,7 +3,11 @@
 Local Docker builds are disabled for normal releases. NCP SourceBuild builds
 two least-privilege images from the `architect_report` SourceCommit `master`
 branch. SourceBuild uploads both images to `architect-ncp-report` Container
-Registry; the deployment script only updates NKS to the resulting tags.
+Registry; the deployment script only updates NKS to the resulting tags. The
+expected authenticated endpoint is
+`architect-ncp-report.kr.ncr.ntruss.com`. Enabling this endpoint does not make
+the registry publicly readable; keep the separate Public Registry option
+disabled.
 
 ## Project 1: application runtime
 
@@ -140,8 +144,8 @@ $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
 ```
 
 The script rejects a revision that does not equal SourceCommit `master`, then
-performs an atomic Helm rollout. Kubernetes pulls through the registry private
-endpoint. Local Docker is not used.
+performs an atomic Helm rollout. Kubernetes pulls through the authenticated
+registry public endpoint. Local Docker is not used.
 
 ## Pipeline stage after the first cloud build
 

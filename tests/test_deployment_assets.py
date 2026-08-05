@@ -58,11 +58,11 @@ def test_worker_roles_can_check_the_required_schema_version():
     assert "ncp_gov_worker" in migration
 
 
-def test_pilot_uses_private_registry_for_cluster_pulls():
+def test_pilot_uses_public_registry_endpoint_for_cluster_pulls():
     pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
 
-    assert "hhgee3ff.kr.private-ncr.ntruss.com/ncp-report" in pilot_values
-    assert "architect-ncp-report.kr.ncr.ntruss.com/ncp-report" not in pilot_values
+    assert "architect-ncp-report.kr.ncr.ntruss.com/ncp-report" in pilot_values
+    assert "private-ncr.ntruss.com" not in pilot_values
 
 
 def test_registry_secret_script_does_not_accept_secret_as_parameter():
@@ -72,6 +72,8 @@ def test_registry_secret_script_does_not_accept_secret_as_parameter():
 
     parameter_block = script.split(")", 1)[0]
     assert "SecretKey" not in parameter_block
+    assert "architect-ncp-report.kr.ncr.ntruss.com" in parameter_block
+    assert "private-ncr.ntruss.com" not in script
     assert "Read-Host \"NCP registry Secret Key\" -AsSecureString" in script
     assert '".dockerconfigjson"' in script
     assert "--ignore-not-found -o name" in script

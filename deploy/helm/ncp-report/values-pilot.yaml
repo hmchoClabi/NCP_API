@@ -1,9 +1,8 @@
 fullnameOverride: ncp-report
 
 image:
-  # SourceBuild pushes to the registry public endpoint. NKS pulls the same
-  # image through this private endpoint.
-  repository: hhgee3ff.kr.private-ncr.ntruss.com/ncp-report
+  # SourceBuild and NKS use the authenticated registry public endpoint.
+  repository: architect-ncp-report.kr.ncr.ntruss.com/ncp-report
   tag: pilot-20260805-002
   pullPolicy: IfNotPresent
   pullSecrets:
@@ -11,7 +10,7 @@ image:
 
 migration:
   image:
-    repository: hhgee3ff.kr.private-ncr.ntruss.com/ncp-report-migrate
+    repository: architect-ncp-report.kr.ncr.ntruss.com/ncp-report-migrate
     tag: pilot-20260805-002
 
 service:
