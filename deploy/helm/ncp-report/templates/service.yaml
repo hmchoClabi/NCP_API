@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-web
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "ncp-report.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP

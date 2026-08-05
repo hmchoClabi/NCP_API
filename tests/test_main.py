@@ -18,9 +18,16 @@ class MainTests(unittest.TestCase):
 
         main.main([])
 
-        runner_class.assert_called_once_with(output_dir=None)
+        runner_class.assert_called_once()
+        runner_arguments = runner_class.call_args.kwargs
+        self.assertIsNone(runner_arguments["output_dir"])
+        self.assertEqual(
+            runner_arguments["customer"].customer_id,
+            "default",
+        )
+        self.assertIsNotNone(runner_arguments["api_factory"])
         runner.run.assert_called_once_with(
-            target_month="2026-06",
+            target_month=main.LEGACY_DEFAULT_TARGET_MONTH,
             target_day=None,
             start_date=None,
             end_date=None,
@@ -48,7 +55,16 @@ class MainTests(unittest.TestCase):
             ]
         )
 
-        runner_class.assert_called_once_with(output_dir="custom-reports")
+        runner_class.assert_called_once()
+        runner_arguments = runner_class.call_args.kwargs
+        self.assertEqual(
+            runner_arguments["output_dir"],
+            "custom-reports",
+        )
+        self.assertEqual(
+            runner_arguments["customer"].customer_id,
+            "default",
+        )
         runner.run.assert_called_once_with(
             target_month=None,
             target_day=None,
@@ -59,6 +75,43 @@ class MainTests(unittest.TestCase):
     def test_incomplete_range_is_rejected_before_execution(self):
         with self.assertRaises(SystemExit) as context:
             main.main(["--start-date", "2026-07-01"])
+
+        self.assertEqual(context.exception.code, 2)
+
+    @patch("main.validate_settings")
+    @patch("main.setup_logging")
+    @patch("main.ReportRunner")
+    def test_datetime_range_is_forwarded(
+        self,
+        runner_class,
+        _setup_logging,
+        _validate_settings,
+    ):
+        runner = runner_class.return_value
+
+        main.main(
+            [
+                "--start-datetime",
+                "2026-08-02 14:00",
+                "--end-datetime",
+                "2026-08-02 15:00",
+            ]
+        )
+
+        expected = {
+            "target_month": None,
+            "target_day": None,
+            "start_date": None,
+            "end_date": None,
+            "start_datetime": "2026-08-02 14:00",
+            "end_datetime": "2026-08-02 15:00",
+        }
+        runner.get_period.assert_called_once_with(**expected)
+        runner.run.assert_called_once_with(**expected)
+
+    def test_incomplete_datetime_range_is_rejected_before_execution(self):
+        with self.assertRaises(SystemExit) as context:
+            main.main(["--start-datetime", "2026-08-02 14:00"])
 
         self.assertEqual(context.exception.code, 2)
 
@@ -76,6 +129,85 @@ class MainTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "invalid API response"):
             main.main([])
+
+    @patch("main.send_report_email")
+    @patch("main.validate_settings")
+    @patch("main.setup_logging")
+    @patch("main.ReportRunner")
+    def test_send_email_flag_delivers_generated_report(
+        self,
+        runner_class,
+        _setup_logging,
+        _validate_settings,
+        send_report_email,
+    ):
+        runner = runner_class.return_value
+        report = runner.run.return_value
+
+        main.main(
+            [
+                "--target-day",
+                "2026-07-29",
+                "--send-email",
+                "--email-to",
+                "first@example.com,second@example.com",
+            ]
+        )
+
+        send_report_email.assert_called_once_with(
+            report=report,
+            runner=runner,
+            recipient_values=[
+                "first@example.com,second@example.com"
+            ],
+        )
+
+    def test_customer_and_gov_options_are_injected_per_run(self):
+        with (
+            patch.dict(
+                "main.os.environ",
+                {
+                    "NCP_ACCESS_KEY": "GOV-ACCESS",
+                    "NCP_SECRET_KEY": "GOV-SECRET",
+                },
+                clear=False,
+            ),
+            patch("main.setup_logging"),
+            patch("main.validate_settings") as validate_settings,
+            patch("main.APIFactory") as api_factory_class,
+            patch("main.ReportRunner") as runner_class,
+        ):
+            main.main(
+                [
+                    "--target-day",
+                    "2026-07-29",
+                    "--customer-id",
+                    "gov-customer-001",
+                    "--customer-name",
+                    "공공 고객",
+                    "--api-type",
+                    "gov",
+                    "--region",
+                    "KRS",
+                ]
+            )
+
+        credentials = api_factory_class.call_args.kwargs["credentials"]
+        self.assertEqual(credentials.access_key, "GOV-ACCESS")
+        self.assertEqual(credentials.secret_key, "GOV-SECRET")
+        self.assertEqual(credentials.api_type, "gov")
+        self.assertEqual(credentials.region, "KRS")
+        validate_settings.assert_called_once_with(credentials)
+
+        runner_arguments = runner_class.call_args.kwargs
+        customer = runner_arguments["customer"]
+        self.assertEqual(customer.customer_id, "gov-customer-001")
+        self.assertEqual(customer.customer_name, "공공 고객")
+        self.assertEqual(customer.api_type, "gov")
+        self.assertIs(
+            runner_arguments["api_factory"],
+            api_factory_class.return_value,
+        )
 
     @patch("main.NCP_ACCESS_KEY", "")
     @patch("main.NCP_SECRET_KEY", "")

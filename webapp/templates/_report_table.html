@@ -1,0 +1,16 @@
+{% if reports %}
+<div class="table-wrap">
+  <table>
+    <thead><tr>{% if show_customer|default(false) %}<th>고객</th>{% endif %}<th>기간</th><th>계정</th><th>유형</th><th>상태</th><th>오류</th><th></th></tr></thead>
+    <tbody>{% for item in reports %}<tr>
+      {% if show_customer|default(false) %}<td><strong>{{ item.customer_name }}</strong></td>{% endif %}
+      <td><strong>{{ item.period_start|kst('%Y-%m-%d') }}</strong><small>{{ item.period_start|kst('%H:%M') }}–{{ item.period_end|kst('%m-%d %H:%M') }}</small></td>
+      <td>{{ item.account_name or '기본 계정' }}</td>
+      <td>{{ '일일' if item.report_type == 'DAILY' else ('월간' if item.report_type == 'MONTHLY' else item.report_type) }}</td>
+      <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}">{{ item.status }}</span></td>
+      <td>{{ item.error_count }}</td>
+      <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a></td>
+    </tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% else %}<div class="empty"><strong>생성된 보고서가 없습니다.</strong><p>보고서 Worker가 실행되면 이곳에 표시됩니다.</p></div>{% endif %}

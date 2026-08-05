@@ -1,0 +1,179 @@
+{{- $root := . -}}
+{{- $components := list
+  (dict "name" "web" "role" "msp" "user" "ncp_msp_app" "passwordKey" "DB_MSP_APP_PASSWORD" "replicas" .Values.web.replicas "resources" .Values.web.resources "credentials" true "artifacts" true)
+  (dict "name" "scheduler" "role" "msp" "user" "ncp_msp_app" "passwordKey" "DB_MSP_APP_PASSWORD" "replicas" .Values.scheduler.replicas "resources" .Values.scheduler.resources "credentials" false "artifacts" false "command" (list "python" "-m" "webapp.scheduler"))
+  (dict "name" "worker-public" "role" "public_worker" "user" "ncp_public_worker" "passwordKey" "DB_PUBLIC_WORKER_PASSWORD" "replicas" .Values.workers.public.replicas "resources" .Values.workers.public.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "public"))
+  (dict "name" "worker-gov" "role" "gov_worker" "user" "ncp_gov_worker" "passwordKey" "DB_GOV_WORKER_PASSWORD" "replicas" .Values.workers.gov.replicas "resources" .Values.workers.gov.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "gov"))
+-}}
+{{- range $index, $component := $components }}
+{{- if gt $index 0 }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ncp-report.fullname" $root }}-{{ $component.name }}
+  labels:
+    {{- include "ncp-report.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component.name }}
+spec:
+  replicas: {{ $component.replicas }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "ncp-report.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $component.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "ncp-report.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $component.name }}
+    spec:
+      serviceAccountName: {{ include "ncp-report.fullname" $root }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ if hasPrefix "worker-" $component.name }}1800{{ else }}60{{ end }}
+      {{- include "ncp-report.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+{{ toYaml $root.Values.podSecurityContext | indent 8 }}
+      initContainers:
+        - name: wait-schema
+          image: "{{ $root.Values.migration.image.repository }}:{{ $root.Values.migration.image.tag }}"
+          imagePullPolicy: {{ $root.Values.migration.image.pullPolicy }}
+          args: ["wait", {{ $root.Values.migration.schemaVersion | quote }}]
+          env:
+            - name: PGHOST
+              value: {{ include "ncp-report.databaseHost" $root | quote }}
+            - name: PGPORT
+              value: {{ $root.Values.database.port | quote }}
+            - name: PGDATABASE
+              value: {{ $root.Values.database.name | quote }}
+            - name: PGUSER
+              value: {{ $component.user | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.existingSecret }}
+                  key: {{ $component.passwordKey }}
+            - name: PGSSLMODE
+              value: {{ $root.Values.database.sslmode | quote }}
+            - name: DB_WAIT_SECONDS
+              value: {{ $root.Values.migration.waitSeconds | quote }}
+          securityContext:
+{{ toYaml $root.Values.containerSecurityContext | indent 12 }}
+      containers:
+        - name: {{ $component.name }}
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- with $component.command }}
+          command:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          env:
+            {{- include "ncp-report.databaseEnv" $root | nindent 12 }}
+            - name: REPORT_DB_ROLE
+              value: {{ $component.role | quote }}
+            - name: REPORT_DB_USER
+              value: {{ $component.user | quote }}
+            - name: REPORT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.existingSecret }}
+                  key: {{ $component.passwordKey }}
+            - name: REPORT_DB_APPLICATION_NAME
+              value: {{ printf "ncp-report-%s" $component.name | quote }}
+            - name: REPORT_OUTPUT_DIR
+              value: /app/output/report
+            - name: TZ
+              value: Asia/Seoul
+            - name: LOG_LEVEL
+              value: INFO
+            {{- range $smtpName := list "SMTP_HOST" "SMTP_PORT" "SMTP_FROM" "SMTP_USERNAME" "SMTP_PASSWORD" "SMTP_USE_TLS" "SMTP_USE_SSL" }}
+            - name: {{ $smtpName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.existingSecret }}
+                  key: {{ $smtpName }}
+                  optional: true
+            {{- end }}
+            {{- if eq $component.name "web" }}
+            - name: WEB_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.existingSecret }}
+                  key: WEB_SECRET_KEY
+            - name: WEB_COOKIE_SECURE
+              value: {{ ternary "true" "false" $root.Values.ingress.enabled | quote }}
+            {{- end }}
+            {{- if eq $component.name "scheduler" }}
+            - name: SCHEDULER_POLL_SECONDS
+              value: {{ $root.Values.scheduler.pollSeconds | quote }}
+            - name: WORKER_STALE_MINUTES
+              value: {{ $root.Values.scheduler.staleMinutes | quote }}
+            {{- end }}
+            {{- if hasPrefix "worker-" $component.name }}
+            - name: WORKER_POLL_SECONDS
+              value: {{ $root.Values.workers.pollSeconds | quote }}
+            {{- end }}
+            {{- if $component.credentials }}
+            - name: CREDENTIAL_MASTER_KEY_FILE
+              value: /run/secrets/credential-master-key
+            {{- end }}
+          {{- if eq $component.name "web" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- end }}
+          resources:
+{{ toYaml $component.resources | indent 12 }}
+          securityContext:
+{{ toYaml $root.Values.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $component.credentials }}
+            - name: credential-master-key
+              mountPath: /run/secrets/credential-master-key
+              subPath: credential-master-key
+              readOnly: true
+            {{- end }}
+            {{- if and $component.artifacts $root.Values.artifacts.persistence.enabled }}
+            - name: artifacts
+              mountPath: /app/output
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $component.credentials }}
+        - name: credential-master-key
+          secret:
+            secretName: {{ $root.Values.existingSecret }}
+            defaultMode: 0400
+            items:
+              - key: credential-master-key
+                path: credential-master-key
+        {{- end }}
+        {{- if and $component.artifacts $root.Values.artifacts.persistence.enabled }}
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: {{ include "ncp-report.fullname" $root }}-artifacts
+        {{- end }}
+      nodeSelector:
+{{ toYaml $root.Values.nodeSelector | indent 8 }}
+      tolerations:
+{{ toYaml $root.Values.tolerations | indent 8 }}
+      affinity:
+{{ toYaml $root.Values.affinity | indent 8 }}
+{{- end }}

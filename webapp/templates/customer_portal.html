@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ '전체 고객 보고서' if portal_is_msp else '고객 보고서 포털' }}{% endblock %}
+{% block content %}
+{% if portal_is_msp %}
+<header class="page-header">
+  <div>
+    <span class="eyebrow">MSP REPORT PORTAL</span>
+    <h1>전체 고객 및 보고서</h1>
+    <p>등록된 고객과 NCP 계정 현황을 확인하고 최근 보고서를 조회합니다.</p>
+  </div>
+  <span class="count-pill">{{ customers|length }} 고객사</span>
+</header>
+
+<section class="stat-grid portal-stats">
+  <article class="stat-card"><span>전체 고객</span><strong>{{ customers|length }}</strong><small>활성 및 등록 고객사</small></article>
+  <article class="stat-card blue"><span>NCP 계정</span><strong>{{ customers|sum(attribute='account_count') }}</strong><small>전체 연결 계정</small></article>
+  <article class="stat-card violet"><span>저장된 보고서</span><strong>{{ customers|sum(attribute='report_count') }}</strong><small>전체 생성 이력</small></article>
+  <article class="stat-card alert"><span>최근 작업</span><strong>{{ jobs|length }}</strong><small>화면에 표시된 작업</small></article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading"><div><h2>전체 고객</h2><p>고객 상세 화면에서 계정별 보고서 생성과 자동 일정을 관리할 수 있습니다.</p></div></div>
+  {% if customers %}<div class="table-wrap"><table>
+    <thead><tr><th>고객사</th><th>환경</th><th>리전</th><th>NCP 계정</th><th>보고서</th><th>상태</th><th></th></tr></thead>
+    <tbody>{% for customer in customers %}<tr>
+      <td><strong>{{ customer.customer_name }}</strong><small>{{ customer.customer_code }}</small></td>
+      <td><span class="tag {{ customer.environment }}">{{ '공공' if customer.environment == 'gov' else '민간' }}</span></td>
+      <td>{{ customer.region }}</td>
+      <td>{{ customer.account_count }}</td>
+      <td>{{ customer.report_count }}</td>
+      <td><span class="status {{ 'ok' if customer.status == 'ACTIVE' else 'warn' }}">{{ customer.status }}</span></td>
+      <td><a class="table-link" href="{{ url_for('msp_customer', tenant_id=customer.id) }}">상세/생성</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>{% else %}<div class="empty"><strong>등록된 고객사가 없습니다.</strong><p>민간 또는 공공 고객 메뉴에서 고객사를 먼저 등록하세요.</p></div>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-heading"><div><h2>전체 최근 보고서</h2><p>모든 고객에서 최근 생성된 보고서를 최신 순으로 표시합니다.</p></div><a class="table-link" href="{{ url_for('report_history') }}">전체 이력 보기 →</a></div>
+  {% set show_customer = true %}{% include '_report_table.html' %}
+</section>
+
+<section class="panel">
+  <div class="panel-heading"><div><h2>최근 생성 작업</h2><p>모든 고객의 수동 및 예약 작업 처리 상태입니다.</p></div></div>
+  {% include '_job_table.html' %}
+</section>
+{% else %}
+<header class="page-header"><div><span class="eyebrow">CUSTOMER PORTAL</span><h1>내 보고서</h1><p>연결된 고객사와 NCP 계정의 보고서를 확인하고 생성할 수 있습니다.</p></div></header>
+<section class="membership-row">{% for item in memberships %}<span><strong>{{ item.customer_name }}</strong><small>{{ '공공' if item.environment == 'gov' else '민간' }} · {{ item.role }}</small></span>{% else %}<div class="empty wide"><strong>연결된 고객사가 없습니다.</strong><p>MSP 관리자에게 고객사 연결을 요청하세요.</p></div>{% endfor %}</section>
+{% if accounts %}<section class="panel"><div class="panel-heading"><div><h2>NCP 계정 및 보고서 생성</h2><p>계정별로 보고서를 즉시 생성하거나 자동 실행 일정을 관리합니다.</p></div></div>{% for account in accounts %}<article class="account-card"><div class="account-heading"><div><strong>{{ account.customer_name }} · {{ account.display_name }}</strong><small>{{ account.account_code }}</small></div><span class="status {{ 'ok' if account.credential_status == 'VALID' else 'warn' }}">{{ account.credential_status or '미등록' }}</span></div>{% set can_manage_account = account.tenant_id|string in manageable_tenant_ids %}{% include '_account_automation.html' %}</article>{% endfor %}</section>{% endif %}
+<section class="panel"><div class="panel-heading"><div><h2>최근 생성 작업</h2><p>요청한 작업의 처리 상태입니다.</p></div></div>{% include '_job_table.html' %}</section>
+<section class="panel"><div class="panel-heading"><div><h2>최근 보고서</h2><p>권한이 있는 고객사의 보고서만 표시합니다.</p></div></div>{% include '_report_table.html' %}</section>
+{% endif %}
+{% endblock %}

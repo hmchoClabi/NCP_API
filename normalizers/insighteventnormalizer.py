@@ -1,8 +1,14 @@
 from collections import defaultdict
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+from utils.event_sort import event_timestamp_millis, sort_event_records
 
 
 class InsightEventNormalizer:
+    KST = ZoneInfo("Asia/Seoul")
+
     def __init__(self) -> None:
         self.last_errors: List[Dict[str, Any]] = []
 
@@ -37,7 +43,7 @@ class InsightEventNormalizer:
                     exc=exc,
                 )
 
-        return result
+        return sort_event_records(result, ("start_time", "end_time"))
 
     def group_events(
         self,
@@ -112,12 +118,18 @@ class InsightEventNormalizer:
             "rule_id": event.get("ruleId"),
             "rule_name": event.get("ruleName"),
             "description": event.get("describe"),
+            "calc": event.get("calc"),
+            "interval": event.get("interval"),
+            "metric_group_item_id": event.get("metricGroupItemId"),
+            "calc_sliding_group_key": event.get("calcSlidingGroupKey"),
             "notification_groups": event.get("notificationGroups"),
             "notification_status": event.get("notificationStatus"),
             "in_maintenance": event.get("inMaintenance"),
             "resource_deleted": event.get("resourceDeleted"),
             "start_time": event.get("startTime"),
             "end_time": event.get("endTime"),
+            "start_time_kst": self._format_event_time(event.get("startTime")),
+            "end_time_kst": self._format_event_time(event.get("endTime")),
             "prod_key": event.get("prodKey"),
             "prod_name": event.get("prodName"),
             "region_code": event.get("regionCode"),
@@ -127,6 +139,16 @@ class InsightEventNormalizer:
             # 원본 보존
             "raw": event,
         }
+
+    def _format_event_time(self, value: Any) -> Optional[str]:
+        timestamp = event_timestamp_millis(value)
+        if timestamp is None or timestamp <= 0:
+            return None
+        event_time = datetime.fromtimestamp(
+            timestamp / 1000,
+            tz=self.KST,
+        )
+        return event_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " KST"
 
     def _extract_resource_id(
         self,

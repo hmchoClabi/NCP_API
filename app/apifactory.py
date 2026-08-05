@@ -18,6 +18,8 @@ from ncp_api import (
     VpcAPI,
     LoadbalancerAPI,
 )
+from utils.credentials import NCPCredentials
+from utils.credential_provider import get_default_credentials
 
 
 class APIFactory:
@@ -25,7 +27,11 @@ class APIFactory:
     NCP API 객체를 필요한 시점에만 생성하고 재사용하는 Factory
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        credentials: NCPCredentials | None = None,
+    ):
+        self.credentials = credentials or get_default_credentials()
         self._cache: dict[str, Any] = {}
 
         self._registry = {
@@ -62,7 +68,9 @@ class APIFactory:
 
         if name not in self._cache:
             api_class = self._registry[name]
-            self._cache[name] = api_class()
+            self._cache[name] = api_class(
+                credentials=self.credentials,
+            )
 
         return self._cache[name]
 

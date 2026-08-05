@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ report.customer_name }} 보고서{% endblock %}
+{% block content %}
+<header class="page-header"><div><span class="eyebrow">{{ report.report_type }} REPORT</span><h1>{{ report.customer_name }}</h1><p>{{ report.period_start }} – {{ report.period_end }} · {{ report.account_name or '기본 계정' }}</p></div><div class="report-actions"><span class="status {{ 'ok' if report.status == 'SUCCESS' else 'warn' }}">{{ report.status }}</span><a class="secondary" href="{{ url_for('report_content', report_id=report.id) }}" target="_blank" rel="noopener">새 창에서 보기</a></div></header>
+{% set snapshot = report.snapshot or {} %}
+<section class="stat-grid"><article class="stat-card"><span>서버</span><strong>{{ snapshot.get('servers', [])|length }}</strong><small>수집 대상</small></article><article class="stat-card blue"><span>Insight 이벤트</span><strong>{{ snapshot.get('insight_events', [])|length }}</strong><small>보고 기간</small></article><article class="stat-card violet"><span>Activity</span><strong>{{ snapshot.get('activity_events', {}).get('events', [])|length if snapshot.get('activity_events') is mapping else 0 }}</strong><small>감사 이벤트</small></article><article class="stat-card alert"><span>수집 오류</span><strong>{{ report.error_count }}</strong><small>파이프라인 결과</small></article></section>
+<section class="panel report-viewer-panel"><div class="panel-heading"><div><h2>보고서 내용</h2><p>PostgreSQL에 저장된 정규화 스냅샷에서 전체 보고서를 재현했습니다.</p></div></div><iframe class="report-frame" title="{{ report.customer_name }} NCP 보고서" src="{{ url_for('report_content', report_id=report.id) }}"></iframe></section>
+{% endblock %}

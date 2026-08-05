@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16}
+    container_name: ncp-report-postgres
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD}
+      DB_CONTROL_APP_PASSWORD: ${DB_CONTROL_APP_PASSWORD}
+      DB_PUBLIC_WORKER_PASSWORD: ${DB_PUBLIC_WORKER_PASSWORD}
+      DB_GOV_WORKER_PASSWORD: ${DB_GOV_WORKER_PASSWORD}
+      DB_MSP_APP_PASSWORD: ${DB_MSP_APP_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --data-checksums"
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${DB_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_ADMIN_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - ncp_report_pgdata:/var/lib/postgresql/data
+      - ./database/schema:/opt/ncp-report/schema:ro
+      - ./database/verify_database.sql:/opt/ncp-report/verify_database.sql:ro
+
+volumes:
+  ncp_report_pgdata:
+    name: ncp-report-pgdata

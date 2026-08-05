@@ -1,0 +1,99 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-postgresql
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ncp-report.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+  ports:
+    - name: postgresql
+      port: {{ .Values.database.port }}
+      targetPort: postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-postgresql
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  serviceName: {{ include "ncp-report.fullname" . }}-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ncp-report.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  template:
+    metadata:
+      labels:
+        {{- include "ncp-report.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgresql
+          image: {{ .Values.postgresql.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: DB_ADMIN_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: DB_ADMIN_PASSWORD
+            - name: POSTGRES_INITDB_ARGS
+              value: "--encoding=UTF8 --data-checksums"
+            # Block Storage filesystems can contain lost+found at their root.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TZ
+              value: Asia/Seoul
+          ports:
+            - name: postgresql
+              containerPort: {{ .Values.database.port }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+{{ toYaml .Values.postgresql.resources | indent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storageClass.name }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storageSize }}
+{{- end }}

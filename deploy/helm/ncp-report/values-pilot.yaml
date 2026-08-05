@@ -1,0 +1,47 @@
+fullnameOverride: ncp-report
+
+image:
+  # NKS pulls over the registry's private endpoint. Local builds are pushed to
+  # architect-ncp-report.kr.ncr.ntruss.com by deploy/scripts/build-and-push.*.
+  repository: hhgee3ff.kr.private-ncr.ntruss.com/ncp-report
+  tag: pilot-20260805-002
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - ncp-registry
+
+migration:
+  image:
+    repository: hhgee3ff.kr.private-ncr.ntruss.com/ncp-report-migrate
+    tag: pilot-20260805-002
+
+service:
+  # NKS ALB Ingress requires a NodePort backend service.
+  type: NodePort
+
+ingress:
+  enabled: false
+  host: report.example.com
+  certificateNo: ""
+
+storageClass:
+  create: true
+  name: ncp-report-retain
+  provisioner: blk.csi.ncloud.com
+  type: CB1
+
+postgresql:
+  enabled: true
+  storageSize: 20Gi
+
+artifacts:
+  persistence:
+    enabled: true
+    # NKS KVM Block Storage minimum; sufficient for the one-node pilot.
+    storageSize: 10Gi
+
+backups:
+  enabled: true
+  # 03:00 KST. Kubernetes CronJob schedules are UTC unless timeZone is set.
+  schedule: "0 18 * * *"
+  retentionDays: 7
+  storageSize: 10Gi

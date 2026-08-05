@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ '공공' if environment == 'gov' else '민간' }} 고객{% endblock %}
+{% block content %}
+<header class="page-header"><div><span class="eyebrow">{{ 'GOV CLOUD' if environment == 'gov' else 'PUBLIC CLOUD' }}</span><h1>{{ '공공' if environment == 'gov' else '민간' }} 고객</h1><p>고객사를 선택해 계정별 보고서와 인증 상태를 확인하세요.</p></div><span class="count-pill">{{ customers|length }} 고객사</span></header>
+{% if 'MSP_ADMIN' in current_user.platform_roles %}<section class="panel"><div class="panel-heading"><div><h2>신규 고객 등록</h2><p>고객사를 만든 뒤 상세 화면에서 여러 NCP 계정과 API 키를 등록할 수 있습니다.</p></div></div><form class="form-grid" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>고객 코드<input name="customer_code" required maxlength="80" pattern="[a-z0-9][a-z0-9_-]{1,78}[a-z0-9]" placeholder="customer-001"></label><label>고객명<input name="customer_name" required maxlength="200" placeholder="고객사 이름"></label><label>리전<input name="region" required value="{{ 'KRS' if environment == 'gov' else 'KR' }}"></label><button class="primary" type="submit">고객 등록</button></form></section>{% endif %}
+<section class="customer-grid">
+{% for customer in customers %}<a class="customer-card" href="{{ url_for('msp_customer', tenant_id=customer.id) }}"><div><span class="tag {{ customer.environment }}">{{ '공공' if customer.environment == 'gov' else '민간' }}</span> <span class="status {{ 'ok' if customer.status == 'ACTIVE' else 'warn' }}">{{ customer.status }}</span><h2>{{ customer.customer_name }}</h2><p>{{ customer.customer_code }} · {{ customer.region }}</p></div><dl><div><dt>NCP 계정</dt><dd>{{ customer.account_count }}</dd></div><div><dt>보고서</dt><dd>{{ customer.report_count }}</dd></div></dl><span class="arrow">상세 보기 →</span></a>{% else %}<div class="empty wide"><strong>등록된 고객이 없습니다.</strong><p>기존 보고서를 실행하거나 DB에 고객을 먼저 등록하세요.</p></div>{% endfor %}
+</section>
+{% endblock %}

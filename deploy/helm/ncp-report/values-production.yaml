@@ -1,0 +1,23 @@
+# Production defaults intentionally require external infrastructure decisions.
+# Do not enable this file until Cloud DB, Object Storage and managed secrets exist.
+fullnameOverride: ncp-report
+
+postgresql:
+  enabled: false
+
+artifacts:
+  persistence:
+    enabled: false
+
+backups:
+  enabled: false
+
+database:
+  host: REPLACE_WITH_PRIVATE_CLOUD_DB_HOST
+  sslmode: require
+
+web:
+  replicas: 2
+
+ingress:
+  enabled: true

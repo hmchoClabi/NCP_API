@@ -1,0 +1,13 @@
+1. Check the migration and workloads:
+   kubectl -n {{ .Release.Namespace }} get jobs,pods
+
+2. Follow migration logs:
+   kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=migration
+
+3. Check the web readiness endpoint before enabling Ingress:
+   kubectl -n {{ .Release.Namespace }} port-forward service/{{ include "ncp-report.fullname" . }}-web 8080:{{ .Values.service.port }}
+
+{{- if not .Values.ingress.enabled }}
+Ingress is disabled. Verify the portal with port-forward first, then configure
+the domain and Certificate Manager number in a private values file.
+{{- end }}

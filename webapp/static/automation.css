@@ -1,0 +1,38 @@
+.secondary {
+  border: 0;
+  border-radius: 9px;
+  padding: 12px 18px;
+  background: #e8f0fb;
+  color: #1559b5;
+  font-weight: 800;
+  cursor: pointer;
+}
+.account-card { padding: 18px 0; border-top: 1px solid var(--line); }
+.account-card:first-child { border-top: 0; padding-top: 0; }
+.account-heading { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; }
+.account-heading small { display: block; color: var(--muted); margin-top: 4px; }
+.automation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.automation-block { padding: 15px; background: #f8fafc; border-radius: 12px; }
+.automation-block h3 { margin: 0 0 4px; font-size: 14px; }
+.automation-block p { margin-bottom: 12px; }
+.inline-form, .range-form, .schedule-form { display: flex; align-items: end; gap: 9px; margin-top: 9px; flex-wrap: wrap; }
+.inline-form label, .range-form label, .schedule-form label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.inline-form input, .range-form input, .schedule-form input { border: 1px solid #cdd9e7; border-radius: 8px; padding: 9px; background: #fff; color: var(--ink); }
+.range-form { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+.text-action { border: 0; background: none; color: var(--blue); font-weight: 800; cursor: pointer; }
+.muted { color: var(--muted); }
+.schedule-form > small { color: var(--muted); }
+.status.pending { background: #e8f0fb; color: #1559b5; }
+.report-actions { display: flex; align-items: center; gap: 10px; }
+.report-actions .secondary { display: inline-flex; }
+.report-viewer-panel { padding: 12px; }
+.report-viewer-panel .panel-heading { padding: 11px 11px 0; }
+.report-frame { width: 100%; min-height: 78vh; border: 1px solid var(--line); border-radius: 12px; background: #f4f7fb; }
+.section-title { margin: 0 0 13px; font-size: 14px; }
+.management-form { padding: 17px; background: #f8fafc; border-radius: 12px; }
+.form-stack { display: grid; gap: 11px; }
+.form-stack label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.form-stack input, .form-stack select { width: 100%; border: 1px solid #cdd9e7; border-radius: 8px; padding: 10px; background: #fff; color: var(--ink); }
+.form-note { margin-top: 11px !important; font-size: 11px !important; line-height: 1.5; }
+.membership-chip { display: block; margin: 3px 0; white-space: nowrap; }
+@media (max-width: 1000px) { .automation-grid { grid-template-columns: 1fr; } }

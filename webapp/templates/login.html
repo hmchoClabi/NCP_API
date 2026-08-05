@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}로그인 · NCP Report Hub{% endblock %}
+{% block content %}
+<section class="login-layout">
+  <div class="login-copy">
+    <span class="eyebrow">NCP OPERATIONS INTELLIGENCE</span>
+    <h1>고객 클라우드의 하루를<br>한 화면에서 확인하세요.</h1>
+    <p>민간과 공공 환경의 보고서, 이벤트, 비용과 수집 상태를 역할에 맞게 안전하게 제공합니다.</p>
+    <div class="signal-row">
+      <span>일일·월간 보고서</span><span>이슈 고객 우선 확인</span><span>계정별 접근 통제</span>
+    </div>
+  </div>
+  <div class="login-card">
+    <div class="brand compact"><span class="brand-mark">NR</span><span><strong>NCP Report</strong><small>Operations Hub</small></span></div>
+    <h2>서비스 로그인</h2>
+    <p>발급받은 MSP 또는 고객 계정으로 로그인하세요.</p>
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>이메일<input type="email" name="email" required autocomplete="username" placeholder="name@company.com"></label>
+      <label>비밀번호<input type="password" name="password" required autocomplete="current-password" placeholder="비밀번호 입력"></label>
+      <button class="primary wide" type="submit">로그인</button>
+    </form>
+    <small class="security-note">인증정보와 고객 API 키는 화면 및 로그에 표시되지 않습니다.</small>
+  </div>
+</section>
+{% endblock %}

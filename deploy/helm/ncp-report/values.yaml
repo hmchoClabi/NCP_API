@@ -1,0 +1,105 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ncp-report
+  tag: local
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+migration:
+  image:
+    repository: ncp-report-migrate
+    tag: local
+    pullPolicy: IfNotPresent
+  schemaVersion: "100"
+  waitSeconds: 300
+
+existingSecret: ncp-report-secrets
+
+database:
+  host: ""
+  port: 5432
+  name: ncp_report
+  sslmode: disable
+
+web:
+  replicas: 1
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+scheduler:
+  replicas: 1
+  pollSeconds: 30
+  staleMinutes: 360
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+workers:
+  pollSeconds: 5
+  public:
+    replicas: 1
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 2Gi}
+  gov:
+    replicas: 1
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {cpu: "1", memory: 2Gi}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: alb
+  host: report.example.com
+  certificateNo: ""
+  annotations: {}
+
+storageClass:
+  create: false
+  name: nks-block-storage
+  provisioner: blk.csi.ncloud.com
+  type: CB1
+
+postgresql:
+  enabled: true
+  image: postgres:16
+  storageSize: 20Gi
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 2Gi}
+
+artifacts:
+  persistence:
+    enabled: true
+    storageSize: 20Gi
+
+backups:
+  enabled: true
+  schedule: "0 18 * * *"
+  retentionDays: 7
+  storageSize: 20Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

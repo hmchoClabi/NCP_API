@@ -1,0 +1,43 @@
+{{- if .Values.storageClass.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClass.name }}
+provisioner: {{ .Values.storageClass.provisioner }}
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: {{ .Values.storageClass.type }}
+  csi.storage.k8s.io/fstype: ext4
+---
+{{- end }}
+{{- if .Values.artifacts.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-artifacts
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storageClass.name }}
+  resources:
+    requests:
+      storage: {{ .Values.artifacts.persistence.storageSize }}
+---
+{{- end }}
+{{- if .Values.backups.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-backups
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storageClass.name }}
+  resources:
+    requests:
+      storage: {{ .Values.backups.storageSize }}
+{{- end }}

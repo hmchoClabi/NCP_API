@@ -1,0 +1,32 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ncp-report.fullname" . }}
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: {{ ternary "[{\"HTTP\":80},{\"HTTPS\":443}]" "[{\"HTTP\":80}]" (ne .Values.ingress.certificateNo "") | quote }}
+    {{- if .Values.ingress.certificateNo }}
+    alb.ingress.kubernetes.io/ssl-certificate-no: {{ .Values.ingress.certificateNo | quote }}
+    alb.ingress.kubernetes.io/ssl-min-version: TLSV12
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/enable-http2: "true"
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ncp-report.fullname" . }}-web
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

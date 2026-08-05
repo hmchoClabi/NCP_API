@@ -1,6 +1,6 @@
 import unittest
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from collectors.activitytracercollector import ActivityTracerEventCollector
@@ -191,6 +191,7 @@ class MetricAPI:
     def __init__(self):
         self.search_calls = []
         self.metric_payloads = []
+        self.metric_query_windows = []
 
     def get_system_schema_key_list(self):
         return [{"prodName": "Server(VPC)", "cwKey": "server-key"}]
@@ -222,6 +223,7 @@ class MetricAPI:
         metric_info_list,
     ):
         self.metric_payloads.extend(metric_info_list)
+        self.metric_query_windows.append((time_start, time_end))
         return []
 
 
@@ -417,6 +419,9 @@ class PipelineCollectorTests(unittest.TestCase):
         collector = InsightMetricCollector(
             FakeFactory(cloud_insight=api)
         )
+        collector._select_metric_interval = (
+            lambda start_time, end_time: "Hour2"
+        )
         end_time = int(
             datetime(
                 2026,
@@ -467,8 +472,123 @@ class PipelineCollectorTests(unittest.TestCase):
 
         self.assertEqual(api.search_calls, ["1", "2"])
         self.assertEqual(filesystem_pairs, {("1", "/"), ("2", "/data")})
+        self.assertEqual(
+            {payload["interval"] for payload in api.metric_payloads},
+            {"Hour2"},
+        )
         self.assertEqual([report["server_id"] for report in reports], [1, "2"])
         self.assertEqual(collector.last_errors, [])
+
+    def test_metric_interval_matches_data_retention_age(self):
+        collector = InsightMetricCollector(FakeFactory())
+        now_dt = datetime(
+            2026,
+            7,
+            30,
+            12,
+            tzinfo=ZoneInfo("Asia/Seoul"),
+        )
+        now_time = int(now_dt.timestamp() * 1000)
+
+        def timestamp(days_ago):
+            return int(
+                (now_dt - timedelta(days=days_ago)).timestamp()
+                * 1000
+            )
+
+        self.assertEqual(
+            collector._select_metric_interval(
+                timestamp(7),
+                now_time,
+                now_time=now_time,
+            ),
+            "Min1",
+        )
+        self.assertEqual(
+            collector._select_metric_interval(
+                timestamp(20),
+                now_time,
+                now_time=now_time,
+            ),
+            "Min5",
+        )
+        self.assertEqual(
+            collector._select_metric_interval(
+                timestamp(60),
+                now_time,
+                now_time=now_time,
+            ),
+            "Min30",
+        )
+        self.assertEqual(
+            collector._select_metric_interval(
+                timestamp(150),
+                now_time,
+                now_time=now_time,
+            ),
+            "Hour2",
+        )
+        self.assertEqual(
+            collector._select_metric_interval(
+                timestamp(400),
+                now_time,
+                now_time=now_time,
+            ),
+            "Day1",
+        )
+
+    def test_metric_query_windows_follow_interval_recommendations(self):
+        collector = InsightMetricCollector(FakeFactory())
+        day = 24 * 60 * 60 * 1000
+
+        windows = collector._query_time_windows(
+            start_time=0,
+            end_time=20 * day - 1,
+            interval="Min5",
+        )
+
+        self.assertEqual(
+            windows,
+            [
+                (0, 7 * day - 1),
+                (7 * day, 14 * day - 1),
+                (14 * day, 20 * day - 1),
+            ],
+        )
+
+    def test_metric_execution_queries_and_merges_each_time_window(self):
+        api = MetricAPI()
+        collector = InsightMetricCollector(
+            FakeFactory(cloud_insight=api)
+        )
+        day = 24 * 60 * 60 * 1000
+        queries = [
+            {
+                "stat_name": "avg",
+                "payload": {
+                    "prodKey": "server-key",
+                    "metric": "used_rto",
+                    "interval": "Min5",
+                    "aggregation": "AVG",
+                    "dimensions": {"instanceNo": "1"},
+                },
+            }
+        ]
+
+        collector._execute_metric_queries(
+            metric_queries=queries,
+            start_time=0,
+            end_time=20 * day - 1,
+        )
+
+        self.assertEqual(
+            api.metric_query_windows,
+            [
+                (0, 7 * day - 1),
+                (7 * day, 14 * day - 1),
+                (14 * day, 20 * day - 1),
+            ],
+        )
 
     def test_metric_records_http_200_error_envelope(self):
         api = ErrorEnvelopeMetricAPI()

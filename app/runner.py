@@ -1,4 +1,7 @@
 from app.apifactory import APIFactory
+from app.customer import CustomerProfile
+from app.renderers import HtmlReportRenderer
+from app.report_models import ReportResult
 from collectors import (
     ServerCollector,
     InsightMetricCollector,
@@ -9,9 +12,11 @@ from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
 from utils.common_rest import safe_exception_message
 from utils.data_utils import get_unix_time_stamp
+from utils.event_sort import sort_event_records
 
 import json
 import calendar
+import logging
 import os
 from pathlib import Path
 from datetime import date, datetime, timedelta
@@ -22,13 +27,31 @@ from zoneinfo import ZoneInfo
 class ReportRunner:
     KST = ZoneInfo("Asia/Seoul")
 
-    def __init__(self, output_dir: Optional[str] = None):
-        self.api_factory = APIFactory()
-        self.output_dir = str(
+    def __init__(
+        self,
+        output_dir: Optional[str] = None,
+        api_factory: Optional[APIFactory] = None,
+        customer: Optional[CustomerProfile] = None,
+        report_repository: Optional[Any] = None,
+    ):
+        self.api_factory = api_factory or APIFactory()
+        self.customer = customer
+        self.report_repository = report_repository
+        base_output_dir = Path(
             output_dir
             or os.getenv("REPORT_OUTPUT_DIR")
             or "./output/report"
         )
+        if customer is not None and not customer.is_default:
+            base_output_dir = base_output_dir / customer.customer_id
+        if (
+            output_dir is None
+            and not os.getenv("REPORT_OUTPUT_DIR")
+            and (customer is None or customer.is_default)
+        ):
+            self.output_dir = "./output/report"
+        else:
+            self.output_dir = str(base_output_dir)
 
     def get_month_range(self) -> Dict[str, Any]:
         today = self._today_kst()
@@ -49,7 +72,29 @@ class ReportRunner:
         target_day: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if start_datetime and end_datetime:
+            start_dt = self._parse_kst_datetime(start_datetime)
+            end_dt = self._parse_kst_datetime(end_datetime)
+
+            if start_dt >= end_dt:
+                raise ValueError(
+                    "start_datetime은 end_datetime보다 빨라야 합니다."
+                )
+
+            effective_end = end_dt - timedelta(milliseconds=1)
+            if start_dt.strftime("%Y%m") != effective_end.strftime("%Y%m"):
+                raise ValueError(
+                    "Billing API 기준으로 동일 월 안의 시간 범위만 지정하세요."
+                )
+
+            return self.build_datetime_period(
+                start=start_dt,
+                end=end_dt,
+            )
+
         if target_day:
             start = datetime.strptime(target_day, "%Y-%m-%d").date()
             end = start
@@ -87,6 +132,37 @@ class ReportRunner:
             period_type=period_type,
         )
 
+    def build_datetime_period(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> Dict[str, Any]:
+        """Build a KST period whose end boundary is exclusive."""
+        start_kst = self._as_kst(start)
+        end_kst = self._as_kst(end)
+        effective_end = end_kst - timedelta(milliseconds=1)
+        start_text = start_kst.strftime("%Y-%m-%d %H:%M:%S")
+        end_text = end_kst.strftime("%Y-%m-%d %H:%M:%S")
+
+        return {
+            "period_type": "datetime_range",
+            "start_dt": start_text,
+            "end_dt": end_text,
+            "end_exclusive": True,
+            "start_time": int(start_kst.timestamp() * 1000),
+            "end_time": int(end_kst.timestamp() * 1000) - 1,
+            "use_start_date": start_kst.strftime("%Y%m%d"),
+            "use_end_date": effective_end.strftime("%Y%m%d"),
+            "billing_month": start_kst.strftime("%Y%m"),
+            "file_suffix": (
+                f"{start_kst:%Y%m%d_%H%M%S}_"
+                f"{end_kst:%Y%m%d_%H%M%S}"
+            ),
+            "is_full_month": False,
+            "is_closed_month": False,
+            "billing_scope": "date_only",
+        }
+
     def build_period(
         self,
         start: date,
@@ -121,18 +197,68 @@ class ReportRunner:
     def _today_kst(self) -> date:
         return datetime.now(self.KST).date()
 
+    def _parse_kst_datetime(self, value: str) -> datetime:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("조회 일시는 비어 있을 수 없습니다.")
+
+        normalized = self._resolve_relative_datetime(normalized)
+
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                "조회 일시는 YYYY-MM-DD HH:MM[:SS], "
+                "today/yesterday HH:MM[:SS] 또는 ISO 8601 형식이어야 합니다."
+            ) from exc
+        return self._as_kst(parsed)
+
+    def _resolve_relative_datetime(self, value: str) -> str:
+        aliases = {
+            "today": 0,
+            "오늘": 0,
+            "yesterday": -1,
+            "어제": -1,
+        }
+        folded = value.casefold()
+        for alias, day_offset in aliases.items():
+            for separator in (" ", "T"):
+                prefix = alias + separator
+                if not folded.startswith(prefix.casefold()):
+                    continue
+                clock = value[len(prefix):].strip()
+                if not clock:
+                    break
+                resolved_date = self._today_kst() + timedelta(
+                    days=day_offset
+                )
+                return f"{resolved_date.isoformat()}T{clock}"
+        return value
+
+    def _as_kst(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=self.KST)
+        return value.astimezone(self.KST)
+
     def run(
         self,
         target_month: Optional[str] = None,
         target_day: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> None:
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
+    ) -> ReportResult:
         period = self.get_period(
             target_month=target_month,
             target_day=target_day,
             start_date=start_date,
             end_date=end_date,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
         )
 
         self.print_period_summary(period)
@@ -286,8 +412,57 @@ class ReportRunner:
         self.print_network_usage_summary(
             billing_result.get("network_usage_summary", [])
         )
-        self.print_billing_summary(billing_result)
+        self.print_billing_summary(billing_result, period=period)
         self.print_usage_summary(billing_result.get("usage_summary", []))
+
+        report = ReportResult(
+            period=period,
+            customer=(
+                getattr(self, "customer", None).to_dict()
+                if getattr(self, "customer", None) is not None
+                else {}
+            ),
+            servers=self._dict_records(server_data),
+            server_metrics=self._dict_records(insight_data),
+            insight_events=self._dict_records(insight_events),
+            grouped_insight_events=insight_grouped_events,
+            activity_events=activity_data,
+            billing=billing_result,
+            collection_errors=all_collection_errors,
+        )
+        report_json_path = self.save_json_file(
+            data=report.to_dict(),
+            output_dir=self.output_dir,
+            filename=f"ncp_report_{period['file_suffix']}.json",
+        )
+        report_html_path = Path(self.output_dir) / (
+            f"ncp_report_{period['file_suffix']}.html"
+        )
+        HtmlReportRenderer().write(
+            report=report,
+            path=report_html_path,
+        )
+        repository = getattr(self, "report_repository", None)
+        if repository is not None:
+            try:
+                repository.save_report(
+                    report,
+                    artifacts={
+                        "PUBLIC_JSON": report_json_path,
+                        "HTML": report_html_path,
+                    },
+                )
+            except Exception:
+                if getattr(
+                    getattr(repository, "settings", None),
+                    "required",
+                    True,
+                ):
+                    raise
+                logging.getLogger(__name__).exception(
+                    "보고서는 생성했지만 선택적 DB 저장에 실패했습니다."
+                )
+        return report
 
     def print_period_summary(self, period: Dict[str, Any]) -> None:
         print("\n" + "=" * 80)
@@ -379,7 +554,10 @@ class ReportRunner:
                 or self._flatten_grouped_events(insight_grouped_events)
             )
 
-        insight_events = self._deduplicate_events(insight_events)
+        insight_events = sort_event_records(
+            self._deduplicate_events(insight_events),
+            ("event_time", "start_time", "time", "timestamp"),
+        )
 
         if not insight_grouped_events and insight_events:
             normalizer = getattr(insight_event_collector, "normalizer", None)
@@ -390,6 +568,14 @@ class ReportRunner:
                 insight_grouped_events = self._fallback_group_events(
                     insight_events
                 )
+
+        insight_grouped_events = {
+            group_key: sort_event_records(
+                group_events,
+                ("event_time", "start_time", "time", "timestamp"),
+            )
+            for group_key, group_events in insight_grouped_events.items()
+        }
 
         insight_event_errors = self._merge_error_lists(
             insight_event_errors,
@@ -707,21 +893,42 @@ class ReportRunner:
     def print_billing_summary(
         self,
         billing_result: Dict[str, Any],
+        period: Optional[Dict[str, Any]] = None,
     ) -> None:
         summary = billing_result["summary"]
+        use_estimated_cost = bool(
+            period and period.get("is_closed_month") is False
+        )
+
+        if use_estimated_cost:
+            title = "예상 비용 (미확정)"
+            total = summary.get("expected_total_amount", 0)
+            rows = [
+                {
+                    "service_name": row.get("service_name"),
+                    "amount": row.get("expected_amount", 0),
+                    "row_count": row.get("row_count", 0),
+                }
+                for row in billing_result.get("expected_by_service", [])
+                if isinstance(row, dict)
+            ]
+        else:
+            title = "확정 청구 금액"
+            total = summary.get("confirmed_total_amount", 0)
+            rows = billing_result.get("service_summary", [])
 
         print("\n" + "=" * 80)
-        print("확정 청구 금액")
+        print(title)
         print("=" * 80)
         print(f"청구월 : {summary['billing_month']}")
-        print(f"확정 청구 금액 : {summary['confirmed_total_amount']:,.0f} 원")
+        print(f"{title} : {total:,.0f} 원")
         print(f"청구 항목 수 : {summary.get('row_count', summary.get('service_count', 0))} 건")
 
         print("\n" + "=" * 80)
-        print("서비스별 청구 금액")
+        print(f"서비스별 {title}")
         print("=" * 80)
 
-        for service in billing_result["service_summary"]:
+        for service in rows:
             print(
                 f"{service['service_name']:<35} "
                 f"{service['amount']:>15,.0f} 원 "

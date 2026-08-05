@@ -1,6 +1,9 @@
 logs/
 *.log
 .env
+.env.db
+.env.service
+secrets/
 __pycache__/
 .venv/
 output/
@@ -10,3 +13,21 @@ reports/
 .mypy_cache/
 .coverage
 htmlcov/
+database/.generated/
+deploy/private/*
+!deploy/private/.env.k8s.example
+deploy/helm/ncp-report/values-local.yaml
+deploy/sourcedeploy/rendered/
+
+# Local per-customer launchers currently contain injected credentials.
+# Keep only these explicit legacy files local. Deployment scripts must remain
+# trackable so SourceCommit can reproduce a release.
+/cne2.ps1
+/dongaadmin.ps1
+/gbe2.ps1
+/gbsa.ps1
+/kea.ps1
+/konfoti.ps1
+/kosis2.ps1
+/nfram.ps1
+/sbiz.ps1

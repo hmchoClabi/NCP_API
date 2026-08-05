@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 from zoneinfo import ZoneInfo
 
+from dateutil.relativedelta import relativedelta
+
 from normalizers.insightmetricnormalizer import InsightMetricNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
@@ -78,7 +80,14 @@ class InsightMetricCollector:
                 logger.warning("서버 목록이 없어 인사이트 metric 수집을 건너뜁니다.")
                 return []
 
-            metric_queries = self._build_metric_queries(eligible_servers)
+            interval = self._select_metric_interval(
+                start_time=start_time,
+                end_time=end_time,
+            )
+            metric_queries = self._build_metric_queries(
+                eligible_servers,
+                interval=interval,
+            )
 
             if not metric_queries:
                 logger.warning("조회할 Cloud Insight metric 정보가 없습니다.")
@@ -101,6 +110,8 @@ class InsightMetricCollector:
                 raw_metrics=raw_metrics,
                 servers=eligible_servers,
             )
+            for report in result:
+                report["metric_interval"] = interval
 
             logger.info("인사이트 metric 데이터 수집이 완료되었습니다.")
             return result
@@ -120,6 +131,7 @@ class InsightMetricCollector:
     def _build_metric_queries(
         self,
         servers: List[Dict[str, Any]],
+        interval: str,
     ) -> List[Dict[str, Any]]:
         server_cw_key = self._get_cw_key(self.SERVER_PROD_NAME)
 
@@ -146,6 +158,7 @@ class InsightMetricCollector:
                 self._build_simple_metric_queries(
                     prod_key=server_cw_key,
                     instance_no=instance_no,
+                    interval=interval,
                 )
             )
 
@@ -153,6 +166,7 @@ class InsightMetricCollector:
                 self._build_filesystem_metric_queries(
                     prod_key=server_cw_key,
                     instance_no=instance_no,
+                    interval=interval,
                 )
             )
 
@@ -162,6 +176,7 @@ class InsightMetricCollector:
         self,
         prod_key: str,
         instance_no: str,
+        interval: str,
     ) -> List[Dict[str, Any]]:
         result = []
 
@@ -178,6 +193,7 @@ class InsightMetricCollector:
                             metric_config=metric_config,
                             dimensions=dimensions,
                             aggregation=aggregation,
+                            interval=interval,
                         ),
                     }
                 )
@@ -188,6 +204,7 @@ class InsightMetricCollector:
         self,
         prod_key: str,
         instance_no: str,
+        interval: str,
     ) -> List[Dict[str, Any]]:
         try:
             mount_points = self._get_filesystem_mount_candidates(
@@ -225,6 +242,7 @@ class InsightMetricCollector:
                             metric_config=self.FILESYSTEM_METRIC,
                             dimensions=dimensions,
                             aggregation=aggregation,
+                            interval=interval,
                         ),
                     }
                 )
@@ -237,15 +255,69 @@ class InsightMetricCollector:
         metric_config: Dict[str, Any],
         dimensions: Dict[str, Any],
         aggregation: str,
+        interval: Optional[str] = None,
     ) -> Dict[str, Any]:
         return {
             "prodKey": prod_key,
             "metric": metric_config["metric"],
-            "interval": metric_config.get("interval", "Min5"),
+            "interval": (
+                interval
+                or metric_config.get("interval", "Min5")
+            ),
             "aggregation": aggregation,
             "queryAggregation": aggregation,
             "dimensions": dimensions,
         }
+
+    def _select_metric_interval(
+        self,
+        start_time: int,
+        end_time: int,
+        now_time: Optional[int] = None,
+    ) -> str:
+        del end_time
+        now_dt = (
+            datetime.fromtimestamp(now_time / 1000, tz=self.KST)
+            if now_time is not None
+            else datetime.now(self.KST)
+        )
+        start_dt = datetime.fromtimestamp(
+            start_time / 1000,
+            tz=self.KST,
+        )
+
+        if start_dt >= now_dt - relativedelta(days=8):
+            return "Min1"
+        if start_dt >= now_dt - relativedelta(months=1):
+            return "Min5"
+        if start_dt >= now_dt - relativedelta(months=3):
+            return "Min30"
+        if start_dt >= now_dt - relativedelta(months=6):
+            return "Hour2"
+        return "Day1"
+
+    def _query_time_windows(
+        self,
+        start_time: int,
+        end_time: int,
+        interval: str,
+    ) -> List[tuple[int, int]]:
+        day = 24 * 60 * 60 * 1000
+        window_size = {
+            "Min1": day,
+            "Min5": 7 * day,
+            "Min30": 31 * day,
+            "Hour2": 31 * day,
+            "Day1": 366 * day,
+        }.get(interval, 7 * day)
+
+        result = []
+        cursor = start_time
+        while cursor <= end_time:
+            window_end = min(cursor + window_size - 1, end_time)
+            result.append((cursor, window_end))
+            cursor = window_end + 1
+        return result
 
     def _execute_metric_queries(
         self,
@@ -262,69 +334,89 @@ class InsightMetricCollector:
 
         for stat_name, payloads in queries_by_stat.items():
             for chunk in self._chunk_list(payloads, self.MAX_QUERY_SIZE):
-                try:
-                    response = insight_api.get_query_data_multiple(
-                        time_start=start_time,
-                        time_end=end_time,
-                        metric_info_list=chunk,
-                    )
-                except Exception as exc:
-                    target_ids = sorted(
-                        {
-                            str(payload.get("dimensions", {}).get("instanceNo"))
-                            for payload in chunk
-                            if payload.get("dimensions", {}).get("instanceNo")
-                            is not None
-                        }
-                    )
-                    metric_names = sorted(
-                        {
-                            str(payload.get("metric"))
-                            for payload in chunk
-                            if payload.get("metric") is not None
-                        }
-                    )
-                    self._record_error(
-                        stage="query",
-                        api="get_query_data_multiple",
-                        exc=exc,
-                        target_id=",".join(target_ids) or None,
-                        product_key=(
-                            str(chunk[0].get("prodKey"))
-                            if chunk and chunk[0].get("prodKey") is not None
-                            else None
-                        ),
-                        metric=",".join(metric_names) or None,
-                        stat_name=stat_name,
-                    )
-                    continue
-
-                try:
-                    validate_collection_response(
-                        response,
-                        expected_keys=("metrics", "items"),
-                        allow_list=True,
-                        api_name="get_query_data_multiple",
-                    )
-                except Exception as exc:
-                    self._record_error(
-                        stage="response",
-                        api="get_query_data_multiple",
-                        product_key=(
-                            str(chunk[0].get("prodKey"))
-                            if chunk and chunk[0].get("prodKey") is not None
-                            else None
-                        ),
-                        stat_name=stat_name,
-                        exc=exc,
-                    )
-                    continue
-
-                self.normalizer.merge_metric_response(
-                    raw_metrics=raw_metrics,
-                    response=response,
-                    stat_name=stat_name,
+                interval = str(chunk[0].get("interval") or "Min5")
+                time_windows = self._query_time_windows(
+                    start_time=start_time,
+                    end_time=end_time,
+                    interval=interval,
                 )
+
+                for window_start, window_end in time_windows:
+                    try:
+                        response = insight_api.get_query_data_multiple(
+                            time_start=window_start,
+                            time_end=window_end,
+                            metric_info_list=chunk,
+                        )
+                    except Exception as exc:
+                        target_ids = sorted(
+                            {
+                                str(
+                                    payload.get("dimensions", {}).get(
+                                        "instanceNo"
+                                    )
+                                )
+                                for payload in chunk
+                                if payload.get("dimensions", {}).get(
+                                    "instanceNo"
+                                )
+                                is not None
+                            }
+                        )
+                        metric_names = sorted(
+                            {
+                                str(payload.get("metric"))
+                                for payload in chunk
+                                if payload.get("metric") is not None
+                            }
+                        )
+                        self._record_error(
+                            stage="query",
+                            api="get_query_data_multiple",
+                            exc=exc,
+                            target_id=",".join(target_ids) or None,
+                            product_key=(
+                                str(chunk[0].get("prodKey"))
+                                if (
+                                    chunk
+                                    and chunk[0].get("prodKey") is not None
+                                )
+                                else None
+                            ),
+                            metric=",".join(metric_names) or None,
+                            stat_name=stat_name,
+                        )
+                        continue
+
+                    try:
+                        validate_collection_response(
+                            response,
+                            expected_keys=("metrics", "items"),
+                            allow_list=True,
+                            api_name="get_query_data_multiple",
+                        )
+                    except Exception as exc:
+                        self._record_error(
+                            stage="response",
+                            api="get_query_data_multiple",
+                            product_key=(
+                                str(chunk[0].get("prodKey"))
+                                if (
+                                    chunk
+                                    and chunk[0].get("prodKey") is not None
+                                )
+                                else None
+                            ),
+                            stat_name=stat_name,
+                            exc=exc,
+                        )
+                        continue
+
+                    self.normalizer.merge_metric_response(
+                        raw_metrics=raw_metrics,
+                        response=response,
+                        stat_name=stat_name,
+                    )
 
         return raw_metrics
 

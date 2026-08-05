@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}MSP 통합 대시보드{% endblock %}
+{% block content %}
+<header class="page-header"><div><span class="eyebrow">MSP CONTROL CENTER</span><h1>통합 대시보드</h1><p>확인이 필요한 고객을 우선순위대로 살펴보세요.</p></div><span class="live-badge">운영 데이터</span></header>
+<section class="stat-grid">
+  <article class="stat-card"><span>전체 고객</span><strong>{{ summary.customer_count }}</strong><small>활성·온보딩 고객사</small></article>
+  <article class="stat-card blue"><span>민간 고객</span><strong>{{ summary.public_count }}</strong><small>Public 환경</small></article>
+  <article class="stat-card violet"><span>공공 고객</span><strong>{{ summary.gov_count }}</strong><small>GOV 환경</small></article>
+  <article class="stat-card alert"><span>확인 필요</span><strong>{{ summary.issue_count }}</strong><small>오류·이벤트·미수집</small></article>
+</section>
+<section class="panel">
+  <div class="panel-heading"><div><h2>확인이 필요한 고객</h2><p>최근 보고서 기준으로 수집 오류와 주요 이벤트를 모았습니다.</p></div></div>
+  {% if issue_customers %}
+  <div class="table-wrap"><table><thead><tr><th>고객사</th><th>환경</th><th>보고일</th><th>상태</th><th>Critical</th><th>Warning</th><th>수집 오류</th><th></th></tr></thead><tbody>
+  {% for item in issue_customers %}<tr><td><strong>{{ item.customer_name }}</strong><small>{{ item.customer_code }}</small></td><td><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></td><td>{{ item.fact_date or '보고서 없음' }}</td><td><span class="status {{ 'ok' if item.collection_status == 'SUCCESS' else 'warn' }}">{{ item.collection_status or '미수집' }}</span></td><td>{{ item.critical_count or 0 }}</td><td>{{ item.warning_count or 0 }}</td><td>{{ item.collection_error_count or 0 }}</td><td><a class="table-link" href="{{ url_for('msp_customer', tenant_id=item.tenant_id) }}">상세 보기</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty"><strong>현재 확인할 이슈가 없습니다.</strong><p>모든 고객 보고서가 정상 상태입니다.</p></div>{% endif %}
+</section>
+{% endblock %}

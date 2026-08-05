@@ -121,6 +121,13 @@ class RunnerPipelineTests(unittest.TestCase):
         runner.output_dir = output_dir
         return runner
 
+    def test_runner_accepts_report_repository(self):
+        repository = object()
+        with patch("app.runner.APIFactory"):
+            runner = ReportRunner(report_repository=repository)
+
+        self.assertIs(runner.report_repository, repository)
+
     def test_runner_default_output_keeps_legacy_path(self):
         with (
             patch.dict("app.runner.os.environ", {}, clear=True),
@@ -214,6 +221,69 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertTrue(period["is_full_month"])
         self.assertTrue(period["is_closed_month"])
 
+    def test_datetime_range_uses_exclusive_end_and_time_file_suffix(self):
+        runner = self._runner_without_factory_init()
+
+        period = runner.get_period(
+            start_datetime="2026-08-02 09:00",
+            end_datetime="2026-08-03 09:00",
+        )
+
+        self.assertEqual(period["period_type"], "datetime_range")
+        self.assertEqual(period["start_dt"], "2026-08-02 09:00:00")
+        self.assertEqual(period["end_dt"], "2026-08-03 09:00:00")
+        self.assertEqual(period["end_time"] - period["start_time"], 86_399_999)
+        self.assertEqual(period["use_start_date"], "20260802")
+        self.assertEqual(period["use_end_date"], "20260803")
+        self.assertEqual(
+            period["file_suffix"],
+            "20260802_090000_20260803_090000",
+        )
+        self.assertTrue(period["end_exclusive"])
+
+    def test_midnight_datetime_end_does_not_expand_billing_day(self):
+        runner = self._runner_without_factory_init()
+
+        period = runner.get_period(
+            start_datetime="2026-08-02T00:00:00",
+            end_datetime="2026-08-03T00:00:00",
+        )
+
+        self.assertEqual(period["use_end_date"], "20260802")
+
+    def test_datetime_range_rejects_non_positive_duration(self):
+        runner = self._runner_without_factory_init()
+
+        with self.assertRaisesRegex(ValueError, "빨라야"):
+            runner.get_period(
+                start_datetime="2026-08-02 10:00",
+                end_datetime="2026-08-02 10:00",
+            )
+
+    def test_datetime_range_accepts_today_and_yesterday_aliases(self):
+        runner = self._runner_without_factory_init()
+        runner._today_kst = lambda: date(2026, 8, 3)
+
+        period = runner.get_period(
+            start_datetime="yesterday 09:00",
+            end_datetime="today 09:00",
+        )
+
+        self.assertEqual(period["start_dt"], "2026-08-02 09:00:00")
+        self.assertEqual(period["end_dt"], "2026-08-03 09:00:00")
+
+    def test_datetime_range_accepts_korean_alias_and_t_separator(self):
+        runner = self._runner_without_factory_init()
+        runner._today_kst = lambda: date(2026, 8, 3)
+
+        period = runner.get_period(
+            start_datetime="오늘T14:00",
+            end_datetime="오늘T15:00",
+        )
+
+        self.assertEqual(period["start_dt"], "2026-08-03 14:00:00")
+        self.assertEqual(period["end_dt"], "2026-08-03 15:00:00")
+
     def test_run_passes_billing_comparison_flag_for_scope(self):
         CapturingBillingNormalizer.comparison_flags = []
 
@@ -250,6 +320,53 @@ class RunnerPipelineTests(unittest.TestCase):
             CapturingBillingNormalizer.comparison_flags,
             [True, False],
         )
+
+    def test_run_returns_web_ready_result_and_writes_html(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = self._runner_without_factory_init(temp_dir)
+            runner._today_kst = lambda: date(2026, 7, 15)
+
+            with (
+                patch("app.runner.ServerCollector", EmptyServerCollector),
+                patch(
+                    "app.runner.ActivityTracerEventCollector",
+                    EmptyActivityCollector,
+                ),
+                patch("app.runner.BillingCollector", EmptyBillingCollector),
+                patch(
+                    "app.runner.BillingNormalizer",
+                    CapturingBillingNormalizer,
+                ),
+                patch.object(
+                    runner,
+                    "collect_insight_metrics",
+                    return_value=([], []),
+                ),
+                patch.object(
+                    runner,
+                    "collect_insight_events",
+                    return_value=([], {}, []),
+                ),
+            ):
+                report = runner.run(target_month="2026-06")
+
+            suffix = "20260601_20260630"
+            html_path = Path(temp_dir) / f"ncp_report_{suffix}.html"
+            json_path = Path(temp_dir) / f"ncp_report_{suffix}.json"
+
+            self.assertEqual(report.report_id, suffix)
+            self.assertTrue(html_path.exists())
+            self.assertTrue(json_path.exists())
+            self.assertIn(
+                "NCP 이용 보고서",
+                html_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                json.loads(json_path.read_text(encoding="utf-8"))[
+                    "schema_version"
+                ],
+                "1.0",
+            )
 
     def test_period_scoped_empty_summary_files_replace_stale_content(self):
         with tempfile.TemporaryDirectory() as temp_dir:

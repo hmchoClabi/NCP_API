@@ -1,0 +1,66 @@
+{{- if and .Values.backups.enabled .Values.postgresql.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-database-backup
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+spec:
+  schedule: {{ .Values.backups.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "ncp-report.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: database-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: {{ .Values.postgresql.image }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-ec"]
+              args:
+                - >-
+                  umask 077;
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ);
+                  pg_dump --format=custom --no-owner --no-acl
+                  --file="/backup/ncp-report-${stamp}.dump";
+                  find /backup -type f -name 'ncp-report-*.dump'
+                  -mtime +{{ .Values.backups.retentionDays }} -delete
+              env:
+                - name: PGHOST
+                  value: {{ include "ncp-report.databaseHost" . | quote }}
+                - name: PGPORT
+                  value: {{ .Values.database.port | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.database.name | quote }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.existingSecret }}
+                      key: DB_ADMIN_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.existingSecret }}
+                      key: DB_ADMIN_PASSWORD
+              volumeMounts:
+                - name: backups
+                  mountPath: /backup
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ include "ncp-report.fullname" . }}-backups
+{{- end }}

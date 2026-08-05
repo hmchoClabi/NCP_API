@@ -1,0 +1,159 @@
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16}
+    container_name: ncp-report-postgres
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD}
+      DB_CONTROL_APP_PASSWORD: ${DB_CONTROL_APP_PASSWORD}
+      DB_PUBLIC_WORKER_PASSWORD: ${DB_PUBLIC_WORKER_PASSWORD}
+      DB_GOV_WORKER_PASSWORD: ${DB_GOV_WORKER_PASSWORD}
+      DB_MSP_APP_PASSWORD: ${DB_MSP_APP_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --data-checksums"
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${DB_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_ADMIN_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - ncp_report_pgdata:/var/lib/postgresql/data
+
+  migrate:
+    image: postgres:${POSTGRES_VERSION:-16}
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${DB_NAME}
+      PGUSER: ${DB_ADMIN_USER}
+      PGPASSWORD: ${DB_ADMIN_PASSWORD}
+      DB_CONTROL_APP_PASSWORD: ${DB_CONTROL_APP_PASSWORD}
+      DB_PUBLIC_WORKER_PASSWORD: ${DB_PUBLIC_WORKER_PASSWORD}
+      DB_GOV_WORKER_PASSWORD: ${DB_GOV_WORKER_PASSWORD}
+      DB_MSP_APP_PASSWORD: ${DB_MSP_APP_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./database/schema:/schema:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        for file in /schema/*.sql; do
+          echo "Applying $${file##*/}";
+          psql -v ON_ERROR_STOP=1 -f "$$file";
+        done
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ncp-report:${IMAGE_TAG:-local}
+    container_name: ncp-report-web
+    restart: unless-stopped
+    environment: &application-environment
+      REPORT_DB_ENABLED: "true"
+      REPORT_DB_REQUIRED: "true"
+      REPORT_DB_ROLE: msp
+      REPORT_DB_HOST: postgres
+      REPORT_DB_PORT: 5432
+      REPORT_DB_NAME: ${DB_NAME}
+      REPORT_DB_USER: ncp_msp_app
+      REPORT_DB_PASSWORD: ${DB_MSP_APP_PASSWORD}
+      REPORT_DB_SSLMODE: disable
+      REPORT_OUTPUT_DIR: /app/output/report
+      CREDENTIAL_MASTER_KEY_FILE: /run/secrets/credential-master-key
+      WEB_SECRET_KEY: ${WEB_SECRET_KEY}
+      WEB_COOKIE_SECURE: ${WEB_COOKIE_SECURE:-false}
+      TZ: Asia/Seoul
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    secrets:
+      - credential-master-key
+    volumes:
+      - ncp_report_artifacts:/app/output
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  scheduler:
+    image: ncp-report:${IMAGE_TAG:-local}
+    container_name: ncp-report-scheduler
+    restart: unless-stopped
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "-m", "webapp.scheduler"]
+
+  worker-public:
+    image: ncp-report:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      <<: *application-environment
+      REPORT_DB_ROLE: public_worker
+      REPORT_DB_USER: ncp_public_worker
+      REPORT_DB_PASSWORD: ${DB_PUBLIC_WORKER_PASSWORD}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    secrets:
+      - credential-master-key
+    volumes:
+      - ncp_report_artifacts:/app/output
+    command: ["python", "-m", "webapp.job_worker", "--environment", "public"]
+    stop_grace_period: 30m
+
+  worker-gov:
+    image: ncp-report:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      <<: *application-environment
+      REPORT_DB_ROLE: gov_worker
+      REPORT_DB_USER: ncp_gov_worker
+      REPORT_DB_PASSWORD: ${DB_GOV_WORKER_PASSWORD}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    secrets:
+      - credential-master-key
+    volumes:
+      - ncp_report_artifacts:/app/output
+    command: ["python", "-m", "webapp.job_worker", "--environment", "gov"]
+    stop_grace_period: 30m
+
+  report-runner:
+    image: ncp-report:${IMAGE_TAG:-local}
+    profiles: ["tools"]
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    secrets:
+      - credential-master-key
+    volumes:
+      - ncp_report_artifacts:/app/output
+    command: ["python", "-m", "webapp.worker", "--help"]
+
+secrets:
+  credential-master-key:
+    file: ./secrets/credential-master-key
+
+volumes:
+  ncp_report_pgdata:
+    name: ncp-report-pgdata
+  ncp_report_artifacts:
+    name: ncp-report-artifacts

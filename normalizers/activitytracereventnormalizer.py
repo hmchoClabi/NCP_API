@@ -1,8 +1,14 @@
 from collections import defaultdict
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+from utils.event_sort import sort_event_records
 
 
 class ActivityTracerEventNormalizer:
+    KST = ZoneInfo("Asia/Seoul")
+
     def __init__(self) -> None:
         self.last_errors: List[Dict[str, Any]] = []
 
@@ -37,7 +43,7 @@ class ActivityTracerEventNormalizer:
                     exc=exc,
                 )
 
-        return result
+        return sort_event_records(result, ("event_time",))
 
     def group_events(
         self,
@@ -100,6 +106,7 @@ class ActivityTracerEventNormalizer:
         event: Dict[str, Any],
     ) -> Dict[str, Any]:
         product_data = event.get("productData") or {}
+        event_time = event.get("eventTime")
 
         if not isinstance(product_data, dict):
             product_data = {}
@@ -107,7 +114,8 @@ class ActivityTracerEventNormalizer:
         return {
             "event_id": event.get("historyId"),
             "nrn": event.get("nrn"),
-            "event_time": event.get("eventTime"),
+            "event_time": event_time,
+            "event_time_kst": self._format_event_time_kst(event_time),
 
             "platform_type": event.get("platformType"),
 
@@ -141,6 +149,31 @@ class ActivityTracerEventNormalizer:
             # 원본 보존
             "raw": event,
         }
+
+    def _format_event_time_kst(self, value: Any) -> Optional[str]:
+        if value is None or isinstance(value, bool):
+            return None
+
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            return None
+
+        # Activity Tracer eventTime is Unix epoch milliseconds. Accepting
+        # seconds as well keeps the normalizer tolerant of older fixtures.
+        if abs(timestamp) >= 100_000_000_000:
+            timestamp /= 1000
+
+        try:
+            event_dt = datetime.fromtimestamp(timestamp, tz=self.KST)
+        except (OSError, OverflowError, ValueError):
+            return None
+
+        milliseconds = event_dt.microsecond // 1000
+        return (
+            event_dt.strftime("%Y-%m-%d %H:%M:%S")
+            + f".{milliseconds:03d} KST"
+        )
 
     def _record_error(
         self,

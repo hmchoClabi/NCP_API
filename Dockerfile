@@ -1,0 +1,32 @@
+FROM postgres:16 AS migration
+
+COPY database/schema /schema
+COPY deploy/docker/migrate.sh /migration/migrate.sh
+
+ENTRYPOINT ["/bin/sh", "/migration/migrate.sh"]
+CMD ["migrate"]
+
+FROM python:3.13-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --shell /usr/sbin/nologin app
+
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r /app/requirements.txt
+
+COPY --chown=app:app . /app
+RUN mkdir -p /app/output/report \
+    && chown -R app:app /app/output
+
+USER app
+
+EXPOSE 8080
+
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "webapp.wsgi:app"]
