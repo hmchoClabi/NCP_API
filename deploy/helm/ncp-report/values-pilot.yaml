@@ -1,8 +1,8 @@
 fullnameOverride: ncp-report
 
 image:
-  # NKS pulls over the registry's private endpoint. Local builds are pushed to
-  # architect-ncp-report.kr.ncr.ntruss.com by deploy/scripts/build-and-push.*.
+  # SourceBuild pushes to the registry public endpoint. NKS pulls the same
+  # image through this private endpoint.
   repository: hhgee3ff.kr.private-ncr.ntruss.com/ncp-report
   tag: pilot-20260805-002
   pullPolicy: IfNotPresent

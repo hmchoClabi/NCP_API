@@ -1,5 +1,9 @@
 # SourceCommit-based release
 
+> Normal local image builds are disabled. Configure NCP SourceBuild with
+> `deploy/SOURCEBUILD_SETUP.md`. The legacy local builder now requires the
+> explicit emergency-only `-AllowLocalBuild` switch.
+
 The release source of truth is the commit pushed to NCP SourceCommit. The
 release script refuses dirty working trees, runs tests, pushes `HEAD`, verifies
 the remote branch SHA, labels both images with that full SHA, and only then
@@ -35,12 +39,13 @@ git diff --cached --check
 git commit -m "Describe the release"
 ```
 
-Run the guarded release:
+Emergency-only local release:
 
 ```powershell
 $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
 .\deploy\scripts\release-from-sourcecommit.ps1 `
-  -Helm "C:\Tools\helm\helm.exe"
+  -Helm "C:\Tools\helm\helm.exe" `
+  -AllowLocalBuild
 ```
 
 The image tag is derived from the commit, for example `git-a1b2c3d4e5f6`.

@@ -1,0 +1,9 @@
+FROM postgres:16
+
+LABEL org.opencontainers.image.source="NCP SourceCommit architect_report"
+
+COPY database/schema /schema
+COPY deploy/docker/migrate.sh /migration/migrate.sh
+
+ENTRYPOINT ["/bin/sh", "/migration/migrate.sh"]
+CMD ["migrate"]

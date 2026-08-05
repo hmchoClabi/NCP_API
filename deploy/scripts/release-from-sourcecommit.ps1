@@ -6,11 +6,16 @@ param(
     [string]$Release = "ncp-report",
     [string]$ValuesFile = ".\deploy\helm\ncp-report\values-pilot.yaml",
     [string]$Helm = "helm",
+    [switch]$AllowLocalBuild,
     [switch]$SkipTests,
     [switch]$SkipDeploy
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $AllowLocalBuild) {
+    throw "Local image builds are disabled. Use SourceBuild and deploy-sourcebuild-images.ps1."
+}
 
 if ($Remote -notmatch '^[A-Za-z0-9._-]+$') { throw "Invalid remote name." }
 if ($Branch -notmatch '^[A-Za-z0-9._/-]+$') { throw "Invalid branch name." }

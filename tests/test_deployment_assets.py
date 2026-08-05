@@ -114,3 +114,28 @@ def test_image_build_records_full_git_revision():
     assert "org.opencontainers.image.revision=$Revision" in script
     assert "Revision must be a full Git commit SHA" in script
     assert "[Parameter(Mandatory = $true)]" in script
+
+
+def test_sourcebuild_has_separate_runtime_and_migration_images():
+    runtime = (ROOT / "Dockerfile.runtime").read_text(encoding="utf-8")
+    migration = (ROOT / "Dockerfile.migration").read_text(encoding="utf-8")
+
+    assert "webapp.wsgi:app" in runtime
+    assert "postgres:16" not in runtime
+    assert "FROM postgres:16" in migration
+    assert "database/schema" in migration
+
+
+def test_normal_release_does_not_build_images_locally():
+    legacy = (
+        ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1"
+    ).read_text(encoding="utf-8")
+    deployment = (
+        ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert "AllowLocalBuild" in legacy
+    assert "Local image builds are disabled" in legacy
+    assert "docker build" not in deployment.lower()
+    assert "git ls-remote sourcecommit refs/heads/main" in deployment
+    assert "--atomic --wait" in deployment

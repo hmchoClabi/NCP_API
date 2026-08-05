@@ -26,6 +26,8 @@ spec:
       app.kubernetes.io/component: {{ $component.name }}
   template:
     metadata:
+      annotations:
+        ncp-report/source-revision: {{ $root.Values.sourceRevision | quote }}
       labels:
         {{- include "ncp-report.selectorLabels" $root | nindent 8 }}
         app.kubernetes.io/component: {{ $component.name }}
