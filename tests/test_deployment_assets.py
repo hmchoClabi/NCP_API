@@ -126,6 +126,17 @@ def test_sourcebuild_has_separate_runtime_and_migration_images():
     assert "database/schema" in migration
 
 
+def test_sourcebuild_test_dependencies_are_separate_from_runtime():
+    runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    build_requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    setup = (ROOT / "deploy" / "SOURCEBUILD_SETUP.md").read_text(encoding="utf-8")
+
+    assert "pytest" not in runtime_requirements.lower()
+    assert "-r requirements.txt" in build_requirements
+    assert "pytest" in build_requirements.lower()
+    assert "requirements-dev.txt" in setup
+
+
 def test_normal_release_does_not_build_images_locally():
     legacy = (
         ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1"
