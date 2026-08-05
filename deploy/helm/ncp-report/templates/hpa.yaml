@@ -1,0 +1,54 @@
+{{- $root := . -}}
+{{- $targets := list
+  (dict "name" "web" "config" .Values.web.autoscaling)
+  (dict "name" "worker-public" "config" .Values.workers.public.autoscaling)
+  (dict "name" "worker-gov" "config" .Values.workers.gov.autoscaling)
+-}}
+{{- $rendered := false -}}
+{{- range $target := $targets }}
+{{- if $target.config.enabled }}
+{{- if $rendered }}
+---
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "ncp-report.fullname" $root }}-{{ $target.name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "ncp-report.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $target.name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "ncp-report.fullname" $root }}-{{ $target.name }}
+  minReplicas: {{ $target.config.minReplicas }}
+  maxReplicas: {{ $target.config.maxReplicas }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $target.config.targetCPUUtilizationPercentage }}
+{{- $rendered = true -}}
+{{- end }}
+{{- end }}

@@ -1,9 +1,9 @@
 {{- $root := . -}}
 {{- $components := list
-  (dict "name" "web" "role" "msp" "user" "ncp_msp_app" "passwordKey" "DB_MSP_APP_PASSWORD" "replicas" .Values.web.replicas "resources" .Values.web.resources "credentials" true "artifacts" true)
+  (dict "name" "web" "role" "msp" "user" "ncp_msp_app" "passwordKey" "DB_MSP_APP_PASSWORD" "replicas" .Values.web.replicas "autoscaling" .Values.web.autoscaling "resources" .Values.web.resources "credentials" true "artifacts" true)
   (dict "name" "scheduler" "role" "msp" "user" "ncp_msp_app" "passwordKey" "DB_MSP_APP_PASSWORD" "replicas" .Values.scheduler.replicas "resources" .Values.scheduler.resources "credentials" false "artifacts" false "command" (list "python" "-m" "webapp.scheduler"))
-  (dict "name" "worker-public" "role" "public_worker" "user" "ncp_public_worker" "passwordKey" "DB_PUBLIC_WORKER_PASSWORD" "replicas" .Values.workers.public.replicas "resources" .Values.workers.public.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "public"))
-  (dict "name" "worker-gov" "role" "gov_worker" "user" "ncp_gov_worker" "passwordKey" "DB_GOV_WORKER_PASSWORD" "replicas" .Values.workers.gov.replicas "resources" .Values.workers.gov.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "gov"))
+  (dict "name" "worker-public" "role" "public_worker" "user" "ncp_public_worker" "passwordKey" "DB_PUBLIC_WORKER_PASSWORD" "replicas" .Values.workers.public.replicas "autoscaling" .Values.workers.public.autoscaling "resources" .Values.workers.public.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "public"))
+  (dict "name" "worker-gov" "role" "gov_worker" "user" "ncp_gov_worker" "passwordKey" "DB_GOV_WORKER_PASSWORD" "replicas" .Values.workers.gov.replicas "autoscaling" .Values.workers.gov.autoscaling "resources" .Values.workers.gov.resources "credentials" true "artifacts" true "command" (list "python" "-m" "webapp.job_worker" "--environment" "gov"))
 -}}
 {{- range $index, $component := $components }}
 {{- if gt $index 0 }}
@@ -13,11 +13,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "ncp-report.fullname" $root }}-{{ $component.name }}
+  namespace: {{ $root.Release.Namespace }}
   labels:
     {{- include "ncp-report.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $component.name }}
 spec:
+  {{- if not (and (hasKey $component "autoscaling") $component.autoscaling.enabled) }}
   replicas: {{ $component.replicas }}
+  {{- end }}
   strategy:
     type: RollingUpdate
   selector:
@@ -38,6 +41,7 @@ spec:
       {{- include "ncp-report.imagePullSecrets" $root | nindent 6 }}
       securityContext:
 {{ toYaml $root.Values.podSecurityContext | indent 8 }}
+      {{- if $root.Values.migration.enabled }}
       initContainers:
         - name: wait-schema
           image: "{{ $root.Values.migration.image.repository }}:{{ $root.Values.migration.image.tag }}"
@@ -63,6 +67,7 @@ spec:
               value: {{ $root.Values.migration.waitSeconds | quote }}
           securityContext:
 {{ toYaml $root.Values.containerSecurityContext | indent 12 }}
+      {{- end }}
       containers:
         - name: {{ $component.name }}
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"

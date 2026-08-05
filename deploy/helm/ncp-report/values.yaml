@@ -9,6 +9,7 @@ image:
   pullSecrets: []
 
 migration:
+  enabled: true
   image:
     repository: ncp-report-migrate
     tag: local
@@ -26,6 +27,11 @@ database:
 
 web:
   replicas: 1
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
   resources:
     requests: {cpu: 250m, memory: 512Mi}
     limits: {cpu: "1", memory: 1Gi}
@@ -42,11 +48,21 @@ workers:
   pollSeconds: 5
   public:
     replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 2Gi}
   gov:
     replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
     resources:
       requests: {cpu: 250m, memory: 512Mi}
       limits: {cpu: "1", memory: 2Gi}

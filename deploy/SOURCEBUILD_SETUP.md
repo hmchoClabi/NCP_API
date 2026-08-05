@@ -1,11 +1,12 @@
 # NCP cloud build setup
 
 Local Docker builds are disabled for normal releases. NCP SourceBuild builds
-two least-privilege images from the `architect_report` SourceCommit `master`
-branch. SourceBuild uploads both images to `architect-ncp-report` Container
+the runtime image from the `architect_report` SourceCommit `master` branch.
+A separate least-privilege migration image is built only for database schema
+releases. SourceBuild uploads images to the `architect-report-build` Container
 Registry; the deployment script only updates NKS to the resulting tags. The
 expected authenticated endpoint is
-`architect-ncp-report.kr.ncr.ntruss.com`. Enabling this endpoint does not make
+`architect-report-build.kr.ncr.ntruss.com`. Enabling this endpoint does not make
 the registry publicly readable; keep the separate Public Registry option
 disabled.
 
@@ -53,7 +54,7 @@ Docker image build settings:
 | --- | --- |
 | Use Docker image build | Enabled |
 | Dockerfile path | `Dockerfile.runtime` |
-| Container Registry | `architect-ncp-report` |
+| Container Registry | `architect-report-build` |
 | Image name | `ncp-report` |
 | Image tag | `build-#` |
 | Set latest tag | Enabled |
@@ -112,7 +113,7 @@ Migration Docker image settings:
 | Field | Value |
 | --- | --- |
 | Dockerfile path | `Dockerfile.migration` |
-| Container Registry | `architect-ncp-report` |
+| Container Registry | `architect-report-build` |
 | Image name | `ncp-report-migrate` |
 | Image tag | `build-#` |
 | Set latest tag | Enabled |
@@ -126,40 +127,43 @@ Migration upload and integrations:
 | Cloud Log Analytics | Disabled initially |
 | File Safer | Disabled initially |
 
-The runtime project owns the full tests. Configure the pipeline so the
-migration build starts only after the runtime build succeeds.
+The runtime project owns the full tests. Do not put the migration project in
+the routine runtime pipeline. Run it deliberately only when `database/schema`
+or the migration runner changes.
 
 ## Deploy cloud-built tags
 
-After both SourceBuild projects succeed, copy their immutable `build-N` tags
-and the full SourceCommit SHA. This command performs no Docker build:
+After the runtime SourceBuild project succeeds, copy its immutable `build-N`
+tag and the full SourceCommit SHA. This command performs no Docker build:
 
 ```powershell
 $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
 .\deploy\scripts\deploy-sourcebuild-images.ps1 `
   -RuntimeTag "build-1" `
-  -MigrationTag "build-1" `
   -SourceRevision "FULL_40_CHARACTER_SOURCECOMMIT_SHA" `
   -Helm "C:\Tools\helm\helm.exe"
 ```
 
+For a schema release, build the migration image from the same commit and add:
+
+```powershell
+  -EnableMigration -MigrationTag "build-1"
+```
+
 The script rejects a revision that does not equal SourceCommit `master`, then
 performs an atomic Helm rollout. Kubernetes pulls through the authenticated
-registry public endpoint. Local Docker is not used.
+registry private endpoint. Local Docker is not used.
 
 ## Pipeline stage after the first cloud build
 
-Once both projects are proven independently, create a SourcePipeline triggered
+Once the runtime project is proven independently, create a SourcePipeline triggered
 by SourceCommit `master`:
 
 1. SourceCommit trigger (`architect_report/master`).
 2. Runtime SourceBuild project; tests and runtime image.
-3. Migration SourceBuild project.
-4. Controlled deployment stage.
+3. Controlled SourceDeploy stage for the NKS runtime objects.
 
-SourceDeploy requires plain Kubernetes manifests stored in SourceCommit. The
-current production-safe migration flow is a Helm pre-rollout Job, so the first
-cloud-build stage deliberately keeps deployment as the small, build-free Helm
-command above. Move deployment to SourceDeploy only after providing an
-equivalent one-time migration mechanism; do not run schema migration from every
-application pod.
+SourceDeploy uses the committed `deploy/sourcedeploy/runtime.yaml` manifest for
+routine application rollouts. Database migration remains a separate,
+deliberate Helm operation and is not part of the automatic runtime pipeline.
+See `deploy/SOURCEPIPELINE_SETUP.md` for the console configuration.

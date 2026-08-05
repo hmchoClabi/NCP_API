@@ -1,7 +1,7 @@
 param(
     [string]$Remote = "sourcecommit",
     [string]$Branch = "master",
-    [string]$Registry = "architect-ncp-report.kr.ncr.ntruss.com",
+    [string]$Registry = "architect-report-build.kr.ncr.ntruss.com",
     [string]$Namespace = "ncp-report",
     [string]$Release = "ncp-report",
     [string]$ValuesFile = ".\deploy\helm\ncp-report\values-pilot.yaml",

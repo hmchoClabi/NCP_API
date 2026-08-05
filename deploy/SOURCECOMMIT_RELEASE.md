@@ -50,7 +50,7 @@ $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
 
 The image tag is derived from the commit, for example `git-a1b2c3d4e5f6`.
 Rerunning the same commit creates the same release identity. Kubernetes pulls
-over the authenticated registry public endpoint configured in
+over the authenticated registry private endpoint configured in
 `values-pilot.yaml`.
 
 Use `-SkipDeploy` only when publishing images for a later controlled rollout.

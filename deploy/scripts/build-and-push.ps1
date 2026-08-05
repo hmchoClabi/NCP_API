@@ -1,5 +1,5 @@
 param(
-    [string]$Registry = "architect-ncp-report.kr.ncr.ntruss.com",
+    [string]$Registry = "architect-report-build.kr.ncr.ntruss.com",
     [Parameter(Mandatory = $true)]
     [string]$Tag,
     [string]$Context = ".",

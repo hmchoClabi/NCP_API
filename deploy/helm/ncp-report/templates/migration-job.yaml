@@ -1,3 +1,4 @@
+{{- if .Values.migration.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -66,3 +67,4 @@ spec:
               value: {{ .Values.migration.waitSeconds | quote }}
           securityContext:
 {{ toYaml .Values.containerSecurityContext | indent 12 }}
+{{- end }}

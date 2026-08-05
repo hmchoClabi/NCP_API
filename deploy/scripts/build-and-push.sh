@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-registry="${1:-architect-ncp-report.kr.ncr.ntruss.com}"
+registry="${1:-architect-report-build.kr.ncr.ntruss.com}"
 tag="${2:-pilot-20260804-001}"
 
 case "$registry" in

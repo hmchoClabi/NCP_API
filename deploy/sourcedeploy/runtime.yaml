@@ -1,0 +1,723 @@
+---
+# Source: ncp-report/templates/deployments.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ncp-report-web
+  namespace: ncp-report
+  labels:
+    app.kubernetes.io/name: ncp-report
+    app.kubernetes.io/instance: ncp-report
+    app.kubernetes.io/managed-by: SourceDeploy
+    helm.sh/chart: "ncp-report-0.1.0"
+    app.kubernetes.io/component: web
+spec:
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ncp-report
+      app.kubernetes.io/instance: ncp-report
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      annotations:
+        ncp-report/source-revision: "sourcepipeline"
+      labels:
+        app.kubernetes.io/name: ncp-report
+        app.kubernetes.io/instance: ncp-report
+        app.kubernetes.io/component: web
+    spec:
+      serviceAccountName: ncp-report
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      
+      imagePullSecrets:
+        - name: ncp-registry
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: "${registry_endpoint}/ncp-report:latest"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REPORT_DB_ENABLED
+              value: "true"
+            - name: REPORT_DB_REQUIRED
+              value: "true"
+            - name: REPORT_DB_HOST
+              value: "ncp-report-postgresql"
+            - name: REPORT_DB_PORT
+              value: "5432"
+            - name: REPORT_DB_NAME
+              value: "ncp_report"
+            - name: REPORT_DB_SSLMODE
+              value: "disable"
+            - name: REPORT_DB_ROLE
+              value: "msp"
+            - name: REPORT_DB_USER
+              value: "ncp_msp_app"
+            - name: REPORT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_MSP_APP_PASSWORD
+            - name: REPORT_DB_APPLICATION_NAME
+              value: "ncp-report-web"
+            - name: REPORT_OUTPUT_DIR
+              value: /app/output/report
+            - name: TZ
+              value: Asia/Seoul
+            - name: LOG_LEVEL
+              value: INFO
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PORT
+                  optional: true
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_FROM
+                  optional: true
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USERNAME
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PASSWORD
+                  optional: true
+            - name: SMTP_USE_TLS
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_TLS
+                  optional: true
+            - name: SMTP_USE_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_SSL
+                  optional: true
+            - name: WEB_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: WEB_SECRET_KEY
+            - name: WEB_COOKIE_SECURE
+              value: "false"
+            - name: CREDENTIAL_MASTER_KEY_FILE
+              value: /run/secrets/credential-master-key
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: credential-master-key
+              mountPath: /run/secrets/credential-master-key
+              subPath: credential-master-key
+              readOnly: true
+            - name: artifacts
+              mountPath: /app/output
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: credential-master-key
+          secret:
+            secretName: ncp-report-secrets
+            defaultMode: 0400
+            items:
+              - key: credential-master-key
+                path: credential-master-key
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: ncp-report-artifacts
+      nodeSelector:
+        {}
+      tolerations:
+        []
+      affinity:
+        {}
+---
+# Source: ncp-report/templates/deployments.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ncp-report-scheduler
+  namespace: ncp-report
+  labels:
+    app.kubernetes.io/name: ncp-report
+    app.kubernetes.io/instance: ncp-report
+    app.kubernetes.io/managed-by: SourceDeploy
+    helm.sh/chart: "ncp-report-0.1.0"
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ncp-report
+      app.kubernetes.io/instance: ncp-report
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      annotations:
+        ncp-report/source-revision: "sourcepipeline"
+      labels:
+        app.kubernetes.io/name: ncp-report
+        app.kubernetes.io/instance: ncp-report
+        app.kubernetes.io/component: scheduler
+    spec:
+      serviceAccountName: ncp-report
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      
+      imagePullSecrets:
+        - name: ncp-registry
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scheduler
+          image: "${registry_endpoint}/ncp-report:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - webapp.scheduler
+          env:
+            - name: REPORT_DB_ENABLED
+              value: "true"
+            - name: REPORT_DB_REQUIRED
+              value: "true"
+            - name: REPORT_DB_HOST
+              value: "ncp-report-postgresql"
+            - name: REPORT_DB_PORT
+              value: "5432"
+            - name: REPORT_DB_NAME
+              value: "ncp_report"
+            - name: REPORT_DB_SSLMODE
+              value: "disable"
+            - name: REPORT_DB_ROLE
+              value: "msp"
+            - name: REPORT_DB_USER
+              value: "ncp_msp_app"
+            - name: REPORT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_MSP_APP_PASSWORD
+            - name: REPORT_DB_APPLICATION_NAME
+              value: "ncp-report-scheduler"
+            - name: REPORT_OUTPUT_DIR
+              value: /app/output/report
+            - name: TZ
+              value: Asia/Seoul
+            - name: LOG_LEVEL
+              value: INFO
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PORT
+                  optional: true
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_FROM
+                  optional: true
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USERNAME
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PASSWORD
+                  optional: true
+            - name: SMTP_USE_TLS
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_TLS
+                  optional: true
+            - name: SMTP_USE_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_SSL
+                  optional: true
+            - name: SCHEDULER_POLL_SECONDS
+              value: "30"
+            - name: WORKER_STALE_MINUTES
+              value: "360"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      nodeSelector:
+        {}
+      tolerations:
+        []
+      affinity:
+        {}
+---
+# Source: ncp-report/templates/deployments.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ncp-report-worker-public
+  namespace: ncp-report
+  labels:
+    app.kubernetes.io/name: ncp-report
+    app.kubernetes.io/instance: ncp-report
+    app.kubernetes.io/managed-by: SourceDeploy
+    helm.sh/chart: "ncp-report-0.1.0"
+    app.kubernetes.io/component: worker-public
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ncp-report
+      app.kubernetes.io/instance: ncp-report
+      app.kubernetes.io/component: worker-public
+  template:
+    metadata:
+      annotations:
+        ncp-report/source-revision: "sourcepipeline"
+      labels:
+        app.kubernetes.io/name: ncp-report
+        app.kubernetes.io/instance: ncp-report
+        app.kubernetes.io/component: worker-public
+    spec:
+      serviceAccountName: ncp-report
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 1800
+      
+      imagePullSecrets:
+        - name: ncp-registry
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker-public
+          image: "${registry_endpoint}/ncp-report:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - webapp.job_worker
+            - --environment
+            - public
+          env:
+            - name: REPORT_DB_ENABLED
+              value: "true"
+            - name: REPORT_DB_REQUIRED
+              value: "true"
+            - name: REPORT_DB_HOST
+              value: "ncp-report-postgresql"
+            - name: REPORT_DB_PORT
+              value: "5432"
+            - name: REPORT_DB_NAME
+              value: "ncp_report"
+            - name: REPORT_DB_SSLMODE
+              value: "disable"
+            - name: REPORT_DB_ROLE
+              value: "public_worker"
+            - name: REPORT_DB_USER
+              value: "ncp_public_worker"
+            - name: REPORT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_PUBLIC_WORKER_PASSWORD
+            - name: REPORT_DB_APPLICATION_NAME
+              value: "ncp-report-worker-public"
+            - name: REPORT_OUTPUT_DIR
+              value: /app/output/report
+            - name: TZ
+              value: Asia/Seoul
+            - name: LOG_LEVEL
+              value: INFO
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PORT
+                  optional: true
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_FROM
+                  optional: true
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USERNAME
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PASSWORD
+                  optional: true
+            - name: SMTP_USE_TLS
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_TLS
+                  optional: true
+            - name: SMTP_USE_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_SSL
+                  optional: true
+            - name: WORKER_POLL_SECONDS
+              value: "5"
+            - name: CREDENTIAL_MASTER_KEY_FILE
+              value: /run/secrets/credential-master-key
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: credential-master-key
+              mountPath: /run/secrets/credential-master-key
+              subPath: credential-master-key
+              readOnly: true
+            - name: artifacts
+              mountPath: /app/output
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: credential-master-key
+          secret:
+            secretName: ncp-report-secrets
+            defaultMode: 0400
+            items:
+              - key: credential-master-key
+                path: credential-master-key
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: ncp-report-artifacts
+      nodeSelector:
+        {}
+      tolerations:
+        []
+      affinity:
+        {}
+---
+# Source: ncp-report/templates/deployments.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ncp-report-worker-gov
+  namespace: ncp-report
+  labels:
+    app.kubernetes.io/name: ncp-report
+    app.kubernetes.io/instance: ncp-report
+    app.kubernetes.io/managed-by: SourceDeploy
+    helm.sh/chart: "ncp-report-0.1.0"
+    app.kubernetes.io/component: worker-gov
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ncp-report
+      app.kubernetes.io/instance: ncp-report
+      app.kubernetes.io/component: worker-gov
+  template:
+    metadata:
+      annotations:
+        ncp-report/source-revision: "sourcepipeline"
+      labels:
+        app.kubernetes.io/name: ncp-report
+        app.kubernetes.io/instance: ncp-report
+        app.kubernetes.io/component: worker-gov
+    spec:
+      serviceAccountName: ncp-report
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 1800
+      
+      imagePullSecrets:
+        - name: ncp-registry
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker-gov
+          image: "${registry_endpoint}/ncp-report:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - webapp.job_worker
+            - --environment
+            - gov
+          env:
+            - name: REPORT_DB_ENABLED
+              value: "true"
+            - name: REPORT_DB_REQUIRED
+              value: "true"
+            - name: REPORT_DB_HOST
+              value: "ncp-report-postgresql"
+            - name: REPORT_DB_PORT
+              value: "5432"
+            - name: REPORT_DB_NAME
+              value: "ncp_report"
+            - name: REPORT_DB_SSLMODE
+              value: "disable"
+            - name: REPORT_DB_ROLE
+              value: "gov_worker"
+            - name: REPORT_DB_USER
+              value: "ncp_gov_worker"
+            - name: REPORT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_GOV_WORKER_PASSWORD
+            - name: REPORT_DB_APPLICATION_NAME
+              value: "ncp-report-worker-gov"
+            - name: REPORT_OUTPUT_DIR
+              value: /app/output/report
+            - name: TZ
+              value: Asia/Seoul
+            - name: LOG_LEVEL
+              value: INFO
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PORT
+                  optional: true
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_FROM
+                  optional: true
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USERNAME
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_PASSWORD
+                  optional: true
+            - name: SMTP_USE_TLS
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_TLS
+                  optional: true
+            - name: SMTP_USE_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: SMTP_USE_SSL
+                  optional: true
+            - name: WORKER_POLL_SECONDS
+              value: "5"
+            - name: CREDENTIAL_MASTER_KEY_FILE
+              value: /run/secrets/credential-master-key
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: credential-master-key
+              mountPath: /run/secrets/credential-master-key
+              subPath: credential-master-key
+              readOnly: true
+            - name: artifacts
+              mountPath: /app/output
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: credential-master-key
+          secret:
+            secretName: ncp-report-secrets
+            defaultMode: 0400
+            items:
+              - key: credential-master-key
+                path: credential-master-key
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: ncp-report-artifacts
+      nodeSelector:
+        {}
+      tolerations:
+        []
+      affinity:
+        {}
+---
+# Source: ncp-report/templates/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ncp-report-web
+  namespace: ncp-report
+  labels:
+    app.kubernetes.io/name: ncp-report
+    app.kubernetes.io/instance: ncp-report
+    app.kubernetes.io/managed-by: SourceDeploy
+    helm.sh/chart: "ncp-report-0.1.0"
+    app.kubernetes.io/component: web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ncp-report-web
+  minReplicas: 1
+  maxReplicas: 3
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

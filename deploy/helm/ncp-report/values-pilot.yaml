@@ -1,21 +1,29 @@
 fullnameOverride: ncp-report
 
 image:
-  # SourceBuild and NKS use the authenticated registry public endpoint.
-  repository: architect-ncp-report.kr.ncr.ntruss.com/ncp-report
+  # SourceBuild pushes internally; NKS pulls through the VPC private endpoint.
+  repository: qoyw4pih.kr.private-ncr.ntruss.com/ncp-report
   tag: pilot-20260805-002
   pullPolicy: IfNotPresent
   pullSecrets:
     - ncp-registry
 
 migration:
+  enabled: false
   image:
-    repository: architect-ncp-report.kr.ncr.ntruss.com/ncp-report-migrate
+    repository: qoyw4pih.kr.private-ncr.ntruss.com/ncp-report-migrate
     tag: pilot-20260805-002
 
 service:
   # NKS ALB Ingress requires a NodePort backend service.
   type: NodePort
+
+web:
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
 
 ingress:
   enabled: false

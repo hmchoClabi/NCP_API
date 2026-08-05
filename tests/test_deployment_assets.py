@@ -12,6 +12,7 @@ def test_kubernetes_deployment_assets_exist():
         "values-pilot.yaml",
         "values-production.yaml",
         "templates/deployments.yaml",
+        "templates/hpa.yaml",
         "templates/ingress.yaml",
         "templates/migration-job.yaml",
         "templates/postgresql.yaml",
@@ -58,11 +59,11 @@ def test_worker_roles_can_check_the_required_schema_version():
     assert "ncp_gov_worker" in migration
 
 
-def test_pilot_uses_public_registry_endpoint_for_cluster_pulls():
+def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():
     pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
 
-    assert "architect-ncp-report.kr.ncr.ntruss.com/ncp-report" in pilot_values
-    assert "private-ncr.ntruss.com" not in pilot_values
+    assert "qoyw4pih.kr.private-ncr.ntruss.com/ncp-report" in pilot_values
+    assert "architect-report-build.kr.ncr.ntruss.com" not in pilot_values
 
 
 def test_registry_secret_script_does_not_accept_secret_as_parameter():
@@ -72,11 +73,39 @@ def test_registry_secret_script_does_not_accept_secret_as_parameter():
 
     parameter_block = script.split(")", 1)[0]
     assert "SecretKey" not in parameter_block
-    assert "architect-ncp-report.kr.ncr.ntruss.com" in parameter_block
-    assert "private-ncr.ntruss.com" not in script
+    assert "qoyw4pih.kr.private-ncr.ntruss.com" in parameter_block
     assert "Read-Host \"NCP registry Secret Key\" -AsSecureString" in script
     assert '".dockerconfigjson"' in script
     assert "--ignore-not-found -o name" in script
+
+
+def test_migration_can_be_disabled_and_hpa_owns_web_replicas():
+    deployments = (CHART / "templates" / "deployments.yaml").read_text(
+        encoding="utf-8"
+    )
+    migration = (CHART / "templates" / "migration-job.yaml").read_text(
+        encoding="utf-8"
+    )
+    hpa = (CHART / "templates" / "hpa.yaml").read_text(encoding="utf-8")
+
+    assert ".Values.migration.enabled" in deployments
+    assert ".Values.migration.enabled" in migration
+    assert "autoscaling/v2" in hpa
+    assert "HorizontalPodAutoscaler" in hpa
+    assert 'if not (and (hasKey $component "autoscaling")' in deployments
+
+
+def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
+    manifest = (
+        ROOT / "deploy" / "sourcedeploy" / "runtime.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert manifest.count("kind: Deployment") == 4
+    assert "kind: HorizontalPodAutoscaler" in manifest
+    assert '${registry_endpoint}/ncp-report:latest' in manifest
+    assert "kind: Job" not in manifest
+    assert "ncp-report-migrate" not in manifest
+    assert "namespace: ncp-report" in manifest
 
 
 def test_secret_preparation_excludes_global_ncp_credentials():
@@ -151,4 +180,5 @@ def test_normal_release_does_not_build_images_locally():
     assert "Local image builds are disabled" in legacy
     assert "docker build" not in deployment.lower()
     assert "git ls-remote sourcecommit refs/heads/master" in deployment
-    assert "--atomic --wait" in deployment
+    assert '"--atomic", "--wait"' in deployment
+    assert "MigrationTag is required when EnableMigration is set" in deployment

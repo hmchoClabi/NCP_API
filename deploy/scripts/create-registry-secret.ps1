@@ -1,13 +1,13 @@
 param(
     [string]$Namespace = "ncp-report",
     [string]$SecretName = "ncp-registry",
-    [string]$Registry = "architect-ncp-report.kr.ncr.ntruss.com"
+    [string]$Registry = "qoyw4pih.kr.private-ncr.ntruss.com"
 )
 
 $ErrorActionPreference = "Stop"
 
-if ($Registry -notmatch '^[a-z0-9-]+\.[a-z0-9-]+\.ncr\.ntruss\.com$') {
-    throw "Registry must be an NCP Container Registry public endpoint."
+if ($Registry -notmatch '^[a-z0-9-]+\.[a-z0-9-]+\.private-ncr\.ntruss\.com$') {
+    throw "Registry must be an NCP Container Registry private endpoint."
 }
 
 $accessKey = (Read-Host "NCP registry Access Key ID").Trim()
