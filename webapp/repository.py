@@ -1220,7 +1220,12 @@ class PortalRepository:
             return anonymous_name
 
     def permanently_delete_tenant(
-        self, tenant_id: str, actor_id: str, archive_reference: str = ""
+        self,
+        tenant_id: str,
+        actor_id: str,
+        archive_reference: str = "",
+        *,
+        force: bool = False,
     ) -> tuple[str, int]:
         archive_reference = archive_reference.strip()
         if len(archive_reference) > 500:
@@ -1249,7 +1254,7 @@ class PortalRepository:
             if tenant["has_running_job"]:
                 raise ValueError("실행 중인 보고서가 있어 영구 삭제할 수 없습니다.")
             report_count = int(tenant["report_count"] or 0)
-            if report_count and not archive_reference:
+            if report_count and not archive_reference and not force:
                 raise ValueError("보고서가 있는 고객은 외부 보관 참조가 필요합니다.")
 
             code_hash = sha256(
@@ -1259,12 +1264,12 @@ class PortalRepository:
                 """
                 INSERT INTO control.customer_deletion_tombstones (
                     customer_code_hash, environment, report_count,
-                    archive_reference, deleted_by
-                ) VALUES (%s, %s, %s, NULLIF(%s, ''), %s)
+                    archive_reference, forced, deleted_by
+                ) VALUES (%s, %s, %s, NULLIF(%s, ''), %s, %s)
                 """,
                 (
                     code_hash, tenant["environment"], report_count,
-                    archive_reference, actor_id,
+                    archive_reference, force, actor_id,
                 ),
             )
             cursor.execute(
@@ -1280,6 +1285,7 @@ class PortalRepository:
                         "permanent": True,
                         "report_count": report_count,
                         "archive_reference": archive_reference or None,
+                        "forced": force,
                     }),
                 ),
             )

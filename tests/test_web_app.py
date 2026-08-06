@@ -154,9 +154,11 @@ class FakePortalRepository:
         self.anonymized_tenants.append((tenant_id, actor_id))
         return "익명 고객 12345678"
 
-    def permanently_delete_tenant(self, tenant_id, actor_id, archive_reference=""):
+    def permanently_delete_tenant(
+        self, tenant_id, actor_id, archive_reference="", *, force=False,
+    ):
         self.permanently_deleted_tenants.append(
-            (tenant_id, actor_id, archive_reference)
+            (tenant_id, actor_id, archive_reference, force)
         )
         return "Customer", 1
 
@@ -567,8 +569,41 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             self.repository.permanently_deleted_tenants,
-            [("tenant-1", "user-1", "s3://archive/customer/report.json")],
+            [("tenant-1", "user-1", "s3://archive/customer/report.json", False)],
         )
+
+    def test_msp_admin_can_force_delete_test_customer_with_reports(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/customer/tenant-1/permanent-delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_customer_code": "customer",
+                "confirm_phrase": "강제 삭제",
+                "force_delete": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.permanently_deleted_tenants,
+            [("tenant-1", "user-1", "", True)],
+        )
+
+    def test_force_delete_requires_force_confirmation_phrase(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/customer/tenant-1/permanent-delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_customer_code": "customer",
+                "confirm_phrase": "영구 삭제",
+                "force_delete": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.permanently_deleted_tenants, [])
 
     def test_msp_portal_uses_all_customers_without_memberships(self):
         response = self.client.get("/portal")

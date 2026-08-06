@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 
 from database.config import DatabaseSettings
@@ -82,7 +83,13 @@ class PortalIntegrationTests(unittest.TestCase):
                 )
                 cursor.execute(
                     "DELETE FROM control.customer_deletion_tombstones "
-                    "WHERE archive_reference = 'TEST-ARCHIVE-001'"
+                    "WHERE archive_reference = 'TEST-ARCHIVE-001' "
+                    "OR customer_code_hash = %s",
+                    (
+                        sha256(
+                            self.TENANT_CODE.casefold().encode("utf-8")
+                        ).hexdigest(),
+                    ),
                 )
 
     def test_users_multi_account_and_encrypted_credentials(self):
@@ -264,7 +271,7 @@ class PortalIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "외부 보관 참조"):
             self.repository.permanently_delete_tenant(tenant_id, admin_id)
         deleted_name, report_count = self.repository.permanently_delete_tenant(
-            tenant_id, admin_id, "TEST-ARCHIVE-001"
+            tenant_id, admin_id, force=True
         )
         self.assertEqual(deleted_name, anonymous_name)
         self.assertEqual(report_count, 1)
@@ -272,10 +279,16 @@ class PortalIntegrationTests(unittest.TestCase):
         with psycopg.connect(**self.settings.connection_kwargs()) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT report_count FROM control.customer_deletion_tombstones "
-                    "WHERE archive_reference = 'TEST-ARCHIVE-001'"
+                    "SELECT report_count, forced, archive_reference "
+                    "FROM control.customer_deletion_tombstones "
+                    "WHERE customer_code_hash = %s",
+                    (
+                        sha256(
+                            self.TENANT_CODE.casefold().encode("utf-8")
+                        ).hexdigest(),
+                    ),
                 )
-                self.assertEqual(cursor.fetchone()[0], 1)
+                self.assertEqual(cursor.fetchone(), (1, True, None))
 
 
 if __name__ == "__main__":

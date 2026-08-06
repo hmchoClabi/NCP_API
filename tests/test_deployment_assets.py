@@ -59,6 +59,21 @@ def test_worker_roles_can_check_the_required_schema_version():
     assert "ncp_gov_worker" in migration
 
 
+def test_forced_test_customer_deletion_is_audited():
+    migration = (
+        ROOT / "database" / "schema" / "110_forced_test_customer_deletion.sql"
+    ).read_text(encoding="utf-8")
+    values = (CHART / "values.yaml").read_text(encoding="utf-8")
+
+    assert "forced boolean NOT NULL DEFAULT false" in migration
+    assert "OR forced" in migration
+    assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
+    assert 'schemaVersion: "110"' in values
+    assert 'REPORT_SCHEMA_VERSION:-110' in (
+        ROOT / "deploy" / "docker" / "migrate.sh"
+    ).read_text(encoding="utf-8")
+
+
 def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():
     pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
 
@@ -120,8 +135,14 @@ def test_pilot_ingress_uses_small_public_alb():
     assert "loadBalancerSize: small" in pilot_values
     assert "networkType: public" in pilot_values
     assert 'subnetId: "315758"' in pilot_values
+    assert 'certificateNo: "65260"' in pilot_values
+    assert "cookieSecure: true" in pilot_values
     assert "alb.ingress.kubernetes.io/load-balancer-size" in ingress
+    assert "alb.ingress.kubernetes.io/idle-timeout" in ingress
     assert "alb.ingress.kubernetes.io/healthcheck-path" in ingress
+    assert r'[{\"HTTP\": 80}, {\"HTTPS\": 443}]' in ingress
+    assert 'alb.ingress.kubernetes.io/ssl-redirect: "443"' in ingress
+    assert "alb.ingress.kubernetes.io/enable-http2" not in ingress
     assert "cookieSecure: true" in (
         CHART / "values-production.yaml"
     ).read_text(encoding="utf-8")

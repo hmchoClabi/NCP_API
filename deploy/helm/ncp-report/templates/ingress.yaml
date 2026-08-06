@@ -7,9 +7,10 @@ metadata:
   labels:
     {{- include "ncp-report.labels" . | nindent 4 }}
   annotations:
-    alb.ingress.kubernetes.io/listen-ports: {{ ternary "[{\"HTTP\":80},{\"HTTPS\":443}]" "[{\"HTTP\":80}]" (ne .Values.ingress.certificateNo "") | quote }}
+    alb.ingress.kubernetes.io/listen-ports: {{ ternary "[{\"HTTP\": 80}, {\"HTTPS\": 443}]" "[{\"HTTP\": 80}]" (ne .Values.ingress.certificateNo "") | quote }}
     alb.ingress.kubernetes.io/network-type: {{ .Values.ingress.networkType | quote }}
     alb.ingress.kubernetes.io/load-balancer-size: {{ .Values.ingress.loadBalancerSize | quote }}
+    alb.ingress.kubernetes.io/idle-timeout: {{ .Values.ingress.idleTimeout | quote }}
     alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.ingress.healthcheckPath | quote }}
     {{- with .Values.ingress.loadBalancerName }}
     alb.ingress.kubernetes.io/load-balancer-name: {{ . | quote }}
@@ -21,7 +22,6 @@ metadata:
     alb.ingress.kubernetes.io/ssl-certificate-no: {{ .Values.ingress.certificateNo | quote }}
     alb.ingress.kubernetes.io/ssl-min-version: TLSV12
     alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/enable-http2: "true"
     {{- end }}
     {{- with .Values.ingress.annotations }}
 {{ toYaml . | indent 4 }}

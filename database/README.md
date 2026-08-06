@@ -68,7 +68,7 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | `email_deliveries` | Delivery attempts, provider IDs and failures |
 | `event_cases` | MSP acknowledgement, assignment and resolution workflow |
 | `event_case_comments` | Operations comments attached to a case |
-| `customer_deletion_tombstones` | Hashed customer-code deletion ledger and archive reference |
+| `customer_deletion_tombstones` | Hashed customer-code deletion ledger, archive reference and forced-test-deletion flag |
 | `schema_versions` | Applied baseline schema components |
 
 ### Environment data schemas

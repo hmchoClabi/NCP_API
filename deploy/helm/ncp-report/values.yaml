@@ -14,7 +14,7 @@ migration:
     repository: ncp-report-migrate
     tag: local
     pullPolicy: IfNotPresent
-  schemaVersion: "100"
+  schemaVersion: "110"
   waitSeconds: 300
 
 existingSecret: ncp-report-secrets
@@ -79,6 +79,7 @@ ingress:
   certificateNo: ""
   networkType: public
   loadBalancerSize: small
+  idleTimeout: 60
   loadBalancerName: ""
   subnetId: ""
   healthcheckPath: /health/ready
