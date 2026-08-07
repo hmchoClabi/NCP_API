@@ -104,6 +104,10 @@ spec:
                   optional: true
             {{- end }}
             {{- if eq $component.name "web" }}
+            - name: APP_VERSION
+              value: {{ $root.Values.image.tag | quote }}
+            - name: APP_SOURCE_REVISION
+              value: {{ $root.Values.sourceRevision | quote }}
             - name: WEB_SECRET_KEY
               valueFrom:
                 secretKeyRef:

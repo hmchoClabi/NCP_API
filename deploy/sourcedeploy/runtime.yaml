@@ -117,13 +117,17 @@ spec:
                   name: ncp-report-secrets
                   key: SMTP_USE_SSL
                   optional: true
+            - name: APP_VERSION
+              value: "latest"
+            - name: APP_SOURCE_REVISION
+              value: "sourcepipeline"
             - name: WEB_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: ncp-report-secrets
                   key: WEB_SECRET_KEY
             - name: WEB_COOKIE_SECURE
-              value: "false"
+              value: "true"
             - name: CREDENTIAL_MASTER_KEY_FILE
               value: /run/secrets/credential-master-key
           ports:

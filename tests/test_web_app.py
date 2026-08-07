@@ -219,6 +219,8 @@ class WebAppTests(unittest.TestCase):
                 "TESTING": True,
                 "PORTAL_REPOSITORY": self.repository,
                 "REPORT_JOB_REPOSITORY": self.jobs,
+                "APP_VERSION": "build-5",
+                "APP_SOURCE_REVISION": "1234567890abcdef",
             }
         )
         self.client = self.app.test_client()
@@ -229,6 +231,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'name="csrf_token"', response.data)
         self.assertIn(CSRF_COOKIE, response.headers.get("Set-Cookie", ""))
+        self.assertIn("버전 build-5 · 1234567".encode("utf-8"), response.data)
 
         rejected = self.app.test_client().post(
             "/login",

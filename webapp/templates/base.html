@@ -55,6 +55,9 @@
     {% endif %}
     <main class="main{% if not current_user %} full{% endif %}">
       {% block content %}{% endblock %}
+      <footer aria-label="애플리케이션 버전" style="margin:28px 18px 14px;color:#64748b;font-size:11px;text-align:right">
+        버전 {{ app_version }}{% if app_source_revision %} · {{ app_source_revision[:7] }}{% endif %}
+      </footer>
     </main>
   </div>
 </body>

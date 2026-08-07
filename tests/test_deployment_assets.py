@@ -209,6 +209,17 @@ def test_sourcebuild_has_separate_runtime_and_migration_images():
     assert "database/schema" in migration
 
 
+def test_web_receives_deployed_image_tag_and_source_revision():
+    deployments = (
+        CHART / "templates" / "deployments.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "APP_VERSION" in deployments
+    assert "$root.Values.image.tag" in deployments
+    assert "APP_SOURCE_REVISION" in deployments
+    assert "$root.Values.sourceRevision" in deployments
+
+
 def test_sourcebuild_test_dependencies_are_separate_from_runtime():
     runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     build_requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")

@@ -43,6 +43,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "CREDENTIAL_MASTER_KEY_FILE",
             str(Path("secrets") / "credential-master-key"),
         ),
+        APP_VERSION=os.getenv("APP_VERSION", "local"),
+        APP_SOURCE_REVISION=os.getenv("APP_SOURCE_REVISION", ""),
     )
     if test_config:
         app.config.update(test_config)
@@ -147,6 +149,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 second=0, microsecond=0
             ).strftime("%Y-%m-%dT%H:%M"),
             "notification_since": datetime.now(timezone.utc).isoformat(),
+            "app_version": str(app.config["APP_VERSION"]),
+            "app_source_revision": str(
+                app.config["APP_SOURCE_REVISION"]
+            ),
         }
 
     @app.get("/health/live")
