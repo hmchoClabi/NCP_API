@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 from hashlib import sha256
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from psycopg.rows import dict_row
@@ -21,6 +24,30 @@ _PERSONAL_DATA_KEYS = {
     "account_name", "actor", "actor_id", "email", "email_address",
     "member_no", "member_number", "user", "user_id", "user_name",
 }
+_ACTIVE_REPORT_STATUSES = {"QUEUED", "RUNNING", "RETRYING"}
+
+
+def _remove_local_report_artifacts(storage_uris: list[str]) -> tuple[int, int]:
+    output_root = Path(
+        os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
+    ).resolve()
+    removed = 0
+    failed = 0
+    for storage_uri in set(storage_uris):
+        parsed = urlparse(storage_uri)
+        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+            continue
+        candidate = Path(unquote(parsed.path)).resolve()
+        try:
+            candidate.relative_to(output_root)
+        except ValueError:
+            continue
+        try:
+            candidate.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            failed += 1
+    return removed, failed
 
 
 def _anonymize_report_payload(value: Any, customer: dict[str, Any]) -> Any:
@@ -684,6 +711,90 @@ class PortalRepository:
             snapshot = cursor.fetchone()
             report["snapshot"] = snapshot["normalized_data"] if snapshot else {}
             return report
+
+    def delete_report(self, report_id: str, actor_id: str) -> dict[str, Any]:
+        storage_uris: list[str] = []
+        result: dict[str, Any]
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT report.id, report.tenant_id, report.environment,
+                       report.status, report.report_type,
+                       tenant.customer_name
+                FROM control.report_runs report
+                JOIN control.tenants tenant ON tenant.id = report.tenant_id
+                WHERE report.id = %s
+                FOR UPDATE OF report
+                """,
+                (report_id,),
+            )
+            report = cursor.fetchone()
+            if not report:
+                raise ValueError("보고서를 찾을 수 없습니다.")
+            if report["status"] in _ACTIVE_REPORT_STATUSES:
+                raise ValueError("실행 중인 보고서는 삭제할 수 없습니다.")
+
+            schema = (
+                "public_data" if report["environment"] == "public"
+                else "gov_data"
+            )
+            cursor.execute(
+                "SELECT storage_uri FROM control.report_artifacts "
+                "WHERE report_run_id = %s",
+                (report_id,),
+            )
+            storage_uris.extend(
+                str(row["storage_uri"]) for row in cursor.fetchall()
+                if row.get("storage_uri")
+            )
+            cursor.execute(
+                f"SELECT storage_uri FROM {schema}.raw_payload_refs "
+                "WHERE report_run_id = %s",
+                (report_id,),
+            )
+            storage_uris.extend(
+                str(row["storage_uri"]) for row in cursor.fetchall()
+                if row.get("storage_uri")
+            )
+            cursor.execute(
+                f"SELECT artifact_uri FROM {schema}.metric_series "
+                "WHERE report_run_id = %s AND artifact_uri IS NOT NULL",
+                (report_id,),
+            )
+            storage_uris.extend(
+                str(row["artifact_uri"]) for row in cursor.fetchall()
+                if row.get("artifact_uri")
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                ) VALUES (%s, %s, 'control.report_runs', %s, 'DELETE', %s::jsonb)
+                """,
+                (
+                    report["tenant_id"], actor_id, report_id,
+                    json.dumps({
+                        "report_type": report["report_type"],
+                        "status": report["status"],
+                        "artifact_reference_count": len(set(storage_uris)),
+                    }),
+                ),
+            )
+            cursor.execute(
+                "DELETE FROM control.report_runs WHERE id = %s",
+                (report_id,),
+            )
+            result = {
+                "tenant_id": str(report["tenant_id"]),
+                "customer_name": report["customer_name"],
+            }
+
+        removed, failed = _remove_local_report_artifacts(storage_uris)
+        result["removed_artifact_files"] = removed
+        result["failed_artifact_files"] = failed
+        return result
 
     def jobs_for_tenants(self, tenant_ids: list[str]) -> list[dict[str, Any]]:
         if not tenant_ids:

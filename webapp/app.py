@@ -374,6 +374,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             reports=tenant["reports"],
             jobs=repository.jobs_for_tenants([tenant_id]),
             can_manage_schedules=_can_manage_tenant(g.user, tenant_id),
+            can_delete_reports=True,
         )
 
     @app.post("/msp/customer/<tenant_id>/credentials")
@@ -585,6 +586,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             reports=repository.reports_for_tenants(tenant_ids),
             jobs=repository.jobs_for_tenants(tenant_ids),
             portal_is_msp=portal_is_msp,
+            can_delete_reports=portal_is_msp,
             manageable_tenant_ids={
                 tenant_id for tenant_id in tenant_ids
                 if _can_manage_tenant(g.user, tenant_id)
@@ -600,7 +602,29 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         report = repository.report_detail(report_id, allowed)
         if not report:
             abort(404)
-        return render_template("report_detail.html", report=report)
+        return render_template(
+            "report_detail.html",
+            report=report,
+            can_delete_report=_is_msp(g.user),
+        )
+
+    @app.post("/reports/<report_id>/delete")
+    @_msp_required
+    def delete_report(report_id: str):
+        try:
+            deleted = repository.delete_report(report_id, str(g.user["id"]))
+            message = f"{deleted['customer_name']} 보고서를 삭제했습니다."
+            if deleted["failed_artifact_files"]:
+                message += " 일부 산출물 파일은 삭제하지 못해 운영자 확인이 필요합니다."
+                flash(message, "warning")
+            else:
+                flash(message, "success")
+            return redirect(url_for(
+                "msp_customer", tenant_id=deleted["tenant_id"]
+            ))
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("customer_portal"))
 
     @app.get("/history")
     @_login_required

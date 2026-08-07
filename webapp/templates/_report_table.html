@@ -11,7 +11,7 @@
       <td>{{ item.execution_seconds|duration }}</td>
       <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}">{{ item.status }}</span></td>
       <td>{{ item.error_count }}</td>
-      <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a></td>
+      <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a>{% if can_delete_reports|default(false) %}<form method="post" action="{{ url_for('delete_report', report_id=item.id) }}" onsubmit="return confirm('이 보고서와 관련 수집 데이터를 삭제하시겠습니까? 이 작업은 복구할 수 없습니다.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-action" type="submit">보고서 삭제</button></form>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table>
 </div>

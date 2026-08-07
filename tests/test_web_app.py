@@ -15,6 +15,7 @@ class FakePortalRepository:
         self.reactivated_tenants = []
         self.anonymized_tenants = []
         self.permanently_deleted_tenants = []
+        self.deleted_reports = []
         self.created_msp_users = []
 
     def session_user(self, session_token):
@@ -186,6 +187,15 @@ class FakePortalRepository:
             (tenant_id, actor_id, archive_reference, force)
         )
         return "Customer", 1
+
+    def delete_report(self, report_id, actor_id):
+        self.deleted_reports.append((report_id, actor_id))
+        return {
+            "tenant_id": "tenant-1",
+            "customer_name": "Customer",
+            "removed_artifact_files": 1,
+            "failed_artifact_files": 0,
+        }
 
     def schedules(self):
         return []
@@ -380,6 +390,42 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(self.repository.created_msp_users, [])
         self.assertEqual(self.jobs.bulk_upserts, [])
 
+    def test_customer_viewer_cannot_delete_report(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/reports/report-1/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.repository.deleted_reports, [])
+
+    def test_msp_operator_can_delete_report(self):
+        original_session_user = self.repository.session_user
+
+        def msp_operator(session_token):
+            user = original_session_user(session_token)
+            if user:
+                user["platform_roles"] = ["MSP_OPERATOR"]
+            return user
+
+        self.repository.session_user = msp_operator
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/reports/report-1/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.deleted_reports,
+            [("report-1", "user-1")],
+        )
+
     def test_customer_viewer_cannot_delete_credentials_or_customer(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -498,6 +544,21 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("생성 시각".encode("utf-8"), response.data)
         self.assertIn("2026-08-03 09:05:00 KST".encode("utf-8"), response.data)
         self.assertIn("2분 5초".encode("utf-8"), response.data)
+        self.assertIn("보고서 삭제".encode("utf-8"), response.data)
+
+    def test_msp_account_can_delete_report(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/reports/report-1/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.deleted_reports,
+            [("report-1", "user-1")],
+        )
 
     def test_msp_admin_can_open_user_management(self):
         response = self.client.get("/msp/users")
