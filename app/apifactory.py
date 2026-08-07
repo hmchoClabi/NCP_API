@@ -17,6 +17,7 @@ from ncp_api import (
     CertificateMgrAPI,
     VpcAPI,
     LoadbalancerAPI,
+    OrganizationAPI,
 )
 from utils.credentials import NCPCredentials
 from utils.credential_provider import get_default_credentials
@@ -51,6 +52,7 @@ class APIFactory:
             "certificate_manager": CertificateMgrAPI,
             "vpc": VpcAPI,
             "loadbalancer": LoadbalancerAPI,
+            "organization": OrganizationAPI,
         }
 
     def get(self, name: str):

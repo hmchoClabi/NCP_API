@@ -35,13 +35,24 @@ class BillingCollector:
         confirmed_demand_month: Optional[str] = None,
         month_to_date_start: Optional[str] = None,
         month_to_date_end: Optional[str] = None,
+        organization_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         self.last_errors = []
         self.last_warnings = []
         confirmed_demand_month = confirmed_demand_month or demand_month
 
+        organization_context = organization_context or {
+            "scope": "SELF", "members": []
+        }
+        if organization_context.get("scope") == "ORGANIZATION":
+            # isOrganization=true already requests the integrated account scope.
+            # Avoid an unbounded memberNoList query string for large organizations;
+            # responses are separated by memberNo during normalization.
+            member_no_list = None
+            is_organization = True
+
         common_params = {
-            "member_no_list": member_no_list,
+            "member_no_list": member_no_list or None,
             "is_organization": is_organization,
             "is_parent": is_parent,
         }
@@ -217,6 +228,7 @@ class BillingCollector:
             "confirmed_demand_month": confirmed_demand_month,
             "month_to_date_start": month_to_date_start,
             "month_to_date_end": month_to_date_end,
+            "organization": organization_context,
         }
 
         return raw

@@ -227,6 +227,7 @@ class PostgresReportRepository:
             "report_snapshots", "insight_events", "activity_events",
             "metric_series", "metric_summaries", "cost_details",
             "billing_cost_facts", "raw_payload_refs",
+            "billing_account_cost_facts",
         ):
             cursor.execute(
                 f"DELETE FROM {schema}.{table} WHERE report_run_id = %s",
@@ -264,6 +265,13 @@ class PostgresReportRepository:
             cursor, schema, report, report_run_id, tenant_id
         )
         self._insert_billing_cost_facts(
+            cursor, schema, report, report_run_id, tenant_id,
+            cloud_account_id,
+        )
+        self._upsert_organization_members(
+            cursor, report, tenant_id, cloud_account_id
+        )
+        self._insert_billing_account_cost_facts(
             cursor, schema, report, report_run_id, tenant_id,
             cloud_account_id,
         )
@@ -474,6 +482,91 @@ class PostgresReportRepository:
                     ),
                 ),
             )
+
+    def _upsert_organization_members(
+        self, cursor: Any, report: ReportResult, tenant_id: Any,
+        cloud_account_id: Any,
+    ) -> None:
+        billing = report.billing if isinstance(report.billing, dict) else {}
+        organization = billing.get("organization")
+        if not isinstance(organization, dict) or organization.get("scope") != "ORGANIZATION":
+            return
+        for member in organization.get("members", []):
+            if not isinstance(member, dict) or not member.get("member_no"):
+                continue
+            cursor.execute(
+                """
+                INSERT INTO control.organization_members (
+                    tenant_id, source_cloud_account_id, member_no,
+                    display_name, organization_no, group_no, group_path,
+                    is_master, status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_cloud_account_id, member_no) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    organization_no = EXCLUDED.organization_no,
+                    group_no = EXCLUDED.group_no,
+                    group_path = EXCLUDED.group_path,
+                    is_master = EXCLUDED.is_master,
+                    status = EXCLUDED.status,
+                    last_seen_at = clock_timestamp()
+                """,
+                (
+                    tenant_id, cloud_account_id,
+                    self._text(member.get("member_no"), 30),
+                    self._text(member.get("display_name") or member.get("member_no"), 200),
+                    self._text(organization.get("organization_no"), 30),
+                    self._text(member.get("group_no"), 30),
+                    self._text(member.get("group_path"), 500),
+                    bool(member.get("is_master")),
+                    self._text(member.get("status") or "JOIN", 30),
+                ),
+            )
+
+    def _insert_billing_account_cost_facts(
+        self, cursor: Any, schema: str, report: ReportResult,
+        report_run_id: Any, tenant_id: Any, cloud_account_id: Any,
+    ) -> None:
+        billing = report.billing if isinstance(report.billing, dict) else {}
+        for account in billing.get("account_costs", []):
+            if not isinstance(account, dict) or not account.get("member_no"):
+                continue
+            for fact in account.get("cost_facts", []):
+                if not isinstance(fact, dict) or not fact.get("period_start"):
+                    continue
+                service_costs = (
+                    account.get("service_summary", [])
+                    if fact.get("cost_type") == "CONFIRMED"
+                    else account.get("current_service_summary", [])
+                    if fact.get("cost_type") == "CURRENT_PROVISIONAL"
+                    else account.get("expected_by_service", [])
+                )
+                cursor.execute(
+                    f"""
+                    INSERT INTO {schema}.billing_account_cost_facts (
+                        report_run_id, tenant_id, cloud_account_id,
+                        member_no, display_name, is_master, cost_type,
+                        status, period_start, period_end, subtotal_amount,
+                        vat_amount, total_amount, confidence, service_costs,
+                        details
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb
+                    )
+                    """,
+                    (
+                        report_run_id, tenant_id, cloud_account_id,
+                        self._text(account.get("member_no"), 30),
+                        self._text(account.get("display_name") or account.get("member_no"), 200),
+                        bool(account.get("is_master")),
+                        self._text(fact.get("cost_type"), 40),
+                        self._text(fact.get("status") or "UNAVAILABLE", 30),
+                        fact.get("period_start"), fact.get("period_end"),
+                        fact.get("subtotal_amount"), fact.get("vat_amount"),
+                        fact.get("total_amount"),
+                        self._text(fact.get("confidence") or "UNAVAILABLE", 30),
+                        self._json(service_costs), self._json(fact.get("details") or {}),
+                    ),
+                )
 
     def _replace_artifacts(
         self, cursor: Any, report_run_id: Any, tenant_id: Any,

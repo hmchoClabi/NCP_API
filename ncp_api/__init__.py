@@ -15,6 +15,7 @@ __all__ = [
     "CertificateMgrAPI",
     "VpcAPI",
     "LoadbalancerAPI",
+    "OrganizationAPI",
 ]
 
 
@@ -67,5 +68,8 @@ def __getattr__(name):
     if name == "LoadbalancerAPI":
         from .loadbalancerAPI import LoadbalancerAPI
         return LoadbalancerAPI
+    if name == "OrganizationAPI":
+        from .organizationAPI import OrganizationAPI
+        return OrganizationAPI
 
     raise AttributeError(f"module 'ncp_api' has no attribute '{name}'")

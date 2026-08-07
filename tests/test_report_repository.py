@@ -81,6 +81,36 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertEqual(parameters[6], "2026-07-31")
         self.assertEqual(parameters[13], 110)
 
+    def test_organization_account_fact_is_inserted(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={"start_dt": "2026-07-01", "end_dt": "2026-07-31"},
+            billing={"account_costs": [{
+                "member_no": "200",
+                "display_name": "Child",
+                "is_master": False,
+                "service_summary": [{"service_name": "Server", "amount": 100}],
+                "expected_by_service": [],
+                "cost_facts": [{
+                    "cost_type": "CONFIRMED", "status": "AVAILABLE",
+                    "period_start": "2026-07-01", "period_end": "2026-07-31",
+                    "subtotal_amount": 100, "vat_amount": 10,
+                    "total_amount": 110, "confidence": "CONFIRMED",
+                }],
+            }]},
+        )
+
+        self.repository._insert_billing_account_cost_facts(
+            cursor, "public_data", report,
+            "report-id", "tenant-id", "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        query, parameters = cursor.calls[0]
+        self.assertIn("public_data.billing_account_cost_facts", query)
+        self.assertEqual(parameters[3], "200")
+        self.assertEqual(parameters[12], 110)
+
 
 if __name__ == "__main__":
     unittest.main()

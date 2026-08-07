@@ -7,6 +7,7 @@ from collectors import (
     InsightMetricCollector,
     ActivityTracerEventCollector,
     BillingCollector,
+    OrganizationCollector,
 )
 from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
@@ -371,6 +372,9 @@ class ReportRunner:
         billing_stage = "collection"
 
         try:
+            organization_context = OrganizationCollector(
+                api_factory=self.api_factory
+            ).discover()
             billing_collector = BillingCollector(
                 api_factory=self.api_factory
             )
@@ -383,6 +387,7 @@ class ReportRunner:
                 confirmed_demand_month=period["confirmed_demand_month"],
                 month_to_date_start=period["month_to_date_start"],
                 month_to_date_end=period["month_to_date_end"],
+                organization_context=organization_context,
             )
             billing_errors = list(
                 getattr(billing_collector, "last_errors", [])

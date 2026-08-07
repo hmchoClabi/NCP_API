@@ -57,6 +57,7 @@ class HtmlReportRenderer:
             )
             if fact and fact.get("status") != "NOT_APPLICABLE"
         ]
+        account_costs = self._records(billing.get("account_costs"))
         confirmed_service_summary = self._records(
             billing.get("service_summary")
         )
@@ -175,6 +176,7 @@ class HtmlReportRenderer:
         self._billing_fact_cards(cost_facts),
         len(cost_facts),
     )}
+    {self._organization_cost_sections(account_costs)}
     {self._section(
         billing_section_title,
         billing_section_description,
@@ -1298,6 +1300,66 @@ class HtmlReportRenderer:
                 "</ul></article>"
             )
         return '<div class="billing-facts">' + "".join(cards) + "</div>"
+
+    def _organization_cost_sections(
+        self, accounts: List[Dict[str, Any]]
+    ) -> str:
+        if not accounts:
+            return ""
+        articles = []
+        for account in accounts:
+            facts = {
+                str(item.get("cost_type")): item
+                for item in self._records(account.get("cost_facts"))
+            }
+            confirmed = facts.get("CONFIRMED", {})
+            current_provisional = facts.get("CURRENT_PROVISIONAL", {})
+            projection = facts.get("MONTH_END_PROJECTION", {})
+            confirmed_services = self._records(account.get("service_summary"))
+            expected_services = self._records(
+                account.get("current_service_summary")
+            )
+            confirmed_text = (
+                self._number(confirmed.get("total_amount"), 0) + "원"
+                if confirmed.get("total_amount") is not None else "조회 불가"
+            )
+            provisional_text = (
+                self._number(current_provisional.get("total_amount"), 0) + "원"
+                if current_provisional.get("total_amount") is not None
+                else "해당 없음"
+            )
+            projection_text = (
+                self._number(projection.get("total_amount"), 0) + "원"
+                if projection.get("total_amount") is not None else "해당 없음"
+            )
+            metrics = (
+                f"<li><span>확정 청구액</span><strong>{confirmed_text}</strong></li>"
+                f"<li><span>NCP 현재월 누적 예상(VAT 전)</span><strong>{provisional_text}</strong></li>"
+                f"<li><span>월말 단순 예측(참고)</span><strong>{projection_text}</strong></li>"
+            )
+            articles.append(
+                '<article class="billing-fact organization-account">'
+                f"<h3>{self._text(account.get('display_name') or account.get('member_no'))}"
+                f" <small>{self._text(account.get('member_no'))}</small></h3>"
+                f"<ul>{metrics}</ul>"
+                "<h4>확정 서비스별 비용</h4>"
+                + self._table(confirmed_services, (
+                    ("service_name", "서비스"), ("amount", "금액", "number0"),
+                    ("row_count", "항목", "number0"),
+                ))
+                + "<h4>NCP 현재월 서비스별 예상 비용</h4>"
+                + self._table(expected_services, (
+                    ("service_name", "서비스"), ("amount", "금액(VAT 전)", "number0"),
+                    ("row_count", "항목", "number0"),
+                ))
+                + "</article>"
+            )
+        return self._section(
+            "Organization 계정별 비용",
+            "Organization 마스터 계정으로 확인된 경우에만 하위 계정별 비용을 표시합니다.",
+            '<div class="billing-facts">' + "".join(articles) + "</div>",
+            len(accounts),
+        )
 
     def _records(self, value: Any) -> List[Dict[str, Any]]:
         if not isinstance(value, list):

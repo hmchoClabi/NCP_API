@@ -1,7 +1,10 @@
 import unittest
 from collections import defaultdict
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
+
+import requests
 
 from collectors.activitytracercollector import ActivityTracerEventCollector
 from collectors.insighteventcollector import InsightEventCollector
@@ -255,6 +258,24 @@ class PipelineCollectorTests(unittest.TestCase):
             failed_collector.last_errors[0]["stage"],
             "pagination",
         )
+
+    def test_server_collector_records_http_status_and_provider_code(self):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{"error":{"errorCode":"2300","message":"denied"}}'
+        response.headers["Content-Type"] = "application/json"
+        api = Mock()
+        api.get_server_instance_list.side_effect = requests.HTTPError(
+            "forbidden", response=response
+        )
+        factory = Mock()
+        factory.get.return_value = api
+
+        collector = ServerCollector(factory)
+        collector._get_all_servers()
+
+        self.assertEqual(collector.last_errors[0]["status_code"], 403)
+        self.assertEqual(collector.last_errors[0]["error_code"], "2300")
 
     def test_server_collector_records_http_200_error_envelope(self):
         collector = ServerCollector(

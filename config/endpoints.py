@@ -34,6 +34,7 @@ BASE_ENDPOINTS: Dict[str, Dict[str, str]] = {
         "webservicemonitor": "https://wms.apigw.ntruss.com",
         "globaldns": "https://globaldns.apigw.ntruss.com/dns/v1",
         "platform": "https://billingapi.apigw.ntruss.com/billing/v1",
+        "organization": "https://organization.apigw.ntruss.com",
     },
 }
 
@@ -119,6 +120,7 @@ def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
         "webservicemonitor": base["webservicemonitor"],
         "globaldns": base["globaldns"],
         "platform": base["platform"],
+        **({"organization": base["organization"]} if "organization" in base else {}),
 
         "containerregistry": get_containerregistry_endpoint(api_type, region),
         "kubernetes": get_kubernetes_endpoint(api_type, region),

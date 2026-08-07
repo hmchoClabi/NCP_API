@@ -68,8 +68,8 @@ def test_forced_test_customer_deletion_is_audited():
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "120"' in values
-    assert 'REPORT_SCHEMA_VERSION:-120' in (
+    assert 'schemaVersion: "130"' in values
+    assert 'REPORT_SCHEMA_VERSION:-130' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
 
@@ -83,6 +83,17 @@ def test_period_aware_billing_cost_facts_are_migrated():
     assert "PERIOD_ESTIMATE" in migration
     assert "MONTH_END_PROJECTION" in migration
     assert "cloud_account_id" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+
+
+def test_organization_account_billing_is_migrated():
+    migration = (
+        ROOT / "database" / "schema" / "130_organization_billing.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "organization_members" in migration
+    assert "billing_account_cost_facts" in migration
+    assert "member_no" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
 
 

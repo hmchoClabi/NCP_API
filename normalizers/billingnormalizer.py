@@ -25,6 +25,7 @@ class BillingNormalizer:
         comparison_enabled: bool = True,
         report_period: Optional[Dict[str, Any]] = None,
         calculated_at: Optional[str] = None,
+        include_account_breakdown: bool = True,
     ) -> Dict[str, Any]:
         billing_month = billing_month or current_month
         report_period = report_period or {}
@@ -170,6 +171,17 @@ class BillingNormalizer:
         if month_end_projection.get("status") != "NOT_APPLICABLE":
             cost_facts.append(month_end_projection)
 
+        organization = self.as_dict(raw_meta.get("organization"))
+        account_costs = (
+            self.build_account_costs(
+                raw_data, organization, billing_month, use_end_date,
+                comparison_enabled, report_period, calculated_at,
+            )
+            if include_account_breakdown
+            and organization.get("scope") == "ORGANIZATION"
+            else []
+        )
+
         return {
             "summary": {
                 "billing_month": billing_month,
@@ -220,7 +232,122 @@ class BillingNormalizer:
             "month_to_date_estimate": month_to_date_estimate,
             "month_end_projection": month_end_projection,
             "cost_facts": cost_facts,
+            "organization": organization,
+            "account_costs": account_costs,
         }
+
+    def build_account_costs(
+        self,
+        raw_data: Dict[str, Any],
+        organization: Dict[str, Any],
+        billing_month: str,
+        use_end_date: Optional[str],
+        comparison_enabled: bool,
+        report_period: Dict[str, Any],
+        calculated_at: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        members = [
+            item for item in organization.get("members", [])
+            if isinstance(item, dict) and item.get("member_no")
+        ]
+        result: List[Dict[str, Any]] = []
+        for member in members:
+            member_no = str(member["member_no"])
+            member_raw = self._raw_for_member(raw_data, member_no)
+            normalized = self.normalize(
+                member_raw,
+                billing_month=billing_month,
+                use_end_date=use_end_date,
+                comparison_enabled=comparison_enabled,
+                report_period=report_period,
+                calculated_at=calculated_at,
+                include_account_breakdown=False,
+            )
+            current_services = normalized["target_service_summary"]
+            current_amount = sum(
+                self.to_float(row.get("amount")) for row in current_services
+            )
+            current_use_amount = sum(
+                self.to_float(row.get("use_amount")) for row in current_services
+            )
+            current_start, current_end = self.month_bounds(billing_month)
+            provisional_coverage_end = self._parse_api_date(
+                report_period.get("month_to_date_end")
+            )
+            current_fact = {
+                "cost_type": "CURRENT_PROVISIONAL",
+                "status": "AVAILABLE" if current_services else "UNAVAILABLE",
+                "period_start": current_start.isoformat(),
+                "period_end": current_end.isoformat(),
+                "coverage_start": current_start.isoformat() if current_services else None,
+                "coverage_end": (
+                    provisional_coverage_end.isoformat()
+                    if provisional_coverage_end else None
+                ),
+                "calculated_at": calculated_at,
+                "subtotal_amount": round(current_amount, 2) if current_services else None,
+                "vat_amount": None,
+                "total_amount": round(current_amount, 2) if current_services else None,
+                "currency": "KRW",
+                "amount_basis": "NCP_CURRENT_PRODUCT_DEMAND",
+                "includes_discount": True,
+                "includes_vat": False,
+                "confidence": "PROVISIONAL" if current_services else "UNAVAILABLE",
+                "source_api": "getProductDemandCostList",
+                "calculation_version": "1.2",
+                "details": {"use_amount": round(current_use_amount, 2)},
+            }
+            account_facts = list(normalized["cost_facts"])
+            if not bool(report_period.get("target_month_closed", False)):
+                account_facts.append(current_fact)
+            else:
+                current_services = []
+            result.append({
+                **member,
+                "summary": normalized["summary"],
+                "cost_facts": account_facts,
+                "service_summary": normalized["service_summary"],
+                "current_service_summary": current_services,
+                "expected_by_service": normalized["expected_by_service"],
+            })
+        return result
+
+    def _raw_for_member(
+        self, raw_data: Dict[str, Any], member_no: str
+    ) -> Dict[str, Any]:
+        list_keys = {
+            "demand_cost": "demandCostList",
+            "product_demand_cost": "productDemandCostList",
+            "confirmed_demand_cost": "demandCostList",
+            "confirmed_product_demand_cost": "productDemandCostList",
+            "product_demand_cost_by_discount": "productDemandCostByDiscountList",
+            "discount_list": "discountList",
+            "daily_usage": "contractUsageListByDaily",
+            "month_to_date_usage": "contractUsageListByDaily",
+        }
+        filtered: Dict[str, Any] = {
+            "price_list": raw_data.get("price_list", []),
+            "product_price_list": raw_data.get("product_price_list", []),
+            "_meta": {
+                key: value for key, value in self.as_dict(raw_data.get("_meta")).items()
+                if key != "organization"
+            },
+        }
+        for source, list_key in list_keys.items():
+            rows = self.extract_rows(raw_data.get(source, []), list_key)
+            filtered[source] = [{list_key: [
+                row for row in rows if self._row_member_no(row) == member_no
+            ]}]
+        return filtered
+
+    @classmethod
+    def _row_member_no(cls, row: Dict[str, Any]) -> str:
+        return str(cls.first_present(
+            row.get("memberNo"),
+            cls.as_dict(row.get("account")).get("memberNo"),
+            cls.as_dict(row.get("contract")).get("memberNo"),
+            default="",
+        ))
 
     @staticmethod
     def _dict_list(value: Any) -> List[Dict[str, Any]]:
@@ -314,11 +441,10 @@ class BillingNormalizer:
                 "confidence": "UNAVAILABLE",
                 "excluded_item_count": 0,
                 "source_api": "getDemandCostList",
-                "calculation_version": "1.1",
+                "calculation_version": "1.2",
                 "details": {},
             }
 
-        subtotal = sum(self.to_float(row.get("thisMonthDemandAmount")) for row in rows)
         vat = sum(self.to_float(row.get("thisMonthVatAmount")) for row in rows)
         total_demand = sum(
             self.to_float(row.get("totalDemandAmount")) for row in rows
@@ -341,6 +467,14 @@ class BillingNormalizer:
             else subtotal + vat
             if has_current_components
             else total_demand
+        )
+        stated_subtotal = sum(
+            self.to_float(row.get("thisMonthDemandAmount")) for row in rows
+        )
+        subtotal = (
+            current_including_vat - vat
+            if has_current_invoice_total
+            else stated_subtotal
         )
         use_amount = sum(self.to_float(row.get("useAmount")) for row in rows)
         discount_keys = (
@@ -381,7 +515,7 @@ class BillingNormalizer:
             "confidence": "CONFIRMED",
             "excluded_item_count": 0,
             "source_api": "getDemandCostList",
-            "calculation_version": "1.1",
+            "calculation_version": "1.2",
             "details": {
                 "use_amount": round(use_amount, 2),
                 "current_month_amount_including_vat": round(current_including_vat, 2),
@@ -1203,26 +1337,43 @@ class BillingNormalizer:
         contract_product = self.as_dict(row.get("contractProduct"))
         usage = self.as_dict(row.get("usage"))
 
-        candidates = [
+        # NCP contractProduct productSize values are bytes, including values
+        # smaller than 1 GiB (for example a small snapshot).  A magnitude
+        # heuristic therefore turns 12 MiB into 12,582,912 GiB.
+        byte_candidates = [
             contract_product.get("productSize"),
             contract_product.get("productSizeValue"),
-            contract_product.get("storageSize"),
-            contract_product.get("storageSizeGb"),
-            contract_product.get("diskSize"),
-            contract_product.get("diskSizeGb"),
-            contract_product.get("blockStorageSize"),
-            contract_product.get("blockStorageSizeGb"),
             usage.get("productSize"),
             usage.get("productSizeValue"),
-            usage.get("storageSize"),
+        ]
+        for value in byte_candidates:
+            size = self.to_float(value)
+            if size > 0:
+                return size / (1024 ** 3)
+
+        gb_candidates = [
+            contract_product.get("storageSizeGb"),
+            contract_product.get("diskSizeGb"),
+            contract_product.get("blockStorageSizeGb"),
             usage.get("storageSizeGb"),
-            usage.get("diskSize"),
             usage.get("diskSizeGb"),
-            usage.get("blockStorageSize"),
             usage.get("blockStorageSizeGb"),
         ]
+        for value in gb_candidates:
+            size = self.to_float(value)
+            if size > 0:
+                return size
 
-        for value in candidates:
+        ambiguous_candidates = [
+            contract_product.get("storageSize"),
+            contract_product.get("diskSize"),
+            contract_product.get("blockStorageSize"),
+            usage.get("storageSize"),
+            usage.get("diskSize"),
+            usage.get("blockStorageSize"),
+        ]
+
+        for value in ambiguous_candidates:
             size = self.to_float(value)
 
             if size <= 0:

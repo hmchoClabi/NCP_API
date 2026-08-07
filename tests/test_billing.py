@@ -48,12 +48,14 @@ class BillingPlatformStub:
     def __init__(self, failing_method=None, error_method=None):
         self.failing_method = failing_method
         self.error_method = error_method
+        self.calls = []
 
     def __getattr__(self, name):
         if name not in self.LIST_KEYS:
             raise AttributeError(name)
 
         def request(*args, **kwargs):
+            self.calls.append((name, kwargs))
             if name == self.failing_method:
                 raise RuntimeError(
                     "request failed with url: "
@@ -245,6 +247,77 @@ class BillingNormalizerTests(unittest.TestCase):
         )
         self.assertEqual(calculated["expected_amount"], 6)
         self.assertEqual(calculated["calculation_status"], "OK")
+
+    def test_small_product_size_is_always_converted_from_bytes(self):
+        row = {
+            "contractProduct": {"productSize": 12 * 1024 * 1024},
+            "usage": {
+                "userUsageQuantity": 24,
+                "userUnit": {"code": "HOUR"},
+            },
+        }
+        calculated = self.normalizer.calculate_expected_amount(
+            row=row,
+            price_row={
+                "price": 0.08,
+                "priceUnitType": {"code": "STRG_1G_HH"},
+            },
+            usage_quantity=24,
+            usage_unit_code="HOUR",
+            days_in_month=31,
+        )
+
+        self.assertAlmostEqual(calculated["expected_amount"], 0.0225)
+
+    def test_confirmed_invoice_subtotal_excludes_vat(self):
+        invoice = self.normalizer.summarize_confirmed_invoice(
+            [{
+                "useAmount": 750060,
+                "rounddownDiscountAmount": 60,
+                "thisMonthDemandAmount": 825000,
+                "thisMonthVatAmount": 75000,
+                "thisMonthAmountIncludingVat": 825000,
+            }],
+            "202607",
+            "2026-08-07T13:00:00+09:00",
+        )
+
+        self.assertEqual(invoice["subtotal_amount"], 750000)
+        self.assertEqual(invoice["vat_amount"], 75000)
+        self.assertEqual(invoice["total_amount"], 825000)
+
+    def test_organization_billing_is_split_by_member_number(self):
+        def demand(member_no, amount):
+            return {
+                "memberNo": member_no,
+                "thisMonthVatAmount": amount * 0.1,
+                "thisMonthAmountIncludingVat": amount * 1.1,
+            }
+
+        result = self.normalizer.normalize(
+            {
+                "confirmed_demand_cost": [{
+                    "demandCostList": [demand("100", 100), demand("200", 200)]
+                }],
+                "_meta": {
+                    "organization": {
+                        "scope": "ORGANIZATION",
+                        "members": [
+                            {"member_no": "100", "display_name": "Master", "is_master": True},
+                            {"member_no": "200", "display_name": "Child", "is_master": False},
+                        ],
+                    }
+                },
+            },
+            billing_month="202607",
+        )
+
+        self.assertEqual(len(result["account_costs"]), 2)
+        totals = {
+            row["member_no"]: row["cost_facts"][0]["total_amount"]
+            for row in result["account_costs"]
+        }
+        self.assertEqual(totals, {"100": 110.0, "200": 220.0})
 
     def test_complex_rating_types_are_not_counted_as_verified_cost(self):
         usage_row = {
@@ -480,6 +553,28 @@ class BillingNormalizerTests(unittest.TestCase):
 
 
 class BillingCollectorTests(unittest.TestCase):
+    def test_organization_scope_uses_integrated_query_without_member_list(self):
+        platform = BillingPlatformStub()
+        collector = BillingCollector(FakeFactory(platform))
+
+        collector.collect_raw(
+            use_start_date="20260801",
+            use_end_date="20260801",
+            demand_month="202608",
+            organization_context={
+                "scope": "ORGANIZATION",
+                "members": [{"member_no": "100"}, {"member_no": "200"}],
+            },
+        )
+
+        integrated_calls = [
+            kwargs for _, kwargs in platform.calls
+            if "is_organization" in kwargs
+        ]
+        self.assertTrue(integrated_calls)
+        self.assertTrue(all(call["is_organization"] for call in integrated_calls))
+        self.assertTrue(all(call["member_no_list"] is None for call in integrated_calls))
+
     def test_discount_return_code_2300_is_warning_not_report_error(self):
         platform = BillingPlatformStub()
 

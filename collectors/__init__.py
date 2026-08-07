@@ -3,6 +3,7 @@ from .insightmetriccollector import InsightMetricCollector
 from .insighteventcollector import InsightEventCollector
 from .activitytracercollector import ActivityTracerEventCollector
 from .billingcollector import BillingCollector
+from .organizationcollector import OrganizationCollector
 
 
 __all__ = [
