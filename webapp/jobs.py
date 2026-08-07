@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
@@ -296,6 +297,124 @@ class ReportJobRepository:
                 (enabled, next_run, schedule_id),
             )
             return cursor.fetchone() is not None
+
+    def bulk_upsert_schedules(
+        self,
+        account_ids: list[str],
+        report_type: str,
+        run_hour: int,
+        run_minute: int,
+        monthly_day: Optional[int],
+        actor_id: str,
+        timezone_name: str = "Asia/Seoul",
+    ) -> int:
+        report_type, monthly_day = self._validate_schedule_values(
+            report_type, run_hour, run_minute, monthly_day
+        )
+        normalized_ids = self._normalize_account_ids(account_ids)
+        next_run = self.next_run_at(
+            report_type, run_hour, run_minute, monthly_day, timezone_name
+        )
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT account.id, account.tenant_id
+                FROM control.cloud_accounts account
+                JOIN control.tenants tenant ON tenant.id = account.tenant_id
+                JOIN control.encrypted_credentials credential
+                    ON credential.cloud_account_id = account.id
+                   AND credential.tenant_id = account.tenant_id
+                WHERE account.id = ANY(%s::uuid[])
+                  AND account.status = 'ACTIVE'
+                  AND tenant.status = 'ACTIVE'
+                FOR UPDATE OF account
+                """,
+                (normalized_ids,),
+            )
+            accounts = cursor.fetchall()
+            if len(accounts) != len(normalized_ids):
+                raise ValueError(
+                    "선택한 고객 계정 중 일정 등록이 불가능한 계정이 있습니다."
+                )
+            for account in accounts:
+                cursor.execute(
+                    """
+                    INSERT INTO control.account_report_schedules (
+                        tenant_id, cloud_account_id, report_type, timezone,
+                        run_hour, run_minute, monthly_day, next_run_at,
+                        created_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (cloud_account_id, report_type) DO UPDATE SET
+                        timezone = EXCLUDED.timezone,
+                        run_hour = EXCLUDED.run_hour,
+                        run_minute = EXCLUDED.run_minute,
+                        monthly_day = EXCLUDED.monthly_day,
+                        next_run_at = EXCLUDED.next_run_at,
+                        enabled = true,
+                        updated_at = clock_timestamp()
+                    """,
+                    (
+                        account["tenant_id"], account["id"], report_type,
+                        timezone_name, run_hour, run_minute, monthly_day,
+                        next_run, actor_id,
+                    ),
+                )
+            return len(accounts)
+
+    def bulk_delete_schedules(
+        self, account_ids: list[str], report_type: str
+    ) -> int:
+        normalized_type = str(report_type).strip().upper()
+        report_type, _ = self._validate_schedule_values(
+            normalized_type, 0, 0, 1 if normalized_type == "MONTHLY" else None
+        )
+        normalized_ids = self._normalize_account_ids(account_ids)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM control.account_report_schedules
+                WHERE cloud_account_id = ANY(%s::uuid[])
+                  AND report_type = %s
+                """,
+                (normalized_ids, report_type),
+            )
+            return cursor.rowcount
+
+    @staticmethod
+    def _validate_schedule_values(
+        report_type: str,
+        run_hour: int,
+        run_minute: int,
+        monthly_day: Optional[int],
+    ) -> tuple[str, Optional[int]]:
+        report_type = str(report_type).strip().upper()
+        if report_type not in {"DAILY", "MONTHLY"}:
+            raise ValueError("지원하지 않는 보고서 유형입니다.")
+        if not 0 <= run_hour <= 23 or not 0 <= run_minute <= 59:
+            raise ValueError("실행 시각이 올바르지 않습니다.")
+        if report_type == "MONTHLY":
+            monthly_day = 1 if monthly_day is None else monthly_day
+            if not 1 <= monthly_day <= 28:
+                raise ValueError("월간 실행일은 1일부터 28일까지 가능합니다.")
+        else:
+            monthly_day = None
+        return report_type, monthly_day
+
+    @staticmethod
+    def _normalize_account_ids(account_ids: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for account_id in account_ids:
+            try:
+                value = str(UUID(str(account_id)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("선택한 고객 계정이 올바르지 않습니다.") from exc
+            if value not in normalized:
+                normalized.append(value)
+        if not normalized:
+            raise ValueError("고객 또는 고객 계정을 하나 이상 선택해 주세요.")
+        if len(normalized) > 1_000:
+            raise ValueError("한 번에 최대 1,000개 계정까지 선택할 수 있습니다.")
+        return normalized
 
     @staticmethod
     def _validate_target(

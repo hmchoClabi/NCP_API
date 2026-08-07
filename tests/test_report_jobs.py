@@ -49,6 +49,38 @@ class ReportJobTests(unittest.TestCase):
 
         self.assertEqual(ReportJobRepository.scheduled_target(schedule), "2026-07")
 
+    def test_bulk_schedule_values_are_validated(self):
+        self.assertEqual(
+            ReportJobRepository._validate_schedule_values(
+                "daily", 9, 0, 15
+            ),
+            ("DAILY", None),
+        )
+        self.assertEqual(
+            ReportJobRepository._validate_schedule_values(
+                "monthly", 9, 30, 15
+            ),
+            ("MONTHLY", 15),
+        )
+        with self.assertRaises(ValueError):
+            ReportJobRepository._validate_schedule_values(
+                "monthly", 9, 0, 29
+            )
+
+    def test_bulk_schedule_requires_valid_unique_accounts(self):
+        account_id = "11111111-1111-1111-1111-111111111111"
+
+        self.assertEqual(
+            ReportJobRepository._normalize_account_ids(
+                [account_id, account_id]
+            ),
+            [account_id],
+        )
+        with self.assertRaises(ValueError):
+            ReportJobRepository._normalize_account_ids([])
+        with self.assertRaises(ValueError):
+            ReportJobRepository._normalize_account_ids(["not-a-uuid"])
+
 
 if __name__ == "__main__":
     unittest.main()

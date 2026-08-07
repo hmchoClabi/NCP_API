@@ -1,21 +1,47 @@
 {% extends "base.html" %}
 {% block title %}사용자 관리{% endblock %}
 {% block content %}
-<header class="page-header"><div><span class="eyebrow">MSP ACCESS CONTROL</span><h1>사용자 관리</h1><p>고객 사용자를 등록하고 접근할 고객사와 권한을 연결합니다.</p></div><span class="count-pill">{{ users|length }} 사용자</span></header>
+<header class="page-header"><div><span class="eyebrow">MSP ACCESS CONTROL</span><h1>사용자 관리</h1><p>MSP 운영 계정과 고객 포털 사용자를 관리합니다.</p></div><span class="count-pill">MSP {{ msp_users|length }} · 고객 {{ users|length }}</span></header>
+
 <section class="split-grid">
   <article class="panel">
-    <div class="panel-heading"><div><h2>신규 사용자 등록</h2><p>등록 직후에는 INVITED 상태이며 고객사 연결 전에는 로그인할 수 없습니다.</p></div></div>
+    <div class="panel-heading"><div><h2>신규 MSP 계정</h2><p>MSP 관리자는 계정·고객·일정을 관리하고, 운영자는 조회 및 보고서 실행을 담당합니다.</p></div></div>
+    <form class="form-stack" method="post" action="{{ url_for('create_msp_user') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>이메일<input type="email" name="email" required maxlength="320" autocomplete="off" placeholder="operator@example.com"></label>
+      <label>표시 이름<input name="display_name" required maxlength="200" placeholder="MSP 운영자"></label>
+      <label>권한<select name="role"><option value="MSP_OPERATOR">MSP 운영자</option><option value="MSP_ADMIN">MSP 관리자</option></select></label>
+      <label>비밀번호<input type="password" name="password" required minlength="12" autocomplete="new-password"></label>
+      <label>비밀번호 확인<input type="password" name="password_confirmation" required minlength="12" autocomplete="new-password"></label>
+      <button class="primary" type="submit">MSP 계정 등록</button>
+    </form>
+  </article>
+  <article class="panel">
+    <div class="panel-heading"><div><h2>MSP 계정 목록</h2><p>각 사용자는 독립된 로그인 계정과 감사 이력을 가집니다.</p></div></div>
+    {% if msp_users %}<div class="table-wrap"><table><thead><tr><th>사용자</th><th>권한</th><th>범위</th><th>상태</th><th>최근 로그인</th></tr></thead><tbody>{% for user in msp_users %}<tr>
+      <td><strong>{{ user.display_name }}</strong><small>{{ user.email }}</small></td>
+      <td>{{ '관리자' if user.role == 'MSP_ADMIN' else '운영자' }}</td>
+      <td>{{ '민간' if user.environment_scope == 'public' else ('공공' if user.environment_scope == 'gov' else '전체') }}</td>
+      <td><span class="status {{ 'ok' if user.user_status == 'ACTIVE' else 'warn' }}">{{ user.user_status }}</span></td>
+      <td>{{ user.last_login_at|kst('%Y-%m-%d %H:%M') if user.last_login_at else '-' }}</td>
+    </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty compact"><p>등록된 MSP 계정이 없습니다.</p></div>{% endif %}
+  </article>
+</section>
+
+<section class="split-grid">
+  <article class="panel">
+    <div class="panel-heading"><div><h2>신규 고객 사용자</h2><p>고객사에 연결하기 전에는 로그인할 수 없습니다.</p></div></div>
     <form class="form-stack" method="post" action="{{ url_for('create_portal_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>이메일<input type="email" name="email" required maxlength="320" autocomplete="off" placeholder="user@customer.com"></label>
       <label>표시 이름<input name="display_name" required maxlength="200" placeholder="홍길동"></label>
       <label>임시 비밀번호<input type="password" name="password" required minlength="12" autocomplete="new-password"></label>
       <label>비밀번호 확인<input type="password" name="password_confirmation" required minlength="12" autocomplete="new-password"></label>
-      <button class="primary" type="submit">사용자 등록</button>
+      <button class="primary" type="submit">고객 사용자 등록</button>
     </form>
   </article>
   <article class="panel">
-    <div class="panel-heading"><div><h2>고객사 연결·권한 변경</h2><p>기존 연결에 다시 적용하면 해당 고객사의 권한이 변경됩니다.</p></div></div>
+    <div class="panel-heading"><div><h2>고객사 연결·권한 변경</h2><p>사용자를 고객사에 연결하면 로그인이 활성화됩니다.</p></div></div>
     {% if users and customers %}<form class="form-stack" method="post" action="{{ url_for('assign_portal_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>사용자<select name="user_id" required>{% for user in users %}<option value="{{ user.id }}">{{ user.display_name }} · {{ user.email }}</option>{% endfor %}</select></label>
@@ -25,6 +51,7 @@
     </form>{% else %}<div class="empty compact"><p>사용자와 고객사를 먼저 등록하세요.</p></div>{% endif %}
   </article>
 </section>
+
 <section class="panel">
   <div class="panel-heading"><div><h2>전체 고객 사용자</h2><p>사용자별 로그인 상태와 연결된 고객사 권한입니다.</p></div></div>
   {% if users %}<div class="table-wrap"><table><thead><tr><th>사용자</th><th>상태</th><th>연결 고객 및 권한</th><th>최근 로그인</th><th>등록일</th></tr></thead><tbody>{% for user in users %}<tr>
@@ -33,6 +60,6 @@
     <td>{% for membership in user.memberships %}<span class="membership-chip"><span class="tag {{ membership.environment }}">{{ '공공' if membership.environment == 'gov' else '민간' }}</span> {{ membership.customer_name }} · {{ '관리자' if membership.role == 'CUSTOMER_ADMIN' else '조회' }}</span>{% else %}<span class="muted">연결 대기</span>{% endfor %}</td>
     <td>{{ user.last_login_at|kst('%Y-%m-%d %H:%M') if user.last_login_at else '-' }}</td>
     <td>{{ user.created_at|kst('%Y-%m-%d') }}</td>
-  </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><strong>등록된 고객 사용자가 없습니다.</strong><p>위 양식에서 사용자를 먼저 등록하세요.</p></div>{% endif %}
+  </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><strong>등록된 고객 사용자가 없습니다.</strong></div>{% endif %}
 </section>
 {% endblock %}

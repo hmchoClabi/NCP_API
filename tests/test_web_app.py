@@ -15,6 +15,7 @@ class FakePortalRepository:
         self.reactivated_tenants = []
         self.anonymized_tenants = []
         self.permanently_deleted_tenants = []
+        self.created_msp_users = []
 
     def session_user(self, session_token):
         if not session_token:
@@ -125,6 +126,26 @@ class FakePortalRepository:
         self.created_portal_users.append((email, password, display_name))
         return "customer-user-1"
 
+    def create_msp_user(
+        self, email, password, display_name, role, environment_scope=None
+    ):
+        self.created_msp_users.append(
+            (email, password, display_name, role, environment_scope)
+        )
+        return "msp-user-2"
+
+    def msp_users(self):
+        return [{
+            "id": "msp-user-1",
+            "email": "admin@example.com",
+            "display_name": "MSP Admin",
+            "user_status": "ACTIVE",
+            "role": "MSP_ADMIN",
+            "environment_scope": None,
+            "last_login_at": None,
+            "created_at": datetime(2026, 8, 1),
+        }]
+
     def assign_customer_membership(self, user_id, tenant_id, role):
         self.assigned_memberships.append((user_id, tenant_id, role))
 
@@ -169,6 +190,17 @@ class FakePortalRepository:
     def schedules(self):
         return []
 
+    def schedulable_accounts(self):
+        return [{
+            "id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "tenant-1",
+            "account_code": "primary",
+            "account_name": "Primary",
+            "customer_code": "customer",
+            "customer_name": "Customer",
+            "environment": "public",
+        }]
+
     def tenants(self, environment=None):
         return [{
             "id": "tenant-1",
@@ -195,6 +227,8 @@ class FakePortalRepository:
 class FakeReportJobRepository:
     def __init__(self):
         self.enqueued = []
+        self.bulk_upserts = []
+        self.bulk_deletes = []
 
     def enqueue(
         self, account_id, report_type, target_value, requested_by,
@@ -208,6 +242,20 @@ class FakeReportJobRepository:
 
     def set_schedule_enabled(self, schedule_id, enabled):
         return schedule_id == "schedule-1"
+
+    def bulk_upsert_schedules(
+        self, account_ids, report_type, run_hour, run_minute,
+        monthly_day, actor_id,
+    ):
+        self.bulk_upserts.append((
+            account_ids, report_type, run_hour, run_minute,
+            monthly_day, actor_id,
+        ))
+        return len(account_ids)
+
+    def bulk_delete_schedules(self, account_ids, report_type):
+        self.bulk_deletes.append((account_ids, report_type))
+        return len(account_ids)
 
 
 class WebAppTests(unittest.TestCase):
@@ -314,6 +362,24 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.repository.created_portal_users, [])
 
+    def test_customer_viewer_cannot_create_msp_user_or_bulk_schedule(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        msp_response = self.client.post(
+            "/msp/users/platform",
+            data={"csrf_token": "csrf-token"},
+        )
+        schedule_response = self.client.post(
+            "/msp/schedules/bulk",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(msp_response.status_code, 403)
+        self.assertEqual(schedule_response.status_code, 403)
+        self.assertEqual(self.repository.created_msp_users, [])
+        self.assertEqual(self.jobs.bulk_upserts, [])
+
     def test_customer_viewer_cannot_delete_credentials_or_customer(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -414,10 +480,11 @@ class MspCustomerDetailTests(unittest.TestCase):
             return user
 
         self.repository.session_user = msp_user
+        self.jobs = FakeReportJobRepository()
         self.app = create_app({
             "TESTING": True,
             "PORTAL_REPOSITORY": self.repository,
-            "REPORT_JOB_REPOSITORY": FakeReportJobRepository(),
+            "REPORT_JOB_REPOSITORY": self.jobs,
         })
         self.client = self.app.test_client()
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -457,6 +524,26 @@ class MspCustomerDetailTests(unittest.TestCase):
             "new-user@example.com", "temporary-password", "New User",
         )])
 
+    def test_msp_admin_can_register_another_msp_user(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/users/platform",
+            data={
+                "csrf_token": "csrf-token",
+                "email": "operator@example.com",
+                "display_name": "Operator",
+                "role": "MSP_OPERATOR",
+                "password": "temporary-password",
+                "password_confirmation": "temporary-password",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.created_msp_users, [(
+            "operator@example.com", "temporary-password", "Operator",
+            "MSP_OPERATOR", None,
+        )])
+
     def test_msp_admin_can_assign_customer_membership(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
         response = self.client.post(
@@ -493,6 +580,47 @@ class MspCustomerDetailTests(unittest.TestCase):
     def test_msp_can_open_global_schedule_and_history_pages(self):
         self.assertEqual(self.client.get("/msp/schedules").status_code, 200)
         self.assertEqual(self.client.get("/history").status_code, 200)
+
+    def test_msp_admin_can_bulk_create_schedules(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        account_id = "11111111-1111-1111-1111-111111111111"
+
+        response = self.client.post(
+            "/msp/schedules/bulk",
+            data={
+                "csrf_token": "csrf-token",
+                "action": "create",
+                "account_id": account_id,
+                "report_type": "DAILY",
+                "run_hour": "9",
+                "run_minute": "0",
+                "monthly_day": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.jobs.bulk_upserts, [(
+            [account_id], "DAILY", 9, 0, 1, "user-1",
+        )])
+
+    def test_msp_admin_can_bulk_delete_schedules(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        account_id = "11111111-1111-1111-1111-111111111111"
+
+        response = self.client.post(
+            "/msp/schedules/bulk",
+            data={
+                "csrf_token": "csrf-token",
+                "action": "delete",
+                "account_id": account_id,
+                "report_type": "MONTHLY",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.jobs.bulk_deletes, [([account_id], "MONTHLY")]
+        )
 
     def test_msp_admin_can_delete_an_account_credential(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

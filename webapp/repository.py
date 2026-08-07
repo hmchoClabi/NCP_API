@@ -281,6 +281,62 @@ class PortalRepository:
             )
             return str(cursor.fetchone()["id"])
 
+    def create_msp_user(
+        self,
+        email: str,
+        password: str,
+        display_name: str,
+        role: str,
+        environment_scope: Optional[str] = None,
+    ) -> str:
+        if role not in {"MSP_ADMIN", "MSP_OPERATOR"}:
+            raise ValueError("지원하지 않는 MSP 권한입니다.")
+        if environment_scope not in {None, "public", "gov"}:
+            raise ValueError("지원하지 않는 MSP 접근 범위입니다.")
+        email, display_name = _validate_user_fields(email, display_name)
+        password_hash = hash_password(password)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM control.users WHERE lower(email) = lower(%s)",
+                (email,),
+            )
+            if cursor.fetchone():
+                raise ValueError("이미 등록된 이메일입니다.")
+            cursor.execute(
+                """
+                INSERT INTO control.users (
+                    email, password_hash, display_name, status
+                ) VALUES (%s, %s, %s, 'ACTIVE')
+                RETURNING id
+                """,
+                (email, password_hash, display_name),
+            )
+            user_id = cursor.fetchone()["id"]
+            cursor.execute(
+                """
+                INSERT INTO control.platform_roles (
+                    user_id, role, environment_scope
+                ) VALUES (%s, %s, %s)
+                """,
+                (user_id, role, environment_scope),
+            )
+            return str(user_id)
+
+    def msp_users(self) -> list[dict[str, Any]]:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT users.id, users.email, users.display_name,
+                       users.status AS user_status, users.last_login_at,
+                       users.created_at, role.role, role.environment_scope
+                FROM control.users users
+                JOIN control.platform_roles role ON role.user_id = users.id
+                WHERE role.role IN ('MSP_ADMIN', 'MSP_OPERATOR')
+                ORDER BY users.display_name, users.email, role.role
+                """
+            )
+            return cursor.fetchall()
+
     def assign_customer_membership(
         self, user_id: str, tenant_id: str, role: str
     ) -> None:
@@ -709,6 +765,27 @@ class PortalRepository:
                 LEFT JOIN control.users creator ON creator.id = schedule.created_by
                 ORDER BY tenant.environment, tenant.customer_name,
                          account.display_name, schedule.report_type
+                """
+            )
+            return cursor.fetchall()
+
+    def schedulable_accounts(self) -> list[dict[str, Any]]:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT account.id, account.tenant_id, account.account_code,
+                       account.display_name AS account_name,
+                       tenant.customer_code, tenant.customer_name,
+                       tenant.environment
+                FROM control.cloud_accounts account
+                JOIN control.tenants tenant ON tenant.id = account.tenant_id
+                JOIN control.encrypted_credentials credential
+                    ON credential.cloud_account_id = account.id
+                   AND credential.tenant_id = account.tenant_id
+                WHERE tenant.status = 'ACTIVE'
+                  AND account.status = 'ACTIVE'
+                ORDER BY tenant.environment, tenant.customer_name,
+                         account.display_name
                 """
             )
             return cursor.fetchall()

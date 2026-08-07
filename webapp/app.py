@@ -238,7 +238,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.get("/msp/schedules")
     @_msp_required
     def msp_schedules():
-        return render_template("schedules.html", schedules=repository.schedules())
+        return render_template(
+            "schedules.html",
+            schedules=repository.schedules(),
+            schedule_accounts=repository.schedulable_accounts(),
+        )
 
     @app.get("/msp/users")
     @_msp_admin_required
@@ -246,6 +250,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         return render_template(
             "users.html",
             users=repository.customer_users(),
+            msp_users=repository.msp_users(),
             customers=repository.tenants(),
             selected_tenant_id=request.args.get("tenant_id", ""),
         )
@@ -263,6 +268,24 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 request.form.get("display_name", ""),
             )
             flash("사용자를 등록했습니다. 고객사에 연결하면 로그인이 활성화됩니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_users"))
+
+    @app.post("/msp/users/platform")
+    @_msp_admin_required
+    def create_msp_user():
+        try:
+            password = request.form.get("password", "")
+            if password != request.form.get("password_confirmation", ""):
+                raise ValueError("비밀번호 확인이 일치하지 않습니다.")
+            repository.create_msp_user(
+                request.form.get("email", ""),
+                password,
+                request.form.get("display_name", ""),
+                request.form.get("role", "MSP_OPERATOR"),
+            )
+            flash("MSP 계정을 등록했습니다.", "success")
         except ValueError as exc:
             flash(str(exc), "error")
         return redirect(url_for("msp_users"))
@@ -288,6 +311,35 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if not jobs.set_schedule_enabled(schedule_id, enabled):
             abort(404)
         flash("자동 실행 일정 상태를 변경했습니다.", "success")
+        return redirect(url_for("msp_schedules"))
+
+    @app.post("/msp/schedules/bulk")
+    @_msp_admin_required
+    def bulk_schedules():
+        try:
+            action = request.form.get("action", "create")
+            account_ids = request.form.getlist("account_id")
+            report_type = request.form.get("report_type", "DAILY")
+            if action == "delete":
+                count = jobs.bulk_delete_schedules(account_ids, report_type)
+                flash(f"선택한 일정 {count}개를 삭제했습니다.", "success")
+            elif action == "create":
+                try:
+                    run_hour = int(request.form.get("run_hour", "9"))
+                    run_minute = int(request.form.get("run_minute", "0"))
+                    monthly_day_text = request.form.get("monthly_day", "1")
+                    monthly_day = int(monthly_day_text)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("실행 시각 또는 월간 실행일이 올바르지 않습니다.") from exc
+                count = jobs.bulk_upsert_schedules(
+                    account_ids, report_type, run_hour, run_minute,
+                    monthly_day, str(g.user["id"]),
+                )
+                flash(f"선택한 계정 {count}개에 일정을 적용했습니다.", "success")
+            else:
+                raise ValueError("지원하지 않는 일정 작업입니다.")
+        except ValueError as exc:
+            flash(str(exc), "error")
         return redirect(url_for("msp_schedules"))
 
     @app.post("/msp/customers/<environment>")
