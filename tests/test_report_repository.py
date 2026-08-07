@@ -13,6 +13,9 @@ class RecordingCursor:
     def execute(self, query, parameters):
         self.calls.append((query, parameters))
 
+    def fetchone(self):
+        return ("report-run-id",)
+
 
 class ReportRepositoryTests(unittest.TestCase):
     def setUp(self):
@@ -178,6 +181,39 @@ class ReportRepositoryTests(unittest.TestCase):
         _, parameters = cursor.calls[0]
         self.assertIsNone(parameters[11])
         self.assertEqual(parameters[13], "UNAVAILABLE")
+
+    def test_report_run_retry_updates_pipeline_versions(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-07-01 00:00:00",
+                "end_dt": "2026-07-31 23:59:59",
+                "file_suffix": "20260701_20260731",
+            },
+        )
+
+        run_id = self.repository._upsert_report_run(
+            cursor,
+            report,
+            "tenant-id",
+            "public",
+            "account-id",
+        )
+
+        query, _ = cursor.calls[0]
+        self.assertEqual(run_id, "report-run-id")
+        self.assertIn(
+            "collector_version = EXCLUDED.collector_version",
+            query,
+        )
+        self.assertIn(
+            "normalizer_version = EXCLUDED.normalizer_version",
+            query,
+        )
+        self.assertIn(
+            "renderer_version = EXCLUDED.renderer_version",
+            query,
+        )
 
 
 if __name__ == "__main__":

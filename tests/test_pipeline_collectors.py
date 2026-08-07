@@ -277,6 +277,40 @@ class PipelineCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_errors[0]["status_code"], 403)
         self.assertEqual(collector.last_errors[0]["error_code"], "2300")
 
+    def test_server_collector_forwards_configured_region(self):
+        api = Mock()
+        api.get_server_instance_list.return_value = {
+            "getServerInstanceListResponse": {"serverInstanceList": []}
+        }
+        api.get_network_interface_instance_list.return_value = {
+            "getNetworkInterfaceListResponse": {"networkInterfaceList": []}
+        }
+        api.get_block_storage_instance_list.return_value = {
+            "getBlockStorageInstanceListResponse": {
+                "blockStorageInstanceList": []
+            }
+        }
+        factory = FakeFactory(vserver=api)
+        factory.credentials = Mock(region="SGN")
+
+        ServerCollector(factory).collect()
+
+        api.get_server_instance_list.assert_called_once_with(
+            region_code="SGN",
+            page_no=1,
+            page_size=100,
+        )
+        api.get_network_interface_instance_list.assert_called_once_with(
+            region_code="SGN",
+            page_no=1,
+            page_size=100,
+        )
+        api.get_block_storage_instance_list.assert_called_once_with(
+            region_code="SGN",
+            page_no=1,
+            page_size=100,
+        )
+
     def test_server_collector_records_http_200_error_envelope(self):
         collector = ServerCollector(
             FakeFactory(vserver=ErrorEnvelopeVServerAPI())

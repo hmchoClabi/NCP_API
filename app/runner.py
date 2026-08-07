@@ -7,6 +7,8 @@ from collectors import (
     InsightMetricCollector,
     ActivityTracerEventCollector,
     BillingCollector,
+    InfrastructureCollector,
+    InfrastructureMetricCollector,
     OrganizationCollector,
 )
 from collectors.insighteventcollector import InsightEventCollector
@@ -301,9 +303,32 @@ class ReportRunner:
         server_data = server_collector.collect()
         server_errors = list(getattr(server_collector, "last_errors", []))
 
+        (
+            infrastructure_data,
+            infrastructure_errors,
+            infrastructure_warnings,
+        ) = self.collect_infrastructure(
+            servers=server_data,
+            server_raw_data=getattr(
+                server_collector,
+                "last_raw_data",
+                {},
+            ),
+        )
+
         insight_data, insight_metric_errors = self.collect_insight_metrics(
             server_data=server_data,
             period=period,
+        )
+
+        (
+            infrastructure_metric_data,
+            infrastructure_metric_errors,
+            infrastructure_metric_warnings,
+        ) = self.collect_infrastructure_metrics(
+            infrastructure=infrastructure_data,
+            start_time=period["start_time"],
+            end_time=period["end_time"],
         )
 
         insight_events, insight_grouped_events, insight_event_errors = self.collect_insight_events(
@@ -325,10 +350,15 @@ class ReportRunner:
         )
         all_collection_errors = self._merge_error_lists(
             server_errors,
+            infrastructure_errors,
             all_insight_errors,
+            infrastructure_metric_errors,
             activity_errors,
         )
-        all_collection_warnings: List[Dict[str, Any]] = []
+        all_collection_warnings = self._merge_error_lists(
+            infrastructure_warnings,
+            infrastructure_metric_warnings,
+        )
 
         # Billing이 실패하더라도 먼저 완료된 수집 결과는 보존한다.
         self.print_server_metric_summary(
@@ -368,6 +398,21 @@ class ReportRunner:
             filename=f"collection_errors_{period['file_suffix']}.json",
         )
 
+        self.save_json_file(
+            data=infrastructure_data,
+            output_dir=self.output_dir,
+            filename=(
+                f"infrastructure_inventory_{period['file_suffix']}.json"
+            ),
+        )
+        self.save_json_file(
+            data=infrastructure_metric_data,
+            output_dir=self.output_dir,
+            filename=(
+                f"infrastructure_metrics_{period['file_suffix']}.json"
+            ),
+        )
+
         billing_collector = None
         billing_stage = "collection"
 
@@ -397,6 +442,7 @@ class ReportRunner:
                 billing_errors,
             )
             all_collection_warnings = self._merge_error_lists(
+                all_collection_warnings,
                 getattr(billing_collector, "last_warnings", []),
             )
             self.save_json_file(
@@ -471,6 +517,10 @@ class ReportRunner:
             ),
             servers=self._dict_records(server_data),
             server_metrics=self._dict_records(insight_data),
+            infrastructure=self._dict_records(infrastructure_data),
+            infrastructure_metrics=self._dict_records(
+                infrastructure_metric_data
+            ),
             insight_events=self._dict_records(insight_events),
             grouped_insight_events=insight_grouped_events,
             activity_events=activity_data,
@@ -547,6 +597,92 @@ class ReportRunner:
             insight_errors,
             collector_errors,
         )
+
+    def collect_infrastructure(
+        self,
+        servers: List[Dict[str, Any]],
+        server_raw_data: Dict[str, Any],
+    ) -> tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
+        collector = None
+        try:
+            collector = InfrastructureCollector(api_factory=self.api_factory)
+            data = collector.collect(
+                servers=servers,
+                server_raw_data=server_raw_data,
+            )
+            return (
+                self._dict_records(data),
+                self._dict_records(getattr(collector, "last_errors", [])),
+                self._dict_records(getattr(collector, "last_warnings", [])),
+            )
+        except Exception as exc:
+            failure = {
+                "collector": "InfrastructureCollector",
+                "stage": "collection",
+                "target_type": "infrastructure",
+                "api": "platform",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+            return (
+                [],
+                self._merge_error_lists(
+                    getattr(collector, "last_errors", []),
+                    [failure],
+                ),
+                self._dict_records(
+                    getattr(collector, "last_warnings", [])
+                ),
+            )
+
+    def collect_infrastructure_metrics(
+        self,
+        infrastructure: List[Dict[str, Any]],
+        start_time: int,
+        end_time: int,
+    ) -> tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
+        collector = None
+        try:
+            collector = InfrastructureMetricCollector(
+                api_factory=self.api_factory
+            )
+            data = collector.collect(
+                infrastructure=infrastructure,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            return (
+                self._dict_records(data),
+                self._dict_records(getattr(collector, "last_errors", [])),
+                self._dict_records(getattr(collector, "last_warnings", [])),
+            )
+        except Exception as exc:
+            failure = {
+                "collector": "InfrastructureMetricCollector",
+                "stage": "collection",
+                "target_type": "infrastructure_metric",
+                "api": "cloud_insight",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+            return (
+                [],
+                self._merge_error_lists(
+                    getattr(collector, "last_errors", []),
+                    [failure],
+                ),
+                self._dict_records(
+                    getattr(collector, "last_warnings", [])
+                ),
+            )
 
     def collect_insight_events(
         self,

@@ -180,6 +180,169 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("&lt;target details&gt;", html)
         self.assertNotIn("must-not-be-rendered", html)
 
+    def test_infrastructure_inventory_renders_only_allowed_categories(self):
+        report = self._sample_report()
+        report.infrastructure = [
+            {
+                "category": category,
+                "category_label": label,
+                "service_name": label,
+                "resource_type": f"{category}Resource",
+                "resource_id": f"resource-{index}",
+                "resource_name": f"allowed-{index}",
+                "status": "RUN",
+                "region_code": "KR",
+                "zone_code": "KR-1",
+                "create_time": 0 if index == 1 else None,
+                "details": {},
+            }
+            for index, (category, label) in enumerate(
+                (
+                    ("SERVER", "서버"),
+                    ("LOAD_BALANCER", "Load Balancer"),
+                    ("BLOCK_STORAGE", "Block Storage"),
+                    ("OBJECT_STORAGE", "Object Storage"),
+                    ("NAS", "NAS"),
+                    ("CLOUD_DB", "Cloud DB"),
+                    ("CDN", "CDN"),
+                    ("KUBERNETES", "Kubernetes"),
+                ),
+                start=1,
+            )
+        ] + [
+            {
+                "category": "ALARM",
+                "category_label": "Alarm",
+                "resource_name": "excluded-alarm-instance",
+            },
+            {
+                "category": "IAM",
+                "category_label": "IAM",
+                "resource_name": "excluded-sub-account",
+            },
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        inventory = html.split("<h2>대표 인프라 현황</h2>", 1)[1].split(
+            "</section>",
+            1,
+        )[0]
+
+        for index in range(1, 9):
+            with self.subTest(index=index):
+                self.assertIn(f"allowed-{index}", inventory)
+        self.assertIn("8건", inventory)
+        self.assertIn("1970-01-01 09:00 KST", inventory)
+        self.assertNotIn("excluded-alarm-instance", html)
+        self.assertNotIn("excluded-sub-account", html)
+
+        details = HtmlReportRenderer()._infrastructure_details_text({
+            "engine": "POSTGRESQL",
+            "server_count": 2,
+            "cpu_count_total": 8,
+            "memory_gb_total": 32,
+            "data_storage_gb_total": 500,
+        })
+        self.assertIn("DB 서버: 2개", details)
+        self.assertIn("총 메모리: 32 GB", details)
+        self.assertIn("데이터 용량: 500 GB", details)
+
+    def test_infrastructure_charts_preserve_metric_units(self):
+        report = self._sample_report()
+        report.infrastructure = [
+            {
+                "category": "LOAD_BALANCER",
+                "resource_name": "lb-1",
+            },
+            {
+                "category": "CLOUD_DB",
+                "resource_name": "mysql-1",
+            },
+            {
+                "category": "KUBERNETES",
+                "resource_name": "cluster-1",
+            },
+        ]
+        report.infrastructure_metrics = [
+            {
+                "category": "LOAD_BALANCER",
+                "product_name": "System/Load Balancer(VPC)",
+                "metric": "traffic_in_byte",
+                "metric_label": "수신 트래픽",
+                "unit": "bytes/sec",
+                "interval": "Min5",
+                "aggregation": "AVG",
+                "series": [{
+                    "resource_id": "lb-1",
+                    "resource_name": "lb-1",
+                    "dimensions": {},
+                    "points": [
+                        [1780272000000, 1048576],
+                        [1780272300000, 2097152],
+                    ],
+                }],
+            },
+            {
+                "category": "CLOUD_DB",
+                "product_name": "System/Cloud DB for MySQL(VPC)",
+                "metric": "cpu_used_rto",
+                "metric_label": "CPU 사용률",
+                "unit": "%",
+                "interval": "Min5",
+                "aggregation": "AVG",
+                "series": [{
+                    "resource_id": "mysql-1",
+                    "resource_name": "mysql-1",
+                    "dimensions": {},
+                    "points": [
+                        [1780272000000, 25],
+                        [1780272300000, 50],
+                    ],
+                }],
+            },
+            {
+                "category": "KUBERNETES",
+                "product_name": "System/Ncloud Kubernetes Service",
+                "metric": "node_ready_count",
+                "metric_label": "Ready 노드",
+                "unit": "count",
+                "interval": "Min5",
+                "aggregation": "AVG",
+                "series": [{
+                    "resource_id": "cluster-1",
+                    "resource_name": "cluster-1",
+                    "dimensions": {},
+                    "points": [
+                        [1780272000000, 2],
+                        [1780272300000, 3],
+                    ],
+                }],
+            },
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        monitoring = html.split("<h2>주요 인프라 모니터링</h2>", 1)[1]
+        lb_chart = monitoring.split(
+            "<h3>Load Balancer · 수신 트래픽</h3>",
+            1,
+        )[1].split("</article>", 1)[0]
+        cdb_chart = monitoring.split(
+            "<h3>Cloud DB · CPU 사용률</h3>",
+            1,
+        )[1].split("</article>", 1)[0]
+        nks_chart = monitoring.split(
+            "<h3>Kubernetes · Ready 노드</h3>",
+            1,
+        )[1].split("</article>", 1)[0]
+
+        self.assertIn("1.0 MiB/s", lb_chart)
+        self.assertNotIn("%", lb_chart)
+        self.assertIn("25%", cdb_chart)
+        self.assertIn("50%", cdb_chart)
+        self.assertIn("cluster-1", nks_chart)
+        self.assertNotIn("2%", nks_chart)
+        self.assertNotIn("3%", nks_chart)
+
     def test_insight_event_detail_fields_are_rendered_and_escaped(self):
         report = self._sample_report()
         report.insight_events = [
@@ -327,6 +490,18 @@ class HtmlReportRendererTests(unittest.TestCase):
         )
 
         self.assertEqual(segments, [points[:2], points[2:]])
+
+    def test_chart_downsampling_bounds_svg_points_and_keeps_extrema(self):
+        renderer = HtmlReportRenderer()
+        points = [(index, float(index % 17)) for index in range(10_000)]
+        points[5_000] = (5_000, 999.0)
+
+        sampled = renderer._downsample_chart_points(points, max_points=600)
+
+        self.assertLessEqual(len(sampled), 600)
+        self.assertEqual(sampled[0], points[0])
+        self.assertEqual(sampled[-1], points[-1])
+        self.assertIn((5_000, 999.0), sampled)
 
     def test_event_tables_are_sorted_oldest_first(self):
         renderer = HtmlReportRenderer()

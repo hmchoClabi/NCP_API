@@ -73,6 +73,46 @@ class EmptyServerCollector:
         return []
 
 
+class EmptyInfrastructureCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_warnings = []
+
+    def collect(self, servers, server_raw_data):
+        return []
+
+
+class EmptyInfrastructureMetricCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_warnings = []
+
+    def collect(self, infrastructure, start_time, end_time):
+        return []
+
+
+class FailingInfrastructureCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_warnings = []
+
+    def collect(self, servers, server_raw_data):
+        raise RuntimeError(
+            "inventory failed https://example.test/path?privateKey=hidden"
+        )
+
+
+class FailingInfrastructureMetricCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_warnings = []
+
+    def collect(self, infrastructure, start_time, end_time):
+        raise RuntimeError(
+            "metric failed https://example.test/path?privateKey=hidden"
+        )
+
+
 class EmptyActivityCollector:
     def __init__(self, api_factory):
         self.last_errors = []
@@ -182,6 +222,41 @@ class RunnerPipelineTests(unittest.TestCase):
 
         self.assertEqual(metrics, [{"server_id": "one"}])
         self.assertEqual(errors[0]["stage"], "query")
+
+    def test_optional_infrastructure_collectors_are_failure_isolated(self):
+        runner = self._runner_without_factory_init()
+
+        with patch(
+            "app.runner.InfrastructureCollector",
+            FailingInfrastructureCollector,
+        ):
+            inventory, errors, warnings = runner.collect_infrastructure(
+                servers=[],
+                server_raw_data={},
+            )
+
+        self.assertEqual(inventory, [])
+        self.assertEqual(warnings, [])
+        self.assertEqual(errors[0]["collector"], "InfrastructureCollector")
+        self.assertNotIn("privateKey", errors[0]["message"])
+        self.assertNotIn("hidden", errors[0]["message"])
+
+        with patch(
+            "app.runner.InfrastructureMetricCollector",
+            FailingInfrastructureMetricCollector,
+        ):
+            metrics, errors, warnings = (
+                runner.collect_infrastructure_metrics([], 1, 2)
+            )
+
+        self.assertEqual(metrics, [])
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            errors[0]["collector"],
+            "InfrastructureMetricCollector",
+        )
+        self.assertNotIn("privateKey", errors[0]["message"])
+        self.assertNotIn("hidden", errors[0]["message"])
 
     def test_period_marks_only_complete_calendar_month_comparable(self):
         runner = self._runner_without_factory_init()
@@ -307,6 +382,14 @@ class RunnerPipelineTests(unittest.TestCase):
             with (
                 patch("app.runner.ServerCollector", EmptyServerCollector),
                 patch(
+                    "app.runner.InfrastructureCollector",
+                    EmptyInfrastructureCollector,
+                ),
+                patch(
+                    "app.runner.InfrastructureMetricCollector",
+                    EmptyInfrastructureMetricCollector,
+                ),
+                patch(
                     "app.runner.ActivityTracerEventCollector",
                     EmptyActivityCollector,
                 ),
@@ -342,6 +425,14 @@ class RunnerPipelineTests(unittest.TestCase):
             with (
                 patch("app.runner.ServerCollector", EmptyServerCollector),
                 patch(
+                    "app.runner.InfrastructureCollector",
+                    EmptyInfrastructureCollector,
+                ),
+                patch(
+                    "app.runner.InfrastructureMetricCollector",
+                    EmptyInfrastructureMetricCollector,
+                ),
+                patch(
                     "app.runner.ActivityTracerEventCollector",
                     EmptyActivityCollector,
                 ),
@@ -366,10 +457,26 @@ class RunnerPipelineTests(unittest.TestCase):
             suffix = "20260601_20260630"
             html_path = Path(temp_dir) / f"ncp_report_{suffix}.html"
             json_path = Path(temp_dir) / f"ncp_report_{suffix}.json"
+            infrastructure_path = Path(temp_dir) / (
+                f"infrastructure_inventory_{suffix}.json"
+            )
+            infrastructure_metrics_path = Path(temp_dir) / (
+                f"infrastructure_metrics_{suffix}.json"
+            )
 
             self.assertEqual(report.report_id, suffix)
             self.assertTrue(html_path.exists())
             self.assertTrue(json_path.exists())
+            self.assertEqual(
+                json.loads(infrastructure_path.read_text(encoding="utf-8")),
+                [],
+            )
+            self.assertEqual(
+                json.loads(
+                    infrastructure_metrics_path.read_text(encoding="utf-8")
+                ),
+                [],
+            )
             self.assertIn(
                 "NCP 이용 보고서",
                 html_path.read_text(encoding="utf-8"),
@@ -378,7 +485,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 json.loads(json_path.read_text(encoding="utf-8"))[
                     "schema_version"
                 ],
-                "1.1",
+                "1.2",
             )
 
     def test_period_scoped_empty_summary_files_replace_stale_content(self):
@@ -430,6 +537,14 @@ class RunnerPipelineTests(unittest.TestCase):
             with (
                 patch("app.runner.ServerCollector", EmptyServerCollector),
                 patch(
+                    "app.runner.InfrastructureCollector",
+                    EmptyInfrastructureCollector,
+                ),
+                patch(
+                    "app.runner.InfrastructureMetricCollector",
+                    EmptyInfrastructureMetricCollector,
+                ),
+                patch(
                     "app.runner.ActivityTracerEventCollector",
                     EmptyActivityCollector,
                 ),
@@ -460,6 +575,8 @@ class RunnerPipelineTests(unittest.TestCase):
                 f"cloud_insight_events_{suffix}.json",
                 f"activity_tracer_events_{suffix}.json",
                 f"collection_errors_{suffix}.json",
+                f"infrastructure_inventory_{suffix}.json",
+                f"infrastructure_metrics_{suffix}.json",
             ):
                 with self.subTest(filename=filename):
                     self.assertTrue((Path(temp_dir) / filename).exists())

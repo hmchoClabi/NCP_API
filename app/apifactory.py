@@ -18,6 +18,8 @@ from ncp_api import (
     VpcAPI,
     LoadbalancerAPI,
     OrganizationAPI,
+    CloudDbAPI,
+    CdnAPI,
 )
 from utils.credentials import NCPCredentials
 from utils.credential_provider import get_default_credentials
@@ -53,6 +55,8 @@ class APIFactory:
             "vpc": VpcAPI,
             "loadbalancer": LoadbalancerAPI,
             "organization": OrganizationAPI,
+            "cloud_db": CloudDbAPI,
+            "cdn": CdnAPI,
         }
 
     def get(self, name: str):

@@ -4,6 +4,8 @@ from .insighteventcollector import InsightEventCollector
 from .activitytracercollector import ActivityTracerEventCollector
 from .billingcollector import BillingCollector
 from .organizationcollector import OrganizationCollector
+from .infrastructurecollector import InfrastructureCollector
+from .infrastructuremetriccollector import InfrastructureMetricCollector
 
 
 __all__ = [
@@ -12,5 +14,7 @@ __all__ = [
     "InsightEventCollector",
     "ActivityTracerEventCollector",
     "BillingCollector",
-    
+    "OrganizationCollector",
+    "InfrastructureCollector",
+    "InfrastructureMetricCollector",
 ]

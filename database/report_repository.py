@@ -155,7 +155,7 @@ class PostgresReportRepository:
                 attempt_count, error_count, started_at, completed_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                '1.0', '1.0', '1.0', %s, 1, %s, clock_timestamp(), clock_timestamp()
+                '1.2', '1.2', '1.2', %s, 1, %s, clock_timestamp(), clock_timestamp()
             )
             ON CONFLICT (idempotency_key) DO UPDATE SET
                 period_start = EXCLUDED.period_start,
@@ -163,6 +163,9 @@ class PostgresReportRepository:
                 end_exclusive = EXCLUDED.end_exclusive,
                 status = EXCLUDED.status,
                 error_count = EXCLUDED.error_count,
+                collector_version = EXCLUDED.collector_version,
+                normalizer_version = EXCLUDED.normalizer_version,
+                renderer_version = EXCLUDED.renderer_version,
                 attempt_count = control.report_runs.attempt_count + 1,
                 started_at = clock_timestamp(),
                 completed_at = clock_timestamp()
@@ -243,7 +246,7 @@ class PostgresReportRepository:
                 report_run_id, tenant_id, schema_version, normalized_data,
                 content_hash_sha256, collector_version, normalizer_version,
                 renderer_version
-            ) VALUES (%s, %s, '1.1', %s::jsonb, %s, '1.0', '1.1', '1.1')
+            ) VALUES (%s, %s, '1.2', %s::jsonb, %s, '1.2', '1.2', '1.2')
             """,
             (
                 report_run_id,

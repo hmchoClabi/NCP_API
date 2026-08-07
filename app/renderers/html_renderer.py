@@ -15,6 +15,7 @@ class HtmlReportRenderer:
     """Render a standalone, responsive HTML report without web dependencies."""
 
     KST = ZoneInfo("Asia/Seoul")
+    MAX_CHART_POINTS_PER_SEGMENT = 600
     CHART_COLORS = (
         "#03c75a",
         "#2563eb",
@@ -28,6 +29,16 @@ class HtmlReportRenderer:
         "#0f766e",
         "#a16207",
         "#475569",
+    )
+    INFRASTRUCTURE_CATEGORIES = (
+        ("SERVER", "서버"),
+        ("LOAD_BALANCER", "Load Balancer"),
+        ("BLOCK_STORAGE", "Block Storage"),
+        ("OBJECT_STORAGE", "Object Storage"),
+        ("NAS", "NAS"),
+        ("CLOUD_DB", "Cloud DB"),
+        ("CDN", "CDN"),
+        ("KUBERNETES", "Kubernetes"),
     )
 
     def render(self, report: ReportResult) -> str:
@@ -140,6 +151,7 @@ class HtmlReportRenderer:
             billing.get("network_usage_summary")
         )
         activity_events = self._flatten_grouped(report.activity_events)
+        infrastructure = report.display_infrastructure
 
         return f"""<!doctype html>
 <html lang="ko">
@@ -169,7 +181,7 @@ class HtmlReportRenderer:
     </header>
 
     <section class="summary-grid" aria-label="주요 요약">
-      {self._summary_card("서버", len(report.servers), "대")}
+      {self._summary_card("대표 인프라", len(infrastructure), "개")}
       {self._summary_card(
           "Cloud Insight 이벤트",
           len(report.insight_events),
@@ -191,9 +203,10 @@ class HtmlReportRenderer:
       )}
     </section>
 
+    {self._infrastructure_section(infrastructure)}
     {self._section(
-        "서버 목록",
-        "보고서 생성 시점에 조회된 서버 인벤토리입니다.",
+        "서버 상세",
+        "보고서 생성 시점에 조회된 서버의 상세 구성입니다.",
         self._table(
             self._records(report.servers),
             (
@@ -215,6 +228,11 @@ class HtmlReportRenderer:
         len(report.display_server_metrics),
     )}
     {self._metric_chart_section(report.server_metrics, report.period)}
+    {self._infrastructure_metric_section(
+        report.display_infrastructure_metrics,
+        report.period,
+        infrastructure,
+    )}
     {self._section(
         "과금 데이터 기준",
         "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
@@ -339,6 +357,261 @@ class HtmlReportRenderer:
       </div>
       {content}
     </section>"""
+
+    def _infrastructure_section(
+        self,
+        resources: List[Dict[str, Any]],
+    ) -> str:
+        allowed = {
+            category for category, _ in self.INFRASTRUCTURE_CATEGORIES
+        }
+        counts = defaultdict(int)
+        prepared = []
+
+        for resource in self._records(resources):
+            category = str(resource.get("category") or "").upper()
+            if category not in allowed:
+                continue
+            counts[category] += 1
+            region_zone = " / ".join(
+                str(value)
+                for value in (
+                    resource.get("region_code"),
+                    resource.get("zone_code"),
+                )
+                if value
+            )
+            prepared.append({
+                **resource,
+                "location": region_zone or "-",
+                "details_text": self._infrastructure_details_text(
+                    resource.get("details")
+                ),
+                "create_time_text": self._infrastructure_create_time(
+                    resource.get("create_time")
+                ),
+            })
+
+        summary_cards = "".join(
+            f"""
+      <article class="infra-summary-card">
+        <span>{self._text(label)}</span>
+        <strong>{counts.get(category, 0):,}</strong>
+      </article>"""
+            for category, label in self.INFRASTRUCTURE_CATEGORIES
+        )
+        table = self._table(
+            prepared,
+            (
+                ("category_label", "구분"),
+                ("resource_name", "리소스명"),
+                ("service_name", "서비스"),
+                ("resource_type", "유형"),
+                ("status", "상태"),
+                ("location", "리전 / Zone"),
+                ("details_text", "주요 구성"),
+                ("create_time_text", "생성 시각 (KST)"),
+            ),
+        )
+        content = (
+            f'<div class="infra-summary-grid">{summary_cards}</div>'
+            + table
+        )
+        return self._section(
+            "대표 인프라 현황",
+            (
+                "실제 서비스 트래픽과 데이터를 처리하는 핵심 리소스만 "
+                "표시합니다. IAM 서브계정과 알람·이벤트·정책 객체는 "
+                "포함하지 않습니다."
+            ),
+            content,
+            len(prepared),
+        )
+
+    def _infrastructure_details_text(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return "-"
+        labels = (
+            ("load_balancer_type", "LB 유형", ""),
+            ("network_type", "네트워크", ""),
+            ("protocol", "프로토콜", ""),
+            ("engine", "엔진", ""),
+            ("version", "버전", ""),
+            ("server_count", "DB 서버", "개"),
+            ("cpu_count_total", "총 vCPU", ""),
+            ("memory_gb_total", "총 메모리", " GB"),
+            ("data_storage_gb_total", "데이터 용량", " GB"),
+            ("cpu_count", "vCPU", ""),
+            ("memory_gb", "메모리", " GB"),
+            ("size_gb", "용량", " GB"),
+            ("storage_size_gb", "용량", " GB"),
+            ("kubernetes_version", "Kubernetes", ""),
+            ("node_count", "노드", "개"),
+            ("node_pool_count", "노드풀", "개"),
+            ("domain_count", "도메인", "개"),
+            ("attached_server_name", "연결 서버", ""),
+            ("high_availability", "HA", ""),
+            ("multi_zone", "Multi Zone", ""),
+        )
+        parts = []
+        for key, label, suffix in labels:
+            item = value.get(key)
+            if item is None or item == "":
+                continue
+            if isinstance(item, bool):
+                item = "사용" if item else "미사용"
+            parts.append(f"{label}: {item}{suffix}")
+            if len(parts) == 5:
+                break
+        return " · ".join(parts) or "-"
+
+    def _infrastructure_create_time(self, value: Any) -> str:
+        timestamp = self._timestamp_millis(value)
+        if timestamp is not None:
+            parsed = datetime.fromtimestamp(timestamp / 1000, tz=self.KST)
+            return parsed.strftime("%Y-%m-%d %H:%M KST")
+
+        if not isinstance(value, str) or not value.strip():
+            return "-"
+        try:
+            parsed = datetime.fromisoformat(
+                value.strip().replace("Z", "+00:00")
+            )
+        except ValueError:
+            return value.strip()
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=self.KST)
+        return parsed.astimezone(self.KST).strftime("%Y-%m-%d %H:%M KST")
+
+    def _infrastructure_metric_section(
+        self,
+        metric_groups: List[Dict[str, Any]],
+        period: Dict[str, Any],
+        infrastructure: List[Dict[str, Any]],
+    ) -> str:
+        monitored_categories = {
+            "LOAD_BALANCER": "Load Balancer",
+            "CLOUD_DB": "Cloud DB",
+            "KUBERNETES": "Kubernetes",
+        }
+        present_categories = {
+            str(item.get("category") or "").upper()
+            for item in self._records(infrastructure)
+        } & set(monitored_categories)
+        groups = [
+            group for group in self._records(metric_groups)
+            if str(group.get("category") or "").upper()
+            in monitored_categories
+        ]
+
+        if not present_categories and not groups:
+            return ""
+
+        cards = []
+        rendered_categories = set()
+        for group in groups:
+            category = str(group.get("category") or "").upper()
+            series = self._infrastructure_metric_series(group)
+            interval = str(group.get("interval") or "Min5")
+            aggregation = str(group.get("aggregation") or "AVG")
+            unit = str(group.get("unit") or "")
+            metric_label = str(
+                group.get("metric_label")
+                or group.get("metric")
+                or "Metric"
+            )
+            title = f"{monitored_categories[category]} · {metric_label}"
+            product_name = str(group.get("product_name") or "Cloud Insight")
+            description = (
+                f"{product_name} · {self._metric_interval_label(interval)} "
+                f"{aggregation}"
+            )
+            if unit:
+                description += f" · 단위 {unit}"
+            y_axis = (
+                "fixed"
+                if self._is_percent_unit(unit)
+                else "auto"
+            )
+            cards.append(f"""
+      <article class="chart-card">
+        <div class="chart-heading">
+          <h3>{self._text(title)}</h3>
+          <p>{self._text(description)}</p>
+        </div>
+        {self._line_chart(
+            title,
+            series,
+            period,
+            y_axis,
+            interval,
+            unit=unit,
+        )}
+      </article>""")
+            rendered_categories.add(category)
+
+        for category in sorted(
+            present_categories - rendered_categories,
+            key=lambda item: tuple(monitored_categories).index(item),
+        ):
+            cards.append(f"""
+      <article class="chart-card">
+        <div class="chart-heading">
+          <h3>{self._text(monitored_categories[category])}</h3>
+          <p>Cloud Insight 모니터링 데이터 상태</p>
+        </div>
+        <p class="empty-state chart-empty">표시할 시계열이 없습니다. 권한, 모니터링 활성화 여부와 데이터 보관 기간을 확인하십시오.</p>
+      </article>""")
+
+        return f"""
+    <section class="report-section infrastructure-trends">
+      <div class="section-heading">
+        <div>
+          <h2>주요 인프라 모니터링</h2>
+          <p>LB, Cloud DB, Kubernetes의 보고 기간 Cloud Insight 시계열입니다.</p>
+        </div>
+        <span class="count">{len(groups):,}개 그래프</span>
+      </div>
+      <div class="chart-grid">{''.join(cards)}</div>
+    </section>"""
+
+    def _infrastructure_metric_series(
+        self,
+        group: Dict[str, Any],
+    ) -> Dict[str, List[Tuple[int, float]]]:
+        result: Dict[str, List[Tuple[int, float]]] = {}
+        for index, item in enumerate(self._records(group.get("series"))):
+            points = sorted(self._metric_points(item), key=lambda point: point[0])
+            if not points:
+                continue
+            label = str(
+                item.get("resource_name")
+                or item.get("resource_id")
+                or f"resource-{index + 1}"
+            )
+            dimensions = item.get("dimensions")
+            if isinstance(dimensions, dict):
+                qualifier = (
+                    dimensions.get("loadBalancerPort")
+                    or dimensions.get("instanceName")
+                    or dimensions.get("pod")
+                    or dimensions.get("podName")
+                    or dimensions.get("controller")
+                    or dimensions.get("role")
+                )
+                if qualifier:
+                    label = f"{label} · {qualifier}"
+            unique_label = label
+            suffix = 2
+            while unique_label in result:
+                unique_label = f"{label} ({suffix})"
+                suffix += 1
+            result[unique_label] = points
+        return result
+
+    @staticmethod
+    def _is_percent_unit(unit: str) -> bool:
+        return unit.strip().casefold() in {"%", "percent", "percentage"}
 
     def _metric_table(self, rows: List[Dict[str, Any]]) -> str:
         prepared = []
@@ -542,7 +815,7 @@ class HtmlReportRenderer:
             "Min30": "30분 AVG",
             "Hour2": "2시간 AVG",
             "Day1": "1일 AVG",
-        }[interval]
+        }.get(interval, str(interval or "집계 주기 미상"))
 
     def _report_metric_interval(
         self,
@@ -580,7 +853,7 @@ class HtmlReportRenderer:
             "Min30": 30 * 60 * 1000,
             "Hour2": 2 * 60 * 60 * 1000,
             "Day1": 24 * 60 * 60 * 1000,
-        }[interval]
+        }.get(interval, 5 * 60 * 1000)
 
     def _period_bounds(
         self,
@@ -680,6 +953,7 @@ class HtmlReportRenderer:
         period: Dict[str, Any],
         y_axis: str,
         interval: str,
+        unit: str = "%",
     ) -> str:
         populated = {
             label: points
@@ -725,11 +999,7 @@ class HtmlReportRenderer:
         for tick_index in range(5):
             tick = y_max * tick_index / 4
             y = top + plot_height - (tick / y_max * plot_height)
-            tick_label = (
-                f"{tick:.0f}%"
-                if tick >= 1
-                else f"{tick:.1f}%"
-            )
+            tick_label = self._chart_value_text(tick, unit, compact=True)
             grid_parts.append(
                 f'<line x1="{left}" y1="{y:.2f}" '
                 f'x2="{width - right}" y2="{y:.2f}" '
@@ -767,6 +1037,10 @@ class HtmlReportRenderer:
                 points,
                 expected_interval=expected_interval,
             ):
+                segment = self._downsample_chart_points(
+                    segment,
+                    max_points=self.MAX_CHART_POINTS_PER_SEGMENT,
+                )
                 coordinates = []
                 circles = []
                 show_markers = len(segment) <= 60
@@ -790,7 +1064,7 @@ class HtmlReportRenderer:
                             f'r="2.4" fill="{color}"><title>'
                             f"{self._text(label)} · "
                             f"{self._text(self._chart_point_label(point_time))} · "
-                            f"{self._text(f'{value:.2f}%')}"
+                            f"{self._text(self._chart_value_text(value, unit))}"
                             "</title></circle>"
                         )
 
@@ -818,6 +1092,57 @@ class HtmlReportRenderer:
             + "".join(legend_parts)
             + "</div></div>"
         )
+
+    def _chart_value_text(
+        self,
+        value: float,
+        unit: str,
+        compact: bool = False,
+    ) -> str:
+        unit_text = str(unit or "").strip()
+        normalized = unit_text.casefold().replace(" ", "")
+
+        if normalized in {"%", "percent", "percentage"}:
+            precision = 0 if compact or abs(value) >= 1 else 1
+            return f"{value:.{precision}f}%"
+
+        byte_rate_units = {
+            "b/s", "byte/s", "bytes/s", "byte/sec", "bytes/sec",
+            "bps",
+        }
+        byte_units = {"b", "byte", "bytes"}
+        if normalized in byte_rate_units or normalized in byte_units:
+            suffix = "/s" if normalized in byte_rate_units else ""
+            scaled = float(value)
+            prefix = "B"
+            for candidate in ("KiB", "MiB", "GiB", "TiB"):
+                if abs(scaled) < 1024:
+                    break
+                scaled /= 1024
+                prefix = candidate
+            precision = 0 if compact and abs(scaled) >= 10 else 1
+            return f"{scaled:,.{precision}f} {prefix}{suffix}"
+
+        if compact:
+            absolute = abs(value)
+            for divisor, suffix in (
+                (1_000_000_000, "B"),
+                (1_000_000, "M"),
+                (1_000, "K"),
+            ):
+                if absolute >= divisor:
+                    return f"{value / divisor:.1f}{suffix}"
+
+        number = (
+            f"{value:,.0f}"
+            if abs(value) >= 1 or value == 0
+            else f"{value:,.2f}"
+        )
+        if normalized in {"", "num", "number", "count", "ea"}:
+            return number
+        if normalized in {"num/s", "number/s", "count/s", "count/sec"}:
+            return f"{number}/s"
+        return f"{number} {unit_text}"
 
     def _chart_point_label(
         self,
@@ -863,6 +1188,40 @@ class HtmlReportRenderer:
             else:
                 segments[-1].append(point)
         return segments
+
+    @staticmethod
+    def _downsample_chart_points(
+        points: List[Tuple[int, float]],
+        max_points: int,
+    ) -> List[Tuple[int, float]]:
+        """Bound SVG size while preserving the first, last, min and max."""
+        if max_points <= 0:
+            return []
+        if len(points) <= max_points:
+            return list(points)
+        if max_points == 1:
+            return [points[0]]
+        if max_points == 2:
+            return [points[0], points[-1]]
+
+        bucket_count = max((max_points - 2) // 2, 1)
+        interior = points[1:-1]
+        bucket_size = max(math.ceil(len(interior) / bucket_count), 1)
+        selected = [points[0]]
+        for start in range(0, len(interior), bucket_size):
+            bucket = interior[start:start + bucket_size]
+            extrema = {
+                min(range(len(bucket)), key=lambda index: bucket[index][1]),
+                max(range(len(bucket)), key=lambda index: bucket[index][1]),
+            }
+            selected.extend(bucket[index] for index in sorted(extrema))
+        selected.append(points[-1])
+        if len(selected) <= max_points:
+            return selected
+
+        # Rounding can create one extra bucket. Keep the temporal endpoints.
+        interior_limit = max_points - 2
+        return [selected[0], *selected[1:-1][:interior_limit], selected[-1]]
 
     def _event_table(self, rows: Any) -> str:
         prepared = []
@@ -1540,6 +1899,20 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 .summary-card small { color: var(--muted); font-size: .8rem; font-weight: 600; }
 .summary-card.warning { border-color: #fed7aa; }
 .summary-card.warning strong { color: var(--warning); }
+.infra-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.infra-summary-card {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.infra-summary-card span { display: block; color: var(--muted); font-size: .76rem; }
+.infra-summary-card strong { display: block; margin-top: 3px; font-size: 1.2rem; }
 .report-section {
   margin-top: 20px;
   padding: 26px;
@@ -1672,13 +2045,13 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
 @media (max-width: 900px) {
   .report-header { flex-direction: column; padding: 28px; }
   .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
-  .summary-grid, .billing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
 }
 @media print {

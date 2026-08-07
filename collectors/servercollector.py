@@ -19,13 +19,23 @@ class ServerCollector:
         self.api_factory = api_factory
         self.normalizer = ServerNormalizer()
         self.last_errors: List[Dict[str, Any]] = []
+        self.last_raw_data: Dict[str, List[Dict[str, Any]]] = {}
+        credentials = getattr(api_factory, "credentials", None)
+        region = getattr(credentials, "region", None)
+        self.region_code = (
+            region.strip().upper()
+            if isinstance(region, str) and region.strip()
+            else None
+        )
 
     def collect(self) -> List[Dict[str, Any]]:
         logger.info("서버 데이터 수집을 시작합니다.")
         self.last_errors = []
+        self.last_raw_data = {}
 
         try:
             raw_data = self.collect_raw()
+            self.last_raw_data = raw_data
             server_list = self.normalizer.normalize(raw_data)
 
             logger.info("서버 데이터 수집이 완료되었습니다: %s대", len(server_list))
@@ -56,6 +66,7 @@ class ServerCollector:
             fetch_page=lambda page_no: vserver_api.get_server_instance_list(
                 page_no=page_no,
                 page_size=self.PAGE_SIZE,
+                **self._region_kwargs(),
             ),
             extract_items=self._extract_servers,
             identity_fields=("serverInstanceNo",),
@@ -70,6 +81,7 @@ class ServerCollector:
                 vserver_api.get_network_interface_instance_list(
                     page_no=page_no,
                     page_size=self.PAGE_SIZE,
+                    **self._region_kwargs(),
                 )
             ),
             extract_items=self._extract_nics,
@@ -85,6 +97,7 @@ class ServerCollector:
                 vserver_api.get_block_storage_instance_list(
                     page_no=page_no,
                     page_size=self.PAGE_SIZE,
+                    **self._region_kwargs(),
                 )
             ),
             extract_items=self._extract_storages,
@@ -233,6 +246,9 @@ class ServerCollector:
             )
 
         return result
+
+    def _region_kwargs(self) -> Dict[str, str]:
+        return {"region_code": self.region_code} if self.region_code else {}
 
     def _item_identity(
         self,

@@ -307,6 +307,13 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.allowed_tenants, ["tenant-1"])
+        self.assertIn(
+            (
+                "<span>대표 인프라</span><strong>1</strong>"
+                "<small>수집 대상</small>"
+            ).encode("utf-8"),
+            response.data,
+        )
 
     def test_customer_can_render_full_report_from_stored_snapshot(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")

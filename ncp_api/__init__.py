@@ -16,6 +16,8 @@ __all__ = [
     "VpcAPI",
     "LoadbalancerAPI",
     "OrganizationAPI",
+    "CloudDbAPI",
+    "CdnAPI",
 ]
 
 
@@ -71,5 +73,11 @@ def __getattr__(name):
     if name == "OrganizationAPI":
         from .organizationAPI import OrganizationAPI
         return OrganizationAPI
+    if name == "CloudDbAPI":
+        from .clouddbAPI import CloudDbAPI
+        return CloudDbAPI
+    if name == "CdnAPI":
+        from .cdnAPI import CdnAPI
+        return CdnAPI
 
     raise AttributeError(f"module 'ncp_api' has no attribute '{name}'")

@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from app.apifactory import APIFactory
 from ncp_api.claAPI import CloudLogAnalyticsAPI
@@ -13,6 +14,7 @@ from ncp_api.vnasAPI import VnasAPI
 from ncp_api.vpcAPI import VpcAPI
 from ncp_api.vserverAPI import VserverAPI
 from ncp_api.webservicemonitorAPI import WebServiceMonitorAPI
+from utils.credentials import NCPCredentials
 
 
 class RecordingClient:
@@ -84,6 +86,25 @@ class NCPAPIContractTests(unittest.TestCase):
         self.assertEqual(
             client.calls[-1][2]["json_data"]["eventId"],
             "event-1",
+        )
+
+    def test_cloud_insight_sets_configured_region_header(self):
+        client = RecordingClient()
+        client.session = SimpleNamespace(headers={})
+
+        CloudInsightAPI(
+            credentials=NCPCredentials(
+                access_key="test-access",
+                secret_key="test-secret",
+                api_type="public",
+                region="SGN",
+            ),
+            client=client,
+        )
+
+        self.assertEqual(
+            client.session.headers["x-ncp-region_code"],
+            "SGN",
         )
 
     def test_cla_accepts_documented_mysql_alias_and_sends_aggregation_type(self):

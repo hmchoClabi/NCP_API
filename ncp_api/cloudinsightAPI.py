@@ -9,6 +9,18 @@ class CloudInsightAPI(BaseNCPAPI):
     """
     ENDPOINT_KEY = "cloudinsight"
 
+    def __init__(self, credentials=None, client=None):
+        super().__init__(credentials=credentials, client=client)
+        region = getattr(self.credentials, "region", None)
+        session = getattr(self.client, "session", None)
+        headers = getattr(session, "headers", None)
+        if (
+            isinstance(region, str)
+            and region.strip()
+            and hasattr(headers, "setdefault")
+        ):
+            headers.setdefault("x-ncp-region_code", region.strip().upper())
+
     
     """
     ================================================================
