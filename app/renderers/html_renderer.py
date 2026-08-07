@@ -63,21 +63,66 @@ class HtmlReportRenderer:
         )
         use_estimated_cost = period.get("is_closed_month") is False
         if use_estimated_cost:
-            service_summary = [
-                {
-                    "service_name": row.get("service_name"),
-                    "amount": row.get("expected_amount"),
-                    "row_count": row.get("row_count"),
-                }
-                for row in self._records(billing.get("expected_by_service"))
-            ]
-            billing_card_title = "기간 예상 비용"
-            billing_card_amount = period_estimate.get(
-                "total_amount", billing_summary.get("expected_total_amount")
+            use_month_to_date = (
+                period_estimate.get("status") == "NOT_APPLICABLE"
+                and month_to_date_estimate.get("status") == "AVAILABLE"
             )
+            if use_month_to_date and month_to_date_estimate.get(
+                "amount_basis"
+            ) in {
+                "NCP_PRODUCT_DEMAND_USE_AMOUNT",
+                "NCP_CURRENT_USE_AMOUNT_FALLBACK",
+            }:
+                service_summary = [
+                    {
+                        "service_name": row.get("service_name"),
+                        "amount": row.get("use_amount"),
+                        "row_count": row.get("row_count"),
+                    }
+                    for row in self._records(
+                        billing.get("target_service_summary")
+                    )
+                ]
+            elif use_month_to_date:
+                service_summary = [
+                    {
+                        "service_name": row.get("service_name"),
+                        "amount": row.get("expected_amount"),
+                        "row_count": row.get("row_count"),
+                    }
+                    for row in self._records(
+                        billing.get("month_to_date_by_service")
+                    )
+                ]
+            else:
+                service_summary = [
+                    {
+                        "service_name": row.get("service_name"),
+                        "amount": row.get("expected_amount"),
+                        "row_count": row.get("row_count"),
+                    }
+                    for row in self._records(billing.get("expected_by_service"))
+                ]
+            billing_card_title = (
+                "보고 기준일까지 누적 추정 비용"
+                if use_month_to_date
+                else "기간 예상 비용"
+            )
+            billing_card_amount = (
+                month_to_date_estimate.get("total_amount")
+                if use_month_to_date
+                else period_estimate.get("total_amount")
+            )
+            if billing_card_amount is None:
+                billing_card_amount = billing_summary.get(
+                    "expected_total_amount"
+                )
             billing_section_title = "서비스별 예상 비용"
             billing_section_description = (
-                "선택한 기간의 사용량과 단가로 계산한 미확정 예상 비용입니다. "
+                "보고 기준일까지 수집한 사용량과 단가로 계산한 미확정 예상 비용입니다. "
+                if use_month_to_date
+                else "선택한 기간의 사용량과 단가로 계산한 미확정 예상 비용입니다. "
+            ) + (
                 "시간 범위 보고서도 비용 API의 일 단위 사용량을 기준으로 합니다."
             )
         else:
@@ -1249,14 +1294,26 @@ class HtmlReportRenderer:
         labels = {
             "CONFIRMED": "확정 청구 데이터",
             "PERIOD_ESTIMATE": "보고 기간 추정 데이터",
-            "MONTH_TO_DATE_ESTIMATE": "월 누적 추정 데이터",
-            "MONTH_END_PROJECTION": "월말 추정 데이터",
+            "MONTH_TO_DATE_ESTIMATE": "보고 기준일까지 누적 추정 데이터",
+            "MONTH_END_PROJECTION": "월 전체 금액 (1일~말일)",
         }
         basis_labels = {
             "INVOICE_TOTAL": "NCP 발행 청구서 총액",
             "CURRENT_MONTH_INVOICE_TOTAL": "NCP 해당 월 확정 금액 (VAT 포함)",
             "PRE_DISCOUNT_LIST_PRICE": "사용량 × 단가 (할인·VAT 전)",
             "DAILY_RUN_RATE_PROJECTION": "월 누적 일평균 추세 예측",
+            "NCP_PRODUCT_DEMAND_USE_AMOUNT": "NCP 서비스별 누적 사용금액 (할인·VAT 전)",
+            "NCP_CONTRACT_DEMAND_USE_AMOUNT": (
+                "NCP 계약별 사용금액 fallback (할인·VAT 전)"
+            ),
+            "NCP_CURRENT_USE_AMOUNT_FALLBACK": (
+                "NCP 현재월 반환 사용금액 (복합요금 fallback)"
+            ),
+            "PROJECTED_USAGE_RERATED": "월말 예상 사용량에 요금제를 다시 적용",
+            "NCP_ACCRUED_PLUS_USAGE_FORECAST": "NCP 누적 사용금액 + 월말 사용량 예측",
+            "NCP_ACCRUED_LOWER_BOUND": (
+                "NCP 현재 누적 사용금액 (복합요금 월말 하한)"
+            ),
         }
         cards = []
         for fact in facts:
@@ -1281,6 +1338,15 @@ class HtmlReportRenderer:
                     f"{self._number(fact.get('vat_amount'), 0)}원"
                     "</strong></li>"
                 )
+            estimate_quality = ""
+            if fact.get("cost_type") != "CONFIRMED":
+                details = self._mapping(fact.get("details"))
+                estimate_quality = (
+                    "<li><span>계산 품질</span><strong>"
+                    f"제외 {self._number(fact.get('excluded_item_count') or 0, 0)}개 / "
+                    f"추론 {self._number(details.get('inferred_item_count') or 0, 0)}개"
+                    "</strong></li>"
+                )
             included = (
                 f"할인 {'포함' if fact.get('includes_discount') else '미포함'}, "
                 f"VAT {'포함' if fact.get('includes_vat') else '미포함'}"
@@ -1296,6 +1362,7 @@ class HtmlReportRenderer:
                 f"<li><span>금액 기준</span><strong>{self._text(basis_labels.get(str(fact.get('amount_basis')), fact.get('amount_basis')))}</strong></li>"
                 f"<li><span>포함 범위</span><strong>{self._text(included)}</strong></li>"
                 f"<li><span>신뢰도</span><strong>{self._text(fact.get('confidence'))}</strong></li>"
+                f"{estimate_quality}"
                 f"{invoice_breakdown}"
                 "</ul></article>"
             )

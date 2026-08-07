@@ -635,9 +635,18 @@ class PostgresReportRepository:
         billing_summary = report.billing.get("summary", {}) if isinstance(report.billing, dict) else {}
         billing = report.billing if isinstance(report.billing, dict) else {}
         period_estimate = billing.get("period_estimate", {})
+        month_to_date_estimate = billing.get("month_to_date_estimate", {})
         invoice_summary = billing.get("invoice_summary", {})
+        active_estimate = (
+            month_to_date_estimate
+            if (
+                period_estimate.get("status") == "NOT_APPLICABLE"
+                and month_to_date_estimate.get("status") == "AVAILABLE"
+            )
+            else period_estimate
+        )
         confidence = str(
-            period_estimate.get("confidence")
+            active_estimate.get("confidence")
             or invoice_summary.get("confidence")
             or "UNAVAILABLE"
         )
@@ -673,7 +682,7 @@ class PostgresReportRepository:
                     and str(event.get("result")).upper() not in {"SUCCESS", "SUCCEED"}
                     for event in activities
                 ),
-                len(report.collection_errors), period_estimate.get("total_amount"),
+                len(report.collection_errors), active_estimate.get("total_amount"),
                 invoice_summary.get("total_amount"), confidence,
             ),
         )

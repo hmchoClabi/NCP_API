@@ -111,6 +111,74 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertEqual(parameters[3], "200")
         self.assertEqual(parameters[12], 110)
 
+    def test_daily_fact_uses_month_to_date_when_period_is_not_applicable(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-01 00:00:00",
+                "end_dt": "2026-08-31 23:59:59",
+            },
+            billing={
+                "period_estimate": {
+                    "status": "NOT_APPLICABLE",
+                    "total_amount": None,
+                    "confidence": "UNAVAILABLE",
+                },
+                "month_to_date_estimate": {
+                    "status": "AVAILABLE",
+                    "total_amount": 4321,
+                    "confidence": "PARTIAL",
+                },
+                "invoice_summary": {"total_amount": 110},
+            },
+        )
+
+        self.repository._upsert_daily_fact(
+            cursor,
+            report,
+            "report-id",
+            "tenant-id",
+            "public",
+        )
+
+        _, parameters = cursor.calls[0]
+        self.assertEqual(parameters[11], 4321)
+        self.assertEqual(parameters[13], "PARTIAL")
+
+    def test_daily_fact_does_not_replace_unavailable_period_with_month_total(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-16 00:00:00",
+                "end_dt": "2026-08-16 23:59:59",
+            },
+            billing={
+                "period_estimate": {
+                    "status": "UNAVAILABLE",
+                    "total_amount": None,
+                    "confidence": "UNAVAILABLE",
+                },
+                "month_to_date_estimate": {
+                    "status": "AVAILABLE",
+                    "total_amount": 4321,
+                    "confidence": "PARTIAL",
+                },
+                "invoice_summary": {"total_amount": 110},
+            },
+        )
+
+        self.repository._upsert_daily_fact(
+            cursor,
+            report,
+            "report-id",
+            "tenant-id",
+            "public",
+        )
+
+        _, parameters = cursor.calls[0]
+        self.assertIsNone(parameters[11])
+        self.assertEqual(parameters[13], "UNAVAILABLE")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -237,6 +237,46 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("4,321", html)
         self.assertIn("미확정 예상 비용", html)
 
+    def test_month_to_date_ncp_cost_replaces_duplicate_period_card(self):
+        report = self._sample_report()
+        report.period["is_closed_month"] = False
+        report.billing = {
+            "summary": {"expected_total_amount": 9999},
+            "period_estimate": {
+                "cost_type": "PERIOD_ESTIMATE",
+                "status": "NOT_APPLICABLE",
+            },
+            "month_to_date_estimate": {
+                "cost_type": "MONTH_TO_DATE_ESTIMATE",
+                "status": "AVAILABLE",
+                "period_start": "2026-08-01",
+                "period_end": "2026-08-16",
+                "coverage_start": "2026-08-01",
+                "coverage_end": "2026-08-16",
+                "total_amount": 4321,
+                "amount_basis": "NCP_PRODUCT_DEMAND_USE_AMOUNT",
+                "confidence": "PARTIAL",
+                "includes_discount": False,
+                "includes_vat": False,
+            },
+            "target_service_summary": [
+                {
+                    "service_name": "Server",
+                    "use_amount": 4321,
+                    "row_count": 2,
+                }
+            ],
+            "network_usage_summary": [],
+            "usage_summary": [],
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("4,321", html)
+        self.assertNotIn("9,999", html)
+        self.assertIn("NCP 서비스별 누적 사용금액", html)
+        self.assertNotIn("보고 기간 추정 데이터", html)
+
     def test_monthly_header_uses_inclusive_last_day(self):
         report = self._sample_report()
         report.period = {
