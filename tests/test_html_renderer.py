@@ -262,6 +262,10 @@ class HtmlReportRendererTests(unittest.TestCase):
                 "category": "KUBERNETES",
                 "resource_name": "cluster-1",
             },
+            {
+                "category": "NAS",
+                "resource_name": "nas-1",
+            },
         ]
         report.infrastructure_metrics = [
             {
@@ -318,6 +322,24 @@ class HtmlReportRendererTests(unittest.TestCase):
                     ],
                 }],
             },
+            {
+                "category": "NAS",
+                "product_name": "System/NAS(VPC)",
+                "metric": "volume_used_ratio",
+                "metric_label": "볼륨 사용률",
+                "unit": "%",
+                "interval": "Min5",
+                "aggregation": "AVG",
+                "series": [{
+                    "resource_id": "nas-1",
+                    "resource_name": "nas-1",
+                    "dimensions": {},
+                    "points": [
+                        [1780272000000, 40],
+                        [1780272300000, 45],
+                    ],
+                }],
+            },
         ]
 
         html = HtmlReportRenderer().render(report)
@@ -334,6 +356,10 @@ class HtmlReportRendererTests(unittest.TestCase):
             "<h3>Kubernetes · Ready 노드</h3>",
             1,
         )[1].split("</article>", 1)[0]
+        nas_chart = monitoring.split(
+            "<h3>NAS · 볼륨 사용률</h3>",
+            1,
+        )[1].split("</article>", 1)[0]
 
         self.assertIn("1.0 MiB/s", lb_chart)
         self.assertNotIn("%", lb_chart)
@@ -342,6 +368,8 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("cluster-1", nks_chart)
         self.assertNotIn("2%", nks_chart)
         self.assertNotIn("3%", nks_chart)
+        self.assertIn("40%", nas_chart)
+        self.assertIn("45%", nas_chart)
 
     def test_insight_event_detail_fields_are_rendered_and_escaped(self):
         report = self._sample_report()
@@ -551,6 +579,24 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertNotIn("must", html)
+
+    def test_customer_report_options_hide_unselected_sections(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["activity_history"],
+            "resource_categories": [],
+            "monitoring_categories": [],
+            "diagram": {"enabled": False},
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("<h2>Cloud Activity Tracer</h2>", html)
+        self.assertNotIn("<h2>대표 인프라 현황</h2>", html)
+        self.assertNotIn("<h2>클라우드 구성도</h2>", html)
+        self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
+        self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
+        self.assertNotIn("<h2>수집 오류</h2>", html)
 
     def test_write_creates_utf8_html_file(self):
         report = self._sample_report()

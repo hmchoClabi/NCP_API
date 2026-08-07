@@ -17,6 +17,10 @@ from database.config import DatabaseSettings
 from webapp.security import CredentialCipher, hash_password, token_hash
 from utils.credentials import NCPCredentials
 from app.customer import CustomerProfile
+from app.report_options import (
+    normalize_report_options,
+    validate_report_options,
+)
 
 
 _ANONYMIZED_VALUE = "[익명화됨]"
@@ -37,7 +41,10 @@ def _remove_local_report_artifacts(storage_uris: list[str]) -> tuple[int, int]:
         parsed = urlparse(storage_uri)
         if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
             continue
-        candidate = Path(unquote(parsed.path)).resolve()
+        local_path = unquote(parsed.path)
+        if os.name == "nt" and re.match(r"^/[A-Za-z]:", local_path):
+            local_path = local_path[1:]
+        candidate = Path(local_path).resolve()
         try:
             candidate.relative_to(output_root)
         except ValueError:
@@ -503,6 +510,14 @@ class PortalRepository:
             row = cursor.fetchone()
             if not row:
                 raise ValueError("Customer code already belongs to another environment.")
+            cursor.execute(
+                """
+                INSERT INTO control.tenant_report_settings (tenant_id)
+                VALUES (%s)
+                ON CONFLICT (tenant_id) DO NOTHING
+                """,
+                (row["id"],),
+            )
             return str(row["id"])
 
     def dashboard(self) -> dict[str, Any]:
@@ -571,6 +586,18 @@ class PortalRepository:
                 return None
             cursor.execute(
                 """
+                SELECT settings
+                FROM control.tenant_report_settings
+                WHERE tenant_id = %s
+                """,
+                (tenant_id,),
+            )
+            report_settings = cursor.fetchone()
+            tenant["report_options"] = normalize_report_options(
+                report_settings["settings"] if report_settings else None
+            )
+            cursor.execute(
+                """
                 SELECT account.*,
                        credential.status AS credential_status,
                        credential.access_key_hint,
@@ -605,6 +632,56 @@ class PortalRepository:
                 )
             tenant["reports"] = self._report_rows(cursor, tenant_id)
             return tenant
+
+    def update_tenant_report_settings(
+        self,
+        tenant_id: str,
+        options: dict[str, Any],
+        actor_id: str,
+    ) -> dict[str, Any]:
+        normalized = validate_report_options(options)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id
+                FROM control.tenants
+                WHERE id = %s AND status <> 'OFFBOARDED'
+                """,
+                (tenant_id,),
+            )
+            if not cursor.fetchone():
+                raise ValueError("활성 고객을 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO control.tenant_report_settings (
+                    tenant_id, settings, updated_by
+                ) VALUES (%s, %s::jsonb, %s)
+                ON CONFLICT (tenant_id) DO UPDATE SET
+                    settings = EXCLUDED.settings,
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (
+                    tenant_id,
+                    json.dumps(normalized, ensure_ascii=False),
+                    actor_id,
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                ) VALUES (%s, %s, 'control.tenant_report_settings', %s,
+                          'UPDATE', %s::jsonb)
+                """,
+                (
+                    tenant_id,
+                    actor_id,
+                    tenant_id,
+                    json.dumps({"report_options": normalized}, ensure_ascii=False),
+                ),
+            )
+        return normalized
 
     def account_tenant(self, account_id: str) -> Optional[str]:
         with self._connect() as connection, connection.cursor() as cursor:
@@ -1509,6 +1586,7 @@ class PortalRepository:
                 SELECT account.id, account.account_code, account.display_name,
                        account.environment, account.region,
                        tenant.customer_code, tenant.customer_name,
+                       report_settings.settings AS report_options,
                        credential.encrypted_dek, credential.dek_nonce,
                        credential.ciphertext, credential.credential_nonce,
                        credential.status
@@ -1516,6 +1594,8 @@ class PortalRepository:
                 JOIN control.tenants tenant ON tenant.id = account.tenant_id
                 JOIN control.encrypted_credentials credential
                     ON credential.cloud_account_id = account.id
+                LEFT JOIN control.tenant_report_settings report_settings
+                    ON report_settings.tenant_id = account.tenant_id
                 WHERE account.id = %s AND account.status = 'ACTIVE'
                 """,
                 (account_id,),
@@ -1535,6 +1615,7 @@ class PortalRepository:
             credential_ref=f"encrypted-db://{row['id']}",
             cloud_account_id=str(row["id"]),
             cloud_account_code=row["account_code"],
+            report_options=normalize_report_options(row["report_options"]),
         )
         credentials = NCPCredentials(
             access_key=plaintext["access_key"],

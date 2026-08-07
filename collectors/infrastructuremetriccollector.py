@@ -33,11 +33,25 @@ class InfrastructureMetricCollector:
         "LOAD_BALANCER",
         "CDB",
         "NKS",
+        "NAS",
+        "OBJECT_STORAGE",
+        "AUTO_SCALING",
+        "SEARCH_ENGINE",
+        "DATA_STREAMING",
+        "CLOUD_HADOOP",
+        "DATA_STREAM",
     )
     OUTPUT_CATEGORIES = {
         "LOAD_BALANCER": "LOAD_BALANCER",
         "CDB": "CLOUD_DB",
         "NKS": "KUBERNETES",
+        "NAS": "NAS",
+        "OBJECT_STORAGE": "OBJECT_STORAGE",
+        "AUTO_SCALING": "AUTO_SCALING",
+        "SEARCH_ENGINE": "SEARCH_ENGINE",
+        "DATA_STREAMING": "DATA_STREAMING",
+        "CLOUD_HADOOP": "CLOUD_HADOOP",
+        "DATA_STREAM": "DATA_STREAM",
     }
     CATEGORY_ALIASES = {
         "LB": "LOAD_BALANCER",
@@ -52,6 +66,22 @@ class InfrastructureMetricCollector:
         "KUBERNETES_SERVICE": "NKS",
         "NCLOUD_KUBERNETES_SERVICE": "NKS",
         "NKS": "NKS",
+        "NAS": "NAS",
+        "OBJECT_STORAGE": "OBJECT_STORAGE",
+        "OBJECTSTORAGE": "OBJECT_STORAGE",
+        "AUTO_SCALING": "AUTO_SCALING",
+        "AUTOSCALING": "AUTO_SCALING",
+        "AUTO_SCALING_GROUP": "AUTO_SCALING",
+        "SEARCH_ENGINE": "SEARCH_ENGINE",
+        "SEARCH_ENGINE_SERVICE": "SEARCH_ENGINE",
+        "DATA_STREAMING": "DATA_STREAMING",
+        "CLOUD_DATA_STREAMING": "DATA_STREAMING",
+        "CLOUD_DATA_STREAMING_SERVICE": "DATA_STREAMING",
+        "CDSS": "DATA_STREAMING",
+        "CLOUD_HADOOP": "CLOUD_HADOOP",
+        "HADOOP": "CLOUD_HADOOP",
+        "DATA_STREAM": "DATA_STREAM",
+        "DATASTREAM": "DATA_STREAM",
     }
 
     INTERVAL_MINUTES = {
@@ -178,6 +208,250 @@ class InfrastructureMetricCollector:
         "node_available_ratio": ("노드 가용률", "%"),
     }
 
+    # Only documented Cloud Insight metric names are selected. Runtime schema
+    # discovery still decides which of these metrics and aggregations are
+    # actually available for an account.
+    RESOURCE_METRICS = {
+        "NAS": {
+            "volume_size": {
+                "label": "볼륨 전체 용량",
+                "unit": "bytes",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "volume_used_size": {
+                "label": "볼륨 사용량",
+                "unit": "bytes",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "volume_used_ratio": {
+                "label": "볼륨 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+        },
+        "OBJECT_STORAGE": {
+            "bucket_size": {
+                "label": "버킷 사용량",
+                "unit": "bytes",
+                "aggregations": ("AVG",),
+            },
+            "object_count": {
+                "label": "객체 수",
+                "unit": "count",
+                "aggregations": ("AVG",),
+            },
+        },
+        "AUTO_SCALING": {
+            "avg_cpu_used_rto": {
+                "label": "평균 CPU 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "mem_usert": {
+                "label": "메모리 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "avg_fs_usert": {
+                "label": "평균 파일 시스템 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+        },
+        "SEARCH_ENGINE": {
+            "cluster_node_count": {
+                "label": "클러스터 노드 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_documents_total": {
+                "label": "클러스터 문서 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_disk_used": {
+                "label": "클러스터 디스크 사용량",
+                "unit": "GB",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cpu_total": {
+                "label": "CPU 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "mem_usage": {
+                "label": "메모리 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "disk_used": {
+                "label": "노드 디스크 사용량",
+                "unit": "GB",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+        },
+        "DATA_STREAMING": {
+            "cluster_total_partition": {
+                "label": "전체 파티션 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_total_topic": {
+                "label": "전체 토픽 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_total_message": {
+                "label": "전체 메시지 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_messages_in_sec_mean": {
+                "label": "초당 수신 메시지",
+                "unit": "count/s",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_bytes_in_sec": {
+                "label": "초당 수신 바이트",
+                "unit": "bytes/s",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cluster_bytes_out_sec": {
+                "label": "초당 송신 바이트",
+                "unit": "bytes/s",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "cpu_total": {
+                "label": "CPU 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "mem_usage": {
+                "label": "메모리 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "disk_used_ratio": {
+                "label": "디스크 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+        },
+        "CLOUD_HADOOP": {
+            "avg_cpu_used_rto": {
+                "label": "평균 CPU 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "active_nodes": {
+                "label": "활성 노드 수",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "queue_used_memory_percent": {
+                "label": "큐 메모리 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "queue_used_v_cores_percent": {
+                "label": "큐 vCore 사용률",
+                "unit": "%",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+        },
+        "DATA_STREAM": {
+            "bytes_in_total": {
+                "label": "수신 바이트 처리량",
+                "unit": "bytes",
+                "aggregations": ("AVG", "MAX", "SUM", "MIN"),
+            },
+            "messages_in_total": {
+                "label": "수신 메시지 처리량",
+                "unit": "count",
+                "aggregations": ("AVG", "MAX", "SUM", "MIN"),
+            },
+            "bytes_out_total": {
+                "label": "송신 바이트 처리량",
+                "unit": "bytes",
+                "aggregations": ("AVG", "MAX", "SUM", "MIN"),
+            },
+            "log_size": {
+                "label": "토픽 로그 크기",
+                "unit": "bytes",
+                "aggregations": ("AVG", "MAX", "MIN"),
+            },
+            "consumer_group_lag": {
+                "label": "컨슈머 그룹 지연",
+                "unit": "count",
+                "aggregations": ("MAX",),
+            },
+        },
+    }
+
+    PRIMARY_ID_DIMENSIONS = {
+        "LOAD_BALANCER": "instanceId",
+        "CDB": "instanceNo",
+        "NKS": "clusterUUID",
+        "NAS": "instanceNo",
+        "OBJECT_STORAGE": "resourceId",
+        "AUTO_SCALING": "autoScalingGroupNo",
+        "SEARCH_ENGINE": "Svc_group_instance_no",
+        "DATA_STREAMING": "instanceNo",
+        "CLOUD_HADOOP": "instanceNo",
+        "DATA_STREAM": "topicId",
+    }
+    CATEGORY_ID_DIMENSIONS = {
+        "LOAD_BALANCER": frozenset(
+            {
+                "instanceid",
+                "loadbalancerid",
+                "loadbalancerinstanceno",
+                "loadbalancerno",
+            }
+        ),
+        "CDB": frozenset(
+            {"instanceno", "dbinstanceno", "clouddbinstanceno"}
+        ),
+        "NKS": frozenset({"clusteruuid", "clusterid"}),
+        "NAS": frozenset({"instanceno", "nasvolumeinstanceno"}),
+        "OBJECT_STORAGE": frozenset({"resourceid"}),
+        "AUTO_SCALING": frozenset({"autoscalinggroupno"}),
+        "SEARCH_ENGINE": frozenset({"svcgroupinstanceno"}),
+        "DATA_STREAMING": frozenset({"instanceno"}),
+        "CLOUD_HADOOP": frozenset({"instanceno"}),
+        "DATA_STREAM": frozenset({"topicid"}),
+    }
+    CATEGORY_DETAIL_ID_FIELDS = {
+        "LOAD_BALANCER": frozenset(
+            {"loadbalancerinstanceno", "loadbalancerid"}
+        ),
+        "CDB": frozenset(
+            {"serverinstanceno", "serverinstancenos"}
+        ),
+        "NKS": frozenset(
+            {"clusteruuid", "clusterid", "uuid", "clusterno"}
+        ),
+        "NAS": frozenset({"nasvolumeinstanceno", "instanceno"}),
+        "OBJECT_STORAGE": frozenset({"resourceid", "bucketid"}),
+        "AUTO_SCALING": frozenset(
+            {"autoscalinggroupno", "autoscalinggroupid"}
+        ),
+        "SEARCH_ENGINE": frozenset(
+            {
+                "svcgroupinstanceno",
+                "servicegroupinstanceno",
+                "clusterinstanceno",
+            }
+        ),
+        "DATA_STREAMING": frozenset(
+            {"instanceno", "clusterinstanceno"}
+        ),
+        "CLOUD_HADOOP": frozenset(
+            {"instanceno", "clusterinstanceno"}
+        ),
+        "DATA_STREAM": frozenset({"topicid"}),
+    }
+
     ID_DIMENSION_HINTS = {
         "instanceid",
         "instanceno",
@@ -189,6 +463,10 @@ class InfrastructureMetricCollector:
         "serverinstanceno",
         "clusterid",
         "clusteruuid",
+        "resourceid",
+        "autoscalinggroupno",
+        "svcgroupinstanceno",
+        "topicid",
     }
     NAME_DIMENSION_HINTS = {
         "name",
@@ -210,12 +488,16 @@ class InfrastructureMetricCollector:
         infrastructure: List[Dict[str, Any]],
         start_time: int,
         end_time: int,
+        selected_categories: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         self.last_errors = []
         self.last_warnings = []
         self._issue_keys = set()
 
-        resources = self._monitoring_resources(infrastructure)
+        resources = self._monitoring_resources(
+            infrastructure,
+            selected_categories=selected_categories,
+        )
         if not any(resources.values()):
             # 일반 인프라만 있거나 인프라가 없는 계정은 정상적인 빈 결과다.
             return []
@@ -351,6 +633,7 @@ class InfrastructureMetricCollector:
     def _monitoring_resources(
         self,
         infrastructure: Any,
+        selected_categories: Optional[Sequence[str]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         result = {
             category: []
@@ -359,13 +642,31 @@ class InfrastructureMetricCollector:
         if not isinstance(infrastructure, list):
             return result
 
+        selected = self._selected_monitoring_categories(selected_categories)
+
         for item in infrastructure:
             if not isinstance(item, dict):
                 continue
             category = self._normalize_category(item.get("category"))
-            if category in result:
+            if category in result and category in selected:
                 result[category].append(item)
         return result
+
+    def _selected_monitoring_categories(
+        self,
+        selected_categories: Optional[Sequence[str]],
+    ) -> set[str]:
+        if selected_categories is None:
+            return set(self.MONITORED_CATEGORIES)
+        if isinstance(selected_categories, str):
+            candidates: Iterable[Any] = (selected_categories,)
+        else:
+            candidates = selected_categories
+        return {
+            category
+            for value in candidates
+            if (category := self._normalize_category(value)) is not None
+        }
 
     def _normalize_category(self, value: Any) -> Optional[str]:
         if value is None:
@@ -447,6 +748,22 @@ class InfrastructureMetricCollector:
             return "CDB"
         if "kubernetes" in normalized or normalized.startswith("nks"):
             return "NKS"
+        if normalized in {"nas", "nasvpc"}:
+            return "NAS"
+        if "objectstorage" in normalized:
+            return "OBJECT_STORAGE"
+        if "autoscaling" in normalized:
+            return "AUTO_SCALING"
+        if "searchengineservice" in normalized or normalized.startswith(
+            "searchengine"
+        ):
+            return "SEARCH_ENGINE"
+        if "clouddatastreamingservice" in normalized:
+            return "DATA_STREAMING"
+        if "cloudhadoop" in normalized:
+            return "CLOUD_HADOOP"
+        if normalized.startswith("datastream"):
+            return "DATA_STREAM"
         return None
 
     def _normalize_product_name(self, value: Any) -> str:
@@ -595,30 +912,15 @@ class InfrastructureMetricCollector:
         category: str,
         resources: List[Dict[str, Any]],
     ) -> List[Tuple[str, str]]:
-        dimension_name = {
-            "LOAD_BALANCER": "instanceId",
-            "CDB": "instanceNo",
-            "NKS": "clusterUUID",
-        }[category]
+        dimension_name = self.PRIMARY_ID_DIMENSIONS[category]
         identifiers = set()
         for resource in resources:
-            if category == "CDB":
-                details = resource.get("details")
-                server_instance_nos = (
-                    details.get("server_instance_nos")
-                    if isinstance(details, dict)
-                    else None
+            identifiers.update(
+                self._resource_identifiers(
+                    resource,
+                    category=category,
                 )
-                if isinstance(server_instance_nos, (list, tuple, set)):
-                    identifiers.update(
-                        str(value).strip()
-                        for value in server_instance_nos
-                        if str(value).strip()
-                    )
-                continue
-            resource_id = resource.get("resource_id")
-            if resource_id is not None and str(resource_id).strip():
-                identifiers.add(str(resource_id).strip())
+            )
         return [
             (dimension_name, identifier)
             for identifier in sorted(identifiers)
@@ -632,13 +934,17 @@ class InfrastructureMetricCollector:
     ) -> List[Dict[str, Any]]:
         result = []
         for item in items:
-            id_dimension = str(
+            declared_id_dimension = str(
                 item.get("idDimension")
                 or item.get("id_dimension")
-                or fallback_id_dimension
+                or ""
             ).strip()
-            if not id_dimension:
+            if declared_id_dimension and (
+                self._normalize_dimension_name(declared_id_dimension)
+                != self._normalize_dimension_name(fallback_id_dimension)
+            ):
                 continue
+            id_dimension = fallback_id_dimension
             dimensions = self._normalize_dimensions(item.get("dimensions"))
             existing_id = next(
                 (
@@ -736,11 +1042,15 @@ class InfrastructureMetricCollector:
                 continue
 
             resource = self._match_resource(
+                category=category,
                 resources=resources,
                 dimensions=dimensions,
                 metric_item=item,
             )
-            if resource is None and self._resources_have_identifiers(resources):
+            if resource is None and self._resources_have_identifiers(
+                resources,
+                category=category,
+            ):
                 continue
 
             option = self._select_supported_option(
@@ -829,6 +1139,13 @@ class InfrastructureMetricCollector:
                 name
                 for name in names
                 if self._normalize_metric_name(name) in self.NKS_METRICS
+            }
+        metric_catalog = self.RESOURCE_METRICS.get(category)
+        if metric_catalog is not None:
+            return {
+                name
+                for name in names
+                if self._normalize_metric_name(name) in metric_catalog
             }
         return set()
 
@@ -953,6 +1270,12 @@ class InfrastructureMetricCollector:
                 ),
                 "aggregations": ("AVG", "MAX", "SUM", "MIN"),
             }
+        metric_catalog = self.RESOURCE_METRICS.get(category)
+        if metric_catalog is not None:
+            metric_config = metric_catalog.get(token)
+            if metric_config is None:
+                return None
+            return dict(metric_config)
         return None
 
     def _cdb_variant(self, product_name: str) -> str:
@@ -1036,57 +1359,74 @@ class InfrastructureMetricCollector:
     def _resources_have_identifiers(
         self,
         resources: List[Dict[str, Any]],
+        category: str,
     ) -> bool:
-        return any(self._resource_identifiers(resource) for resource in resources)
+        return any(
+            self._resource_identifiers(resource, category=category)
+            for resource in resources
+        )
 
     def _match_resource(
         self,
+        category: str,
         resources: List[Dict[str, Any]],
         dimensions: Dict[str, str],
         metric_item: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        dimension_values = {
+        allowed_dimensions = self.CATEGORY_ID_DIMENSIONS[category]
+        identifier_values = {
             str(value).strip().casefold()
-            for value in dimensions.values()
-            if str(value).strip()
+            for name, value in dimensions.items()
+            if self._normalize_dimension_name(name) in allowed_dimensions
+            and str(value).strip()
         }
-        top_level_values = {
-            str(metric_item.get(key)).strip().casefold()
-            for key in ("resourceId", "resourceName", "instanceId", "instanceNo")
-            if metric_item.get(key) is not None
-        }
-        all_values = dimension_values | top_level_values
+        selected_id = metric_item.get("_selected_id")
+        if selected_id is not None and str(selected_id).strip():
+            identifier_values.add(str(selected_id).strip().casefold())
+
+        for key in ("resourceId", "instanceId", "instanceNo"):
+            if self._normalize_dimension_name(key) not in allowed_dimensions:
+                continue
+            value = metric_item.get(key)
+            if value is not None and str(value).strip():
+                identifier_values.add(str(value).strip().casefold())
+
+        if not identifier_values:
+            return None
 
         for resource in resources:
             identifiers = {
                 value.casefold()
-                for value in self._resource_identifiers(resource)
+                for value in self._resource_identifiers(
+                    resource,
+                    category=category,
+                )
             }
-            if identifiers & all_values:
-                return resource
-
-        for resource in resources:
-            names = {
-                value.casefold()
-                for value in self._resource_names(resource)
-            }
-            if names & all_values:
+            if identifiers & identifier_values:
                 return resource
         return None
 
-    def _resource_identifiers(self, resource: Dict[str, Any]) -> set[str]:
+    def _resource_identifiers(
+        self,
+        resource: Dict[str, Any],
+        category: str,
+    ) -> set[str]:
         result = set()
-        resource_id = resource.get("resource_id")
-        if resource_id is not None and str(resource_id).strip():
-            result.add(str(resource_id).strip())
+        # Cloud DB metrics are keyed by the DB node instance numbers rather
+        # than the service-level resource ID. Other monitored products use
+        # their primary inventory resource ID unless an explicit equivalent
+        # provider field is present.
+        if category != "CDB":
+            resource_id = resource.get("resource_id")
+            if resource_id is not None and str(resource_id).strip():
+                result.add(str(resource_id).strip())
 
         details = resource.get("details")
         if isinstance(details, dict):
+            allowed_fields = self.CATEGORY_DETAIL_ID_FIELDS[category]
             for name, value in details.items():
                 normalized_name = self._normalize_dimension_name(name)
-                if not normalized_name.endswith(
-                    ("id", "ids", "no", "nos", "uuid", "uuids")
-                ):
+                if normalized_name not in allowed_fields:
                     continue
                 if isinstance(value, (str, int)) and str(value).strip():
                     result.add(str(value).strip())
@@ -1096,14 +1436,6 @@ class InfrastructureMetricCollector:
                         for item in value
                         if isinstance(item, (str, int)) and str(item).strip()
                     )
-        return result
-
-    def _resource_names(self, resource: Dict[str, Any]) -> set[str]:
-        result = set()
-        for key in ("resource_name", "name"):
-            value = resource.get(key)
-            if value is not None and str(value).strip():
-                result.add(str(value).strip())
         return result
 
     def _series_identity(

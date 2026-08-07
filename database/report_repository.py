@@ -82,6 +82,149 @@ class PostgresReportRepository:
                 f"Report database persistence failed ({type(exc).__name__})."
             ) from exc
 
+    def load_period_infrastructure_snapshot(
+        self,
+        period: Mapping[str, Any],
+        customer: Mapping[str, Any],
+        reference_at: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest inventory observed inside the report period.
+
+        Current NCP inventory APIs do not provide a complete point-in-time view.
+        A historical report accepts only observations collected inside its
+        requested period. A current snapshot is never substituted.
+        """
+        tenant_id = self.settings.tenant_id
+        cloud_account_id = customer.get("cloud_account_id")
+        environment = str(customer.get("api_type") or "public").casefold()
+        if (
+            not tenant_id
+            or not cloud_account_id
+            or environment not in self.SCHEMAS
+        ):
+            return None
+
+        window = self._snapshot_eligibility_window(period, reference_at)
+        if window is None:
+            return None
+
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabasePersistenceError(
+                "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        schema = self.SCHEMAS[environment]
+        observed_text_expression = (
+            "COALESCE(snapshot.normalized_data #>> "
+            "'{collection_metadata,infrastructure,completed_at}', "
+            "snapshot.normalized_data #>> "
+            "'{collection_metadata,infrastructure,started_at}')"
+        )
+        observed_expression = (
+            f"CASE WHEN ({observed_text_expression}) ~* "
+            "'(Z|[+-][0-9]{2}(:[0-9]{2})?)$' "
+            f"THEN ({observed_text_expression})::timestamptz "
+            f"ELSE ({observed_text_expression})::timestamp "
+            "AT TIME ZONE 'Asia/Seoul' END"
+        )
+
+        try:
+            with psycopg.connect(
+                **self.settings.connection_kwargs()
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
+                cursor.execute(
+                    f"""
+                    SELECT snapshot.normalized_data, snapshot.report_run_id,
+                           {observed_expression} AS observed_at
+                    FROM {schema}.report_snapshots snapshot
+                    JOIN control.report_runs report_run
+                      ON report_run.id = snapshot.report_run_id
+                     AND report_run.tenant_id = snapshot.tenant_id
+                    WHERE snapshot.tenant_id = %s
+                      AND report_run.cloud_account_id = %s
+                      AND jsonb_typeof(
+                          snapshot.normalized_data -> 'infrastructure'
+                      ) = 'array'
+                      AND snapshot.normalized_data #>>
+                          '{collection_metadata,infrastructure,source}'
+                          = 'LIVE_API_COLLECTION'
+                      AND ({observed_expression}) >= %s
+                      AND ({observed_expression}) < %s
+                    ORDER BY ({observed_expression}) DESC,
+                             report_run.completed_at DESC NULLS LAST,
+                             report_run.id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        str(tenant_id),
+                        str(cloud_account_id),
+                        window["eligible_start"],
+                        window["eligible_end"],
+                    ),
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            raise DatabasePersistenceError(
+                "Historical infrastructure snapshot lookup failed."
+            ) from exc
+
+        if not row or not isinstance(row[0], dict):
+            return None
+        observed_at = self._parse_datetime(row[2])
+        result = dict(row[0])
+        result["_snapshot_reference"] = {
+            "report_run_id": str(row[1]),
+            "observed_at": observed_at.isoformat(),
+            "reference_at": window["reference_at"].isoformat(),
+            "eligible_start": window["eligible_start"].isoformat(),
+            "eligible_end": window["eligible_end"].isoformat(),
+            "snapshot_age_seconds": max(
+                0,
+                int(
+                    (
+                        window["reference_at"] - observed_at
+                    ).total_seconds()
+                ),
+            ),
+        }
+        return result
+
+    def _snapshot_eligibility_window(
+        self,
+        period: Mapping[str, Any],
+        reference_at: Any = None,
+    ) -> Optional[Dict[str, datetime]]:
+        period_start, period_end, _ = self._period_bounds(period)
+        reference = (
+            datetime.now(self.KST)
+            if reference_at is None
+            else self._parse_datetime(reference_at)
+        )
+        if reference < period_start:
+            return None
+        reference = min(
+            reference,
+            period_end - timedelta(microseconds=1),
+        )
+        eligible_start = period_start
+        eligible_end = min(
+            period_end,
+            reference + timedelta(microseconds=1),
+        )
+        if eligible_start >= eligible_end:
+            return None
+        return {
+            "reference_at": reference,
+            "eligible_start": eligible_start,
+            "eligible_end": eligible_end,
+        }
+
     def _resolve_tenant(self, cursor: Any, report: ReportResult) -> tuple[Any, str]:
         customer = report.customer if isinstance(report.customer, dict) else {}
         environment = str(customer.get("api_type") or "public").strip().casefold()
@@ -155,7 +298,7 @@ class PostgresReportRepository:
                 attempt_count, error_count, started_at, completed_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                '1.2', '1.2', '1.2', %s, 1, %s, clock_timestamp(), clock_timestamp()
+                '1.3', '1.3', '1.3', %s, 1, %s, clock_timestamp(), clock_timestamp()
             )
             ON CONFLICT (idempotency_key) DO UPDATE SET
                 period_start = EXCLUDED.period_start,
@@ -237,7 +380,7 @@ class PostgresReportRepository:
                 (report_run_id,),
             )
 
-        snapshot = report.to_dict()
+        snapshot = report.to_persistence_dict()
         snapshot["server_metrics"] = report.server_metrics
         payload = self._json(snapshot)
         cursor.execute(
@@ -246,7 +389,7 @@ class PostgresReportRepository:
                 report_run_id, tenant_id, schema_version, normalized_data,
                 content_hash_sha256, collector_version, normalizer_version,
                 renderer_version
-            ) VALUES (%s, %s, '1.2', %s::jsonb, %s, '1.2', '1.2', '1.2')
+            ) VALUES (%s, %s, '1.3', %s::jsonb, %s, '1.3', '1.3', '1.3')
             """,
             (
                 report_run_id,

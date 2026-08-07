@@ -19,6 +19,34 @@ class InfrastructureCollector:
     PAGE_SIZE = 100
     MAX_PAGES = 10_000
     WARNING_HTTP_STATUSES = frozenset({401, 403, 404, 405, 501})
+    LEGACY_DEFAULT_CATEGORIES = frozenset({
+        "SERVER",
+        "LOAD_BALANCER",
+        "BLOCK_STORAGE",
+        "OBJECT_STORAGE",
+        "NAS",
+        "CLOUD_DB",
+        "CDN",
+        "KUBERNETES",
+    })
+    RESOURCE_MANAGER_ONLY_CATEGORIES = frozenset({
+        "OBJECT_STORAGE",
+        "VIRTUAL_PRIVATE_GATEWAY",
+        "AUTO_SCALING",
+        "GLOBAL_EDGE",
+        "GLOBAL_TRAFFIC_MANAGER",
+        "API_GATEWAY",
+        "BACKUP",
+        "ARCHIVE_STORAGE",
+        "SEARCH_ENGINE",
+        "DATA_STREAMING",
+        "CLOUD_HADOOP",
+        "DATA_STREAM",
+        "CLOUD_FUNCTIONS",
+        "SECURITY_SERVICE",
+        "IPSEC_VPN",
+        "CLOUD_CONNECT",
+    })
 
     def __init__(self, api_factory: Any):
         self.api_factory = api_factory
@@ -37,6 +65,7 @@ class InfrastructureCollector:
         self,
         servers: list,
         server_raw_data: Optional[dict] = None,
+        categories: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Collect only billable/operational infrastructure resources.
 
@@ -48,68 +77,322 @@ class InfrastructureCollector:
         logger.info("대표 인프라 인벤토리 수집을 시작합니다.")
         self.last_errors = []
         self.last_warnings = []
+        selected_categories = self._normalize_categories(categories)
+        if selected_categories == frozenset():
+            return []
         resources: List[Dict[str, Any]] = []
 
-        self._extend_normalized(
-            resources,
-            target_type="server",
-            api="server_collector",
-            normalize=lambda: self.normalizer.normalize_servers(servers),
-        )
+        network_interfaces: Optional[List[Dict[str, Any]]] = []
+        if self._category_enabled(selected_categories, "SERVER"):
+            network_interfaces = self._server_network_interfaces(
+                servers,
+                server_raw_data,
+            )
+            if network_interfaces is None:
+                network_interfaces = self._collect_paged_service(
+                    api_key="vserver",
+                    method_name="get_network_interface_instance_list",
+                    response_key="getNetworkInterfaceListResponse",
+                    list_key="networkInterfaceList",
+                    identity_fields=("networkInterfaceNo",),
+                    target_type="network_interface",
+                    optional=True,
+                    request_kwargs=self._region_kwargs(),
+                )
 
-        storages = self._server_storages(servers, server_raw_data)
-        if storages is None:
-            storages = self._collect_paged_service(
-                api_key="vserver",
-                method_name="get_block_storage_instance_list",
-                response_key="getBlockStorageInstanceListResponse",
-                list_key="blockStorageInstanceList",
-                identity_fields=("blockStorageInstanceNo",),
+        if self._category_enabled(selected_categories, "SERVER"):
+            self._extend_normalized(
+                resources,
+                target_type="server",
+                api="server_collector",
+                normalize=lambda: self.normalizer.normalize_servers(
+                    servers,
+                    network_interfaces,
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "BLOCK_STORAGE"):
+            storages = self._server_storages(servers, server_raw_data)
+            if storages is None:
+                storages = self._collect_paged_service(
+                    api_key="vserver",
+                    method_name="get_block_storage_instance_list",
+                    response_key="getBlockStorageInstanceListResponse",
+                    list_key="blockStorageInstanceList",
+                    identity_fields=("blockStorageInstanceNo",),
+                    target_type="block_storage",
+                    request_kwargs=self._region_kwargs(),
+                )
+            self._extend_normalized(
+                resources,
                 target_type="block_storage",
+                api="get_block_storage_instance_list",
+                normalize=lambda: self.normalizer.normalize_block_storages(
+                    storages or []
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "VPC"):
+            vpcs = self._collect_wrapped_service(
+                api_key="vpc",
+                method_name="get_vpc_list",
+                response_key="getVpcListResponse",
+                list_key="vpcList",
+                target_type="vpc",
                 request_kwargs=self._region_kwargs(),
             )
-        self._extend_normalized(
-            resources,
-            target_type="block_storage",
-            api="get_block_storage_instance_list",
-            normalize=lambda: self.normalizer.normalize_block_storages(
-                storages or []
-            ),
-        )
+            self._extend_normalized(
+                resources,
+                target_type="vpc",
+                api="get_vpc_list",
+                normalize=lambda: self.normalizer.normalize_vpcs(vpcs),
+            )
 
-        load_balancers = self._collect_paged_service(
-            api_key="loadbalancer",
-            method_name="get_load_balancer_instance_list",
-            response_key="getLoadBalancerInstanceListResponse",
-            list_key="loadBalancerInstanceList",
-            identity_fields=("loadBalancerInstanceNo",),
-            target_type="load_balancer",
-            request_kwargs=self._region_kwargs(),
-        )
-        self._extend_normalized(
-            resources,
-            target_type="load_balancer",
-            api="get_load_balancer_instance_list",
-            normalize=lambda: self.normalizer.normalize_load_balancers(
-                load_balancers
-            ),
-        )
+        if self._category_enabled(selected_categories, "SUBNET"):
+            subnets = self._collect_paged_service(
+                api_key="vpc",
+                method_name="get_subnet_list",
+                response_key="getSubnetListResponse",
+                list_key="subnetList",
+                identity_fields=("subnetNo",),
+                target_type="subnet",
+                page_parameter="page",
+                request_kwargs=self._region_kwargs(),
+            )
+            route_tables = self._collect_paged_service(
+                api_key="vpc",
+                method_name="get_route_table_list",
+                response_key="getRouteTableListResponse",
+                list_key="routeTableList",
+                identity_fields=("routeTableNo",),
+                target_type="route_table",
+                optional=True,
+                request_kwargs=self._region_kwargs(),
+            )
+            route_evidence = self._collect_route_evidence(route_tables)
+            self._extend_normalized(
+                resources,
+                target_type="subnet",
+                api="get_subnet_list",
+                normalize=lambda: self.normalizer.normalize_subnets(
+                    subnets,
+                    route_evidence,
+                ),
+            )
 
-        nas_volumes = self._collect_paged_service(
-            api_key="vnas",
-            method_name="get_nas_volume_instance_list",
-            response_key="getNasVolumeInstanceListResponse",
-            list_key="nasVolumeInstanceList",
-            identity_fields=("nasVolumeInstanceNo",),
-            target_type="nas",
-            request_kwargs=self._region_kwargs(),
-        )
-        self._extend_normalized(
-            resources,
-            target_type="nas",
-            api="get_nas_volume_instance_list",
-            normalize=lambda: self.normalizer.normalize_nas(nas_volumes),
-        )
+        if self._category_enabled(selected_categories, "NAT_GATEWAY"):
+            nat_gateways = self._collect_paged_service(
+                api_key="vpc",
+                method_name="get_nat_gateway_instance_list",
+                response_key="getNatGatewayInstanceListResponse",
+                list_key="natGatewayInstanceList",
+                identity_fields=("natGatewayInstanceNo",),
+                target_type="nat_gateway",
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="nat_gateway",
+                api="get_nat_gateway_instance_list",
+                normalize=lambda: self.normalizer.normalize_nat_gateways(
+                    nat_gateways
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "VPC_PEERING"):
+            peerings = self._collect_paged_service(
+                api_key="vpc",
+                method_name="get_vpc_peering_instance_list",
+                response_key="getVpcPeeringInstanceListResponse",
+                list_key="vpcPeeringInstanceList",
+                identity_fields=("vpcPeeringInstanceNo",),
+                target_type="vpc_peering",
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="vpc_peering",
+                api="get_vpc_peering_instance_list",
+                normalize=lambda: self.normalizer.normalize_vpc_peerings(
+                    peerings
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "PUBLIC_IP"):
+            public_ips = self._collect_paged_service(
+                api_key="vserver",
+                method_name="get_public_ip_instance_list",
+                response_key="getPublicIpInstanceListResponse",
+                list_key="publicIpInstanceList",
+                identity_fields=("publicIpInstanceNo",),
+                target_type="public_ip",
+                page_start=0,
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="public_ip",
+                api="get_public_ip_instance_list",
+                normalize=lambda: self.normalizer.normalize_public_ips(
+                    public_ips
+                ),
+            )
+
+        if self._category_enabled(
+            selected_categories,
+            "BLOCK_STORAGE_SNAPSHOT",
+        ):
+            snapshots = self._collect_paged_service(
+                api_key="vserver",
+                method_name="get_block_storage_snapshot_instance_list",
+                response_key="getBlockStorageSnapshotInstanceListResponse",
+                list_key="blockStorageSnapshotInstanceList",
+                identity_fields=("blockStorageSnapshotInstanceNo",),
+                target_type="block_storage_snapshot",
+                page_start=0,
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="block_storage_snapshot",
+                api="get_block_storage_snapshot_instance_list",
+                normalize=lambda: self.normalizer.normalize_snapshots(
+                    snapshots
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "SERVER_IMAGE"):
+            server_images = self._collect_paged_service(
+                api_key="vserver",
+                method_name="get_member_server_instance_list",
+                response_key="getMemberServerImageInstanceListResponse",
+                list_key="memberServerImageInstanceList",
+                identity_fields=("memberServerImageInstanceNo",),
+                target_type="server_image",
+                page_start=0,
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="server_image",
+                api="get_member_server_instance_list",
+                normalize=lambda: self.normalizer.normalize_server_images(
+                    server_images
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "GLOBAL_DNS"):
+            domains = self._collect_rest_pages(
+                api_key="global_dns",
+                method_name="get_domain",
+                list_key="content",
+                identity_fields=("id",),
+                target_type="global_dns",
+                page_start=0,
+                page_parameter="page",
+                size_parameter="size",
+                next_field="last",
+                next_field_is_last=True,
+            )
+            self._extend_normalized(
+                resources,
+                target_type="global_dns",
+                api="get_domain",
+                normalize=lambda: self.normalizer.normalize_global_dns(
+                    domains
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "CERTIFICATE"):
+            certificates = self._collect_plain_list_service(
+                api_key="certificate_manager",
+                method_name="get_certificate_list",
+                list_key="sslCertificateList",
+                target_type="certificate",
+            )
+            self._extend_normalized(
+                resources,
+                target_type="certificate",
+                api="get_certificate_list",
+                normalize=lambda: self.normalizer.normalize_certificates(
+                    certificates
+                ),
+            )
+
+        if self._category_enabled(
+            selected_categories,
+            "CONTAINER_REGISTRY",
+        ):
+            registries = self._collect_rest_pages(
+                api_key="container",
+                method_name="get_registry_list",
+                list_key="results",
+                identity_fields=("private_id", "name"),
+                target_type="container_registry",
+                page_start=1,
+                page_parameter="page",
+                size_parameter="page_size",
+                next_field="next",
+            )
+            self._extend_normalized(
+                resources,
+                target_type="container_registry",
+                api="get_registry_list",
+                normalize=lambda: (
+                    self.normalizer.normalize_container_registries(registries)
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "LOAD_BALANCER"):
+            load_balancers = self._collect_paged_service(
+                api_key="loadbalancer",
+                method_name="get_load_balancer_instance_list",
+                response_key="getLoadBalancerInstanceListResponse",
+                list_key="loadBalancerInstanceList",
+                identity_fields=("loadBalancerInstanceNo",),
+                target_type="load_balancer",
+                request_kwargs=self._region_kwargs(),
+            )
+            target_groups: List[Dict[str, Any]] = []
+            if load_balancers:
+                target_groups = self._collect_paged_service(
+                    api_key="loadbalancer",
+                    method_name="get_target_group_list",
+                    response_key="getTargetGroupListResponse",
+                    list_key="targetGroupList",
+                    identity_fields=("targetGroupNo",),
+                    target_type="target_group",
+                    optional=True,
+                    request_kwargs=self._region_kwargs(),
+                )
+            targets_by_group = self._collect_target_lists(target_groups)
+            self._extend_normalized(
+                resources,
+                target_type="load_balancer",
+                api="get_load_balancer_instance_list",
+                normalize=lambda: self.normalizer.normalize_load_balancers(
+                    load_balancers,
+                    target_groups,
+                    targets_by_group,
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "NAS"):
+            nas_volumes = self._collect_paged_service(
+                api_key="vnas",
+                method_name="get_nas_volume_instance_list",
+                response_key="getNasVolumeInstanceListResponse",
+                list_key="nasVolumeInstanceList",
+                identity_fields=("nasVolumeInstanceNo",),
+                target_type="nas",
+                request_kwargs=self._region_kwargs(),
+            )
+            self._extend_normalized(
+                resources,
+                target_type="nas",
+                api="get_nas_volume_instance_list",
+                normalize=lambda: self.normalizer.normalize_nas(nas_volumes),
+            )
 
         cdb_specs = (
             (
@@ -148,39 +431,47 @@ class InfrastructureCollector:
                 "cloudCacheInstanceNo",
             ),
         )
-        for engine, method_name, response_key, list_key, identity_field in cdb_specs:
-            instances = self._collect_paged_service(
-                api_key="cloud_db",
-                method_name=method_name,
-                response_key=response_key,
-                list_key=list_key,
-                identity_fields=(identity_field,),
-                target_type=f"cdb_{engine.lower()}",
-                page_start=0,
-                request_kwargs=self._region_kwargs(),
+        if self._category_enabled(selected_categories, "CLOUD_DB"):
+            for (
+                engine,
+                method_name,
+                response_key,
+                list_key,
+                identity_field,
+            ) in cdb_specs:
+                instances = self._collect_paged_service(
+                    api_key="cloud_db",
+                    method_name=method_name,
+                    response_key=response_key,
+                    list_key=list_key,
+                    identity_fields=(identity_field,),
+                    target_type=f"cdb_{engine.lower()}",
+                    page_start=0,
+                    request_kwargs=self._region_kwargs(),
+                )
+                self._extend_normalized(
+                    resources,
+                    target_type=f"cdb_{engine.lower()}",
+                    api=method_name,
+                    normalize=lambda engine=engine, instances=instances: (
+                        self.normalizer.normalize_cdb(engine, instances)
+                    ),
+                )
+
+        if self._category_enabled(selected_categories, "KUBERNETES"):
+            clusters = self._collect_single_service(
+                api_key="kubernetes",
+                method_name="get_nks_cluster_list",
+                expected_key="clusters",
+                list_key="clusters",
+                target_type="nks",
             )
             self._extend_normalized(
                 resources,
-                target_type=f"cdb_{engine.lower()}",
-                api=method_name,
-                normalize=lambda engine=engine, instances=instances: (
-                    self.normalizer.normalize_cdb(engine, instances)
-                ),
+                target_type="nks",
+                api="get_nks_cluster_list",
+                normalize=lambda: self.normalizer.normalize_nks(clusters),
             )
-
-        clusters = self._collect_single_service(
-            api_key="kubernetes",
-            method_name="get_nks_cluster_list",
-            expected_key="clusters",
-            list_key="clusters",
-            target_type="nks",
-        )
-        self._extend_normalized(
-            resources,
-            target_type="nks",
-            api="get_nks_cluster_list",
-            normalize=lambda: self.normalizer.normalize_nks(clusters),
-        )
 
         cdn_specs = (
             (
@@ -196,36 +487,44 @@ class InfrastructureCollector:
                 "cdnPlusInstanceList",
             ),
         )
-        for variant, method_name, response_key, list_key in cdn_specs:
-            instances = self._collect_paged_service(
-                api_key="cdn",
-                method_name=method_name,
-                response_key=response_key,
-                list_key=list_key,
-                identity_fields=("cdnInstanceNo",),
-                target_type=variant.lower(),
-                page_start=0,
-            )
+        if self._category_enabled(selected_categories, "CDN"):
+            for variant, method_name, response_key, list_key in cdn_specs:
+                instances = self._collect_paged_service(
+                    api_key="cdn",
+                    method_name=method_name,
+                    response_key=response_key,
+                    list_key=list_key,
+                    identity_fields=("cdnInstanceNo",),
+                    target_type=variant.lower(),
+                    page_start=0,
+                )
+                self._extend_normalized(
+                    resources,
+                    target_type=variant.lower(),
+                    api=method_name,
+                    normalize=lambda variant=variant, instances=instances: (
+                        self.normalizer.normalize_cdn(variant, instances)
+                    ),
+                )
+
+        if selected_categories & self.RESOURCE_MANAGER_ONLY_CATEGORIES:
+            resource_manager_items = self._collect_resource_manager()
             self._extend_normalized(
                 resources,
-                target_type=variant.lower(),
-                api=method_name,
-                normalize=lambda variant=variant, instances=instances: (
-                    self.normalizer.normalize_cdn(variant, instances)
+                target_type="resource_manager",
+                api="get_resource_list",
+                normalize=lambda: self.normalizer.normalize_resource_manager(
+                    resource_manager_items
                 ),
             )
 
-        resource_manager_items = self._collect_resource_manager()
-        self._extend_normalized(
-            resources,
-            target_type="resource_manager",
-            api="get_resource_list",
-            normalize=lambda: self.normalizer.normalize_resource_manager(
-                resource_manager_items
-            ),
-        )
-
         result = self.normalizer.finalize(resources)
+        if selected_categories is not None:
+            result = [
+                resource
+                for resource in result
+                if resource.get("category") in selected_categories
+            ]
         logger.info(
             "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 "
             "(오류 %s, 경고 %s)",
@@ -255,6 +554,165 @@ class InfrastructureCollector:
             return nested_storages
         return None
 
+    def _server_network_interfaces(
+        self,
+        servers: list,
+        server_raw_data: Optional[dict],
+    ) -> Optional[List[Dict[str, Any]]]:
+        if isinstance(server_raw_data, Mapping) and "nics" in server_raw_data:
+            return self._dict_items(server_raw_data.get("nics"))
+
+        nested_nics: List[Dict[str, Any]] = []
+        has_nested_nic_field = False
+        for server in self._dict_items(servers):
+            for field in ("raw_nics", "nics"):
+                if field not in server:
+                    continue
+                has_nested_nic_field = True
+                nested_nics.extend(self._dict_items(server.get(field)))
+
+        if has_nested_nic_field:
+            return nested_nics
+        return None
+
+    def _collect_wrapped_service(
+        self,
+        *,
+        api_key: str,
+        method_name: str,
+        response_key: str,
+        list_key: str,
+        target_type: str,
+        request_kwargs: Optional[Mapping[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        try:
+            api = self.api_factory.get(api_key)
+            method = getattr(api, method_name)
+            response = method(**dict(request_kwargs or {}))
+            items, _ = self._extract_wrapped_items(
+                response,
+                response_key=response_key,
+                list_key=list_key,
+                api_name=method_name,
+            )
+            return items
+        except Exception as exc:
+            self._record_issue(
+                stage="collection",
+                api=method_name,
+                target_type=target_type,
+                exc=exc,
+            )
+            return []
+
+    def _collect_plain_list_service(
+        self,
+        *,
+        api_key: str,
+        method_name: str,
+        list_key: str,
+        target_type: str,
+    ) -> List[Dict[str, Any]]:
+        try:
+            api = self.api_factory.get(api_key)
+            method = getattr(api, method_name)
+            response = method()
+            validate_collection_response(
+                response,
+                expected_keys=(list_key,),
+                api_name=method_name,
+            )
+            if not isinstance(response, Mapping):
+                return []
+            return self._dict_items(response.get(list_key))
+        except Exception as exc:
+            self._record_issue(
+                stage="collection",
+                api=method_name,
+                target_type=target_type,
+                exc=exc,
+            )
+            return []
+
+    def _collect_rest_pages(
+        self,
+        *,
+        api_key: str,
+        method_name: str,
+        list_key: str,
+        identity_fields: Sequence[str],
+        target_type: str,
+        page_start: int,
+        page_parameter: str,
+        size_parameter: str,
+        next_field: str,
+        next_field_is_last: bool = False,
+    ) -> List[Dict[str, Any]]:
+        try:
+            api = self.api_factory.get(api_key)
+            method = getattr(api, method_name)
+        except Exception as exc:
+            self._record_issue(
+                stage="initialization",
+                api=method_name,
+                target_type=target_type,
+                exc=exc,
+            )
+            return []
+
+        result: List[Dict[str, Any]] = []
+        seen = set()
+        for page_no in range(page_start, page_start + self.MAX_PAGES):
+            try:
+                response = method(
+                    **{
+                        page_parameter: page_no,
+                        size_parameter: self.PAGE_SIZE,
+                    }
+                )
+                validate_collection_response(
+                    response,
+                    expected_keys=(list_key,),
+                    api_name=method_name,
+                )
+                if not isinstance(response, Mapping):
+                    break
+                items = self._dict_items(response.get(list_key))
+            except Exception as exc:
+                self._record_issue(
+                    stage="collection",
+                    api=method_name,
+                    target_type=target_type,
+                    page_no=page_no,
+                    exc=exc,
+                )
+                break
+
+            for item in items:
+                identity = self._item_identity(item, identity_fields)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                result.append(item)
+
+            marker = response.get(next_field)
+            if next_field_is_last:
+                if marker in (True, "true", "TRUE", 1, "1"):
+                    break
+            elif marker in (None, "", False, 0, "0"):
+                break
+            if not items:
+                break
+        else:
+            self._record_warning(
+                stage="pagination_guard",
+                api=method_name,
+                target_type=target_type,
+                page_no=page_start + self.MAX_PAGES - 1,
+                message="Maximum page count reached; collection stopped.",
+            )
+        return result
+
     def _collect_paged_service(
         self,
         *,
@@ -265,6 +723,9 @@ class InfrastructureCollector:
         identity_fields: Sequence[str],
         target_type: str,
         page_start: int = 1,
+        page_parameter: str = "page_no",
+        size_parameter: str = "page_size",
+        optional: bool = False,
         request_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         try:
@@ -287,8 +748,8 @@ class InfrastructureCollector:
             try:
                 call_kwargs = dict(request_kwargs or {})
                 call_kwargs.update({
-                    "page_no": page_no,
-                    "page_size": self.PAGE_SIZE,
+                    page_parameter: page_no,
+                    size_parameter: self.PAGE_SIZE,
                 })
                 response = method(**call_kwargs)
                 items, total_rows = self._extract_wrapped_items(
@@ -304,6 +765,7 @@ class InfrastructureCollector:
                     target_type=target_type,
                     page_no=page_no,
                     exc=exc,
+                    optional=optional,
                 )
                 break
 
@@ -387,6 +849,120 @@ class InfrastructureCollector:
                 exc=exc,
             )
             return []
+
+    def _collect_target_lists(
+        self,
+        target_groups: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        if not self._dict_items(target_groups):
+            return result
+        try:
+            api = self.api_factory.get("loadbalancer")
+            method = getattr(api, "get_target_list")
+        except Exception as exc:
+            self._record_issue(
+                stage="initialization",
+                api="get_target_list",
+                target_type="target_group",
+                exc=exc,
+            )
+            return result
+
+        for group in self._dict_items(target_groups):
+            target_group_no = group.get("targetGroupNo")
+            if target_group_no is None or not str(target_group_no).strip():
+                continue
+            try:
+                response = method(
+                    target_group_no=str(target_group_no),
+                    **self._region_kwargs(),
+                )
+                items, _ = self._extract_wrapped_items(
+                    response,
+                    response_key="getTargetListResponse",
+                    list_key="targetList",
+                    api_name="get_target_list",
+                )
+                result[str(target_group_no)] = items
+            except Exception as exc:
+                self._record_issue(
+                    stage="collection",
+                    api="get_target_list",
+                    target_type="target_group",
+                    exc=exc,
+                    optional=True,
+                )
+        return result
+
+    def _collect_route_evidence(
+        self,
+        route_tables: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        result: Dict[str, Dict[str, Any]] = {}
+        if not self._dict_items(route_tables):
+            return result
+        try:
+            api = self.api_factory.get("vpc")
+            subnet_method = getattr(api, "get_route_table_subnet_list")
+            route_method = getattr(api, "get_route_list")
+        except Exception as exc:
+            self._record_issue(
+                stage="initialization",
+                api="get_route_table_list",
+                target_type="route_table",
+                exc=exc,
+            )
+            return result
+
+        for route_table in self._dict_items(route_tables):
+            route_table_no = route_table.get("routeTableNo")
+            vpc_no = route_table.get("vpcNo")
+            if not route_table_no or not vpc_no:
+                continue
+            try:
+                subnet_response = subnet_method(
+                    route_table_no=str(route_table_no),
+                    **self._region_kwargs(),
+                )
+                subnets, _ = self._extract_wrapped_items(
+                    subnet_response,
+                    response_key="getRouteTableSubnetListResponse",
+                    list_key="subnetList",
+                    api_name="get_route_table_subnet_list",
+                )
+                route_response = route_method(
+                    route_table_no=str(route_table_no),
+                    vpc_no=str(vpc_no),
+                    **self._region_kwargs(),
+                )
+                routes, _ = self._extract_wrapped_items(
+                    route_response,
+                    response_key="getRouteListResponse",
+                    list_key="routeList",
+                    api_name="get_route_list",
+                )
+            except Exception as exc:
+                self._record_issue(
+                    stage="collection",
+                    api="get_route_list",
+                    target_type="route_table",
+                    exc=exc,
+                    optional=True,
+                )
+                continue
+
+            for subnet in subnets:
+                subnet_no = subnet.get("subnetNo")
+                if subnet_no is None or not str(subnet_no).strip():
+                    continue
+                evidence = result.setdefault(
+                    str(subnet_no),
+                    {"route_table_nos": [], "routes": []},
+                )
+                evidence["route_table_nos"].append(str(route_table_no))
+                evidence["routes"].extend(routes)
+        return result
 
     def _collect_resource_manager(self) -> List[Dict[str, Any]]:
         method_name = "get_resource_list"
@@ -521,13 +1097,15 @@ class InfrastructureCollector:
         target_type: str,
         exc: Exception,
         page_no: Optional[int] = None,
+        optional: bool = False,
     ) -> None:
         status_code = None
         if isinstance(exc, requests.HTTPError) and exc.response is not None:
             status_code = exc.response.status_code
 
         is_warning = (
-            status_code in self.WARNING_HTTP_STATUSES
+            optional
+            or status_code in self.WARNING_HTTP_STATUSES
             or isinstance(exc, (AttributeError, KeyError, NotImplementedError))
         )
         message = (
@@ -615,6 +1193,29 @@ class InfrastructureCollector:
             sort_keys=True,
             default=str,
         )
+
+    def _normalize_categories(
+        self,
+        categories: Optional[Sequence[str]],
+    ) -> Optional[frozenset[str]]:
+        if categories is None:
+            return self.LEGACY_DEFAULT_CATEGORIES
+        if isinstance(categories, str):
+            categories = [categories]
+        result = set()
+        for candidate in categories:
+            normalized = str(candidate or "").strip().upper()
+            category = self.normalizer.CATEGORY_ALIASES.get(normalized)
+            if category in self.normalizer.CATEGORY_LABELS:
+                result.add(category)
+        return frozenset(result)
+
+    @staticmethod
+    def _category_enabled(
+        selected_categories: Optional[frozenset[str]],
+        category: str,
+    ) -> bool:
+        return selected_categories is None or category in selected_categories
 
 
 __all__ = ["InfrastructureCollector"]

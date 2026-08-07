@@ -49,6 +49,69 @@
 </section>
 
 {% if 'MSP_ADMIN' in current_user.platform_roles and tenant.status != 'OFFBOARDED' %}
+{% set report_options = tenant.report_options %}
+<section class="panel report-settings-panel">
+  <div class="panel-heading">
+    <div>
+      <h2>고객별 보고서 출력 설정</h2>
+      <p>새로 생성하는 보고서부터 수집·출력할 섹션과 자원 범주를 적용합니다. 기존 보고서는 변경되지 않습니다.</p>
+    </div>
+  </div>
+  <form class="report-settings-form" method="post" action="{{ url_for('update_customer_report_settings', tenant_id=tenant.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <fieldset>
+      <legend>보고서 섹션</legend>
+      <div class="option-grid">
+        {% for option in report_section_options %}
+        <label><input type="checkbox" name="sections" value="{{ option }}"{% if option in report_options.sections %} checked{% endif %}> {{ report_section_labels[option] }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>대표 인프라 자원</legend>
+      <div class="option-actions"><button class="text-action" type="button" data-check-group="resource-option" data-check-value="true">전체 선택</button><button class="text-action" type="button" data-check-group="resource-option" data-check-value="false">전체 해제</button></div>
+      <div class="option-grid resource-options">
+        {% for option in resource_category_options %}
+        <label><input class="resource-option" type="checkbox" name="resource_categories" value="{{ option }}"{% if option in report_options.resource_categories %} checked{% endif %}> {{ resource_category_labels[option] }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>모니터링 그래프 대상</legend>
+      <div class="option-grid">
+        {% for option in monitoring_category_options %}
+        <label><input type="checkbox" name="monitoring_categories" value="{{ option }}"{% if option in report_options.monitoring_categories %} checked{% endif %}> {{ resource_category_labels[option] }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>클라우드 구성도 표시</legend>
+      <div class="option-grid">
+        {% for option in diagram_boolean_options %}
+        <label><input type="checkbox" name="diagram_{{ option }}" value="true"{% if report_options.diagram[option] %} checked{% endif %}> {{ diagram_option_labels[option] }}</label>
+        {% endfor %}
+        <label>구성도 최대 자원 수<input type="number" name="diagram_max_nodes" value="{{ report_options.diagram.max_nodes }}" min="10" max="200" required></label>
+      </div>
+      <p class="settings-note">API가 명시적으로 확인한 연결만 선으로 표시합니다. 관계를 확인하지 못한 자원은 선택 시 별도 영역에 배치되며 임의로 연결하지 않습니다.</p>
+      <p class="settings-warning">자원 ID, 사설·공인 IP와 CIDR은 고객 내부 정보일 수 있습니다. 선택 시 보고서 열람 권한과 외부 전달 범위를 함께 확인하세요. Access Key, Secret Key 및 기타 인증정보는 어떤 설정에서도 수집하거나 출력하지 않습니다.</p>
+    </fieldset>
+
+    <button class="primary" type="submit">보고서 출력 설정 저장</button>
+  </form>
+</section>
+<script>
+document.querySelectorAll('[data-check-group]').forEach((button) => button.addEventListener('click', () => {
+  const checked = button.dataset.checkValue === 'true';
+  document.querySelectorAll(`.${button.dataset.checkGroup}`).forEach((item) => { item.checked = checked; });
+}));
+</script>
+{% endif %}
+
+{% if 'MSP_ADMIN' in current_user.platform_roles and tenant.status != 'OFFBOARDED' %}
 <section class="panel">
   <div class="panel-heading"><div><h2>API 키 등록·교체</h2><p>같은 계정 코드를 입력하면 키 버전이 증가하며, 입력값은 암호화 후 다시 표시되지 않습니다.</p></div></div>
   <form class="form-grid" method="post" action="{{ url_for('register_credential', tenant_id=tenant.id) }}">

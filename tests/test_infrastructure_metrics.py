@@ -206,6 +206,129 @@ class DiscoveryAPI:
         return result
 
 
+class ExpandedDiscoveryAPI(DiscoveryAPI):
+    def __init__(self):
+        super().__init__()
+        self.schemas = [
+            {"prodName": "System/NAS(VPC)", "cwKey": "nas"},
+            {"prodName": "System/Object Storage", "cwKey": "object"},
+            {
+                "prodName": "System/Auto Scaling Group(Classic)",
+                "cwKey": "autoscaling",
+            },
+            {
+                "prodName": "System/Search Engine Service(VPC)",
+                "cwKey": "search",
+            },
+            {
+                "prodName": "System/Cloud Data Streaming Service(VPC)",
+                "cwKey": "streaming",
+            },
+            {
+                "prodName": "System/Cloud Hadoop(VPC)",
+                "cwKey": "hadoop",
+            },
+            {
+                "prodName": "System/Data Stream(VPC)",
+                "cwKey": "data-stream",
+            },
+        ]
+        self.metrics = {
+            "nas": self._metric_items(
+                ("volume_size", "volume_used_size", "volume_used_ratio"),
+                {"instanceNo": "nas-1"},
+            ),
+            "object": self._metric_items(
+                ("bucket_size", "object_count"),
+                {"resourceId": "bucket-1", "regionCode": "KR"},
+            ),
+            "autoscaling": self._metric_items(
+                ("avg_cpu_used_rto", "mem_usert", "avg_fs_usert"),
+                {"autoScalingGroupNo": "asg-1"},
+            ),
+            "search": self._metric_items(
+                (
+                    "cluster_node_count",
+                    "cluster_documents_total",
+                    "cluster_disk_used",
+                    "cpu_total",
+                    "mem_usage",
+                    "disk_used",
+                ),
+                {
+                    "Svc_group_instance_no": "search-1",
+                    "instanceNo": "search-node-1",
+                },
+            ),
+            "streaming": self._metric_items(
+                (
+                    "cluster_total_partition",
+                    "cluster_total_topic",
+                    "cluster_total_message",
+                    "cluster_messagesInSecMean",
+                    "cluster_bytesInSec",
+                    "cluster_bytesOutSec",
+                    "cpu_total",
+                    "mem_usage",
+                    "disk_used_ratio",
+                ),
+                {"instanceNo": "streaming-1"},
+            ),
+            "hadoop": self._metric_items(
+                (
+                    "avg_cpu_used_rto",
+                    "active_nodes",
+                    "queue_used_memory_percent",
+                    "queue_used_v_cores_percent",
+                ),
+                {
+                    "instanceNo": "hadoop-1",
+                    "clusterName": "do-not-use-for-joining",
+                },
+            ),
+            "data-stream": self._metric_items(
+                (
+                    "bytes_in_total",
+                    "messages_in_total",
+                    "bytes_out_total",
+                    "log_size",
+                    "consumer_group_lag",
+                ),
+                {"topicId": "topic-1", "topicName": "orders"},
+            ),
+        }
+        self.metrics["data-stream"][-1]["options"] = self._options("MAX")
+
+    def _metric_items(self, names, dimensions):
+        units = {
+            "volume_size": "bytes",
+            "volume_used_size": "bytes",
+            "volume_used_ratio": "%",
+            "bucket_size": "bytes",
+            "object_count": "num",
+            "cluster_disk_used": "GB",
+            "disk_used": "GB",
+            "cpu_total": "%",
+            "mem_usage": "%",
+            "disk_used_ratio": "%",
+            "avg_cpu_used_rto": "%",
+            "mem_usert": "%",
+            "avg_fs_usert": "%",
+            "queue_used_memory_percent": "%",
+            "queue_used_v_cores_percent": "%",
+            "log_size": "bytes",
+        }
+        return [
+            {
+                "metric": name,
+                "unit": units.get(name, "num"),
+                "options": self._options("AVG", "MAX", "SUM", "MIN"),
+                "dimensions": dict(dimensions),
+            }
+            for name in names
+        ]
+
+
 class ClassicAndLegacyAPI(DiscoveryAPI):
     def __init__(self):
         super().__init__()
@@ -574,6 +697,221 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
                 "serverIp": "10.0.0.10",
                 "serverPort": "8443",
             },
+        )
+
+    def test_extended_categories_use_documented_metrics_and_id_dimensions(self):
+        api = ExpandedDiscoveryAPI()
+        collector = self._collector(api)
+        infrastructure = [
+            {
+                "category": "NAS",
+                "resource_id": "nas-1",
+                "resource_name": "shared-volume",
+            },
+            {
+                "category": "OBJECT_STORAGE",
+                "resource_id": "bucket-1",
+                "resource_name": "report-archive",
+            },
+            {
+                "category": "AUTO_SCALING",
+                "resource_id": "asg-1",
+                "resource_name": "web-tier",
+            },
+            {
+                "category": "SEARCH_ENGINE",
+                "resource_id": "search-1",
+                "resource_name": "catalog-search",
+            },
+            {
+                "category": "DATA_STREAMING",
+                "resource_id": "streaming-1",
+                "resource_name": "events-kafka",
+            },
+            {
+                "category": "CLOUD_HADOOP",
+                "resource_id": "hadoop-1",
+                "resource_name": "analytics",
+            },
+            {
+                "category": "DATA_STREAM",
+                "resource_id": "topic-1",
+                "resource_name": "orders",
+            },
+        ]
+
+        groups = collector.collect(infrastructure, 1, 2)
+
+        by_category = {}
+        for group in groups:
+            by_category.setdefault(group["category"], set()).add(
+                group["metric"]
+            )
+        self.assertEqual(
+            by_category,
+            {
+                "NAS": {
+                    "volume_size",
+                    "volume_used_size",
+                    "volume_used_ratio",
+                },
+                "OBJECT_STORAGE": {"bucket_size", "object_count"},
+                "AUTO_SCALING": {
+                    "avg_cpu_used_rto",
+                    "mem_usert",
+                    "avg_fs_usert",
+                },
+                "SEARCH_ENGINE": {
+                    "cluster_node_count",
+                    "cluster_documents_total",
+                    "cluster_disk_used",
+                    "cpu_total",
+                    "mem_usage",
+                    "disk_used",
+                },
+                "DATA_STREAMING": {
+                    "cluster_total_partition",
+                    "cluster_total_topic",
+                    "cluster_total_message",
+                    "cluster_messagesInSecMean",
+                    "cluster_bytesInSec",
+                    "cluster_bytesOutSec",
+                    "cpu_total",
+                    "mem_usage",
+                    "disk_used_ratio",
+                },
+                "CLOUD_HADOOP": {
+                    "avg_cpu_used_rto",
+                    "active_nodes",
+                    "queue_used_memory_percent",
+                    "queue_used_v_cores_percent",
+                },
+                "DATA_STREAM": {
+                    "bytes_in_total",
+                    "messages_in_total",
+                    "bytes_out_total",
+                    "log_size",
+                    "consumer_group_lag",
+                },
+            },
+        )
+        expected_dimensions = {
+            "nas": "instanceNo",
+            "object": "resourceId",
+            "autoscaling": "autoScalingGroupNo",
+            "search": "Svc_group_instance_no",
+            "streaming": "instanceNo",
+            "hadoop": "instanceNo",
+            "data-stream": "topicId",
+        }
+        self.assertEqual(
+            {
+                call["prod_key"]:
+                call["dimensions_selected_list"][0]["name"]
+                for call in api.search_calls
+            },
+            expected_dimensions,
+        )
+        expected_resource_ids = {
+            item["category"]: item["resource_id"]
+            for item in infrastructure
+        }
+        self.assertTrue(
+            all(
+                series["resource_id"]
+                == expected_resource_ids[group["category"]]
+                for group in groups
+                for series in group["series"]
+            )
+        )
+        lag_group = next(
+            group
+            for group in groups
+            if group["metric"] == "consumer_group_lag"
+        )
+        self.assertEqual(lag_group["aggregation"], "MAX")
+        self.assertEqual(collector.last_errors, [])
+
+    def test_name_and_unrelated_dimensions_never_join_inventory(self):
+        collector = InfrastructureMetricCollector(FakeFactory())
+        resource = {
+            "category": "OBJECT_STORAGE",
+            "resource_id": "bucket-1",
+            "resource_name": "same-name",
+        }
+
+        self.assertIsNone(
+            collector._match_resource(
+                category="OBJECT_STORAGE",
+                resources=[resource],
+                dimensions={
+                    "resourceName": "same-name",
+                    "regionCode": "bucket-1",
+                },
+                metric_item={"resourceName": "same-name"},
+            )
+        )
+        self.assertIsNone(
+            collector._match_resource(
+                category="SEARCH_ENGINE",
+                resources=[
+                    {
+                        "resource_id": "search-1",
+                        "resource_name": "search",
+                    }
+                ],
+                dimensions={"instanceNo": "search-1"},
+                metric_item={},
+            )
+        )
+        self.assertIsNotNone(
+            collector._match_resource(
+                category="SEARCH_ENGINE",
+                resources=[
+                    {
+                        "resource_id": "search-1",
+                        "resource_name": "search",
+                    }
+                ],
+                dimensions={"Svc_group_instance_no": "search-1"},
+                metric_item={},
+            )
+        )
+        self.assertEqual(
+            collector._attach_search_target(
+                items=[
+                    {
+                        "idDimension": "resourceName",
+                        "dimensions": {"resourceName": "same-name"},
+                    }
+                ],
+                fallback_id_dimension="resourceId",
+                target_id="bucket-1",
+            ),
+            [],
+        )
+
+    def test_selected_categories_skip_unrequested_products(self):
+        api = ExpandedDiscoveryAPI()
+        collector = self._collector(api)
+
+        groups = collector.collect(
+            [
+                {"category": "NAS", "resource_id": "nas-1"},
+                {
+                    "category": "OBJECT_STORAGE",
+                    "resource_id": "bucket-1",
+                },
+            ],
+            1,
+            2,
+            selected_categories=["NAS"],
+        )
+
+        self.assertEqual({group["category"] for group in groups}, {"NAS"})
+        self.assertEqual(
+            {call["prod_key"] for call in api.search_calls},
+            {"nas"},
         )
 
     def test_query_windowing_and_series_limit_are_bounded(self):

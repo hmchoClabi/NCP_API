@@ -1,9 +1,10 @@
 import re
 from hashlib import sha256
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict
 
 from config.endpoints import build_api_endpoints
+from app.report_options import ReportOptions
 
 
 CUSTOMER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -25,6 +26,9 @@ class CustomerProfile:
     credential_ref: str | None = None
     cloud_account_id: str | None = None
     cloud_account_code: str | None = None
+    report_options: ReportOptions | Dict[str, Any] = field(
+        default_factory=ReportOptions
+    )
 
     def __post_init__(self) -> None:
         customer_id = self.customer_id.strip()
@@ -49,6 +53,11 @@ class CustomerProfile:
         object.__setattr__(self, "customer_name", customer_name)
         object.__setattr__(self, "api_type", api_type)
         object.__setattr__(self, "region", region)
+        object.__setattr__(
+            self,
+            "report_options",
+            ReportOptions.from_value(self.report_options),
+        )
 
     @property
     def is_default(self) -> bool:
@@ -63,4 +72,5 @@ class CustomerProfile:
             "credential_ref": self.credential_ref,
             "cloud_account_id": self.cloud_account_id,
             "cloud_account_code": self.cloud_account_code,
+            "report_options": self.report_options.to_dict(),
         }

@@ -4,9 +4,19 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
+from app.infrastructure_topology import (
+    InfrastructureTopologyBuilder,
+    REPRESENTATIVE_CATEGORY_LABELS,
+    TopologyDisplayOptions,
+)
+from app.report_options import (
+    MONITORING_CATEGORY_OPTIONS,
+    RESOURCE_CATEGORY_LABELS,
+    ReportOptions,
+)
 from app.report_models import ReportResult
 from utils.event_sort import sort_event_records
 
@@ -30,19 +40,58 @@ class HtmlReportRenderer:
         "#a16207",
         "#475569",
     )
-    INFRASTRUCTURE_CATEGORIES = (
-        ("SERVER", "서버"),
-        ("LOAD_BALANCER", "Load Balancer"),
-        ("BLOCK_STORAGE", "Block Storage"),
-        ("OBJECT_STORAGE", "Object Storage"),
-        ("NAS", "NAS"),
-        ("CLOUD_DB", "Cloud DB"),
-        ("CDN", "CDN"),
-        ("KUBERNETES", "Kubernetes"),
+    INFRASTRUCTURE_CATEGORIES = tuple(
+        REPRESENTATIVE_CATEGORY_LABELS.items()
     )
+    TOPOLOGY_LAYER_ORDER = {
+        "PUBLIC_IP": 0,
+        "GLOBAL_EDGE": 0,
+        "GLOBAL_DNS": 0,
+        "GLOBAL_TRAFFIC_MANAGER": 0,
+        "API_GATEWAY": 0,
+        "VPC": 0,
+        "VPC_PEERING": 1,
+        "VIRTUAL_PRIVATE_GATEWAY": 1,
+        "IPSEC_VPN": 1,
+        "CLOUD_CONNECT": 1,
+        "SUBNET": 1,
+        "NAT_GATEWAY": 2,
+        "AUTO_SCALING": 2,
+        "LOAD_BALANCER": 2,
+        "KUBERNETES": 2,
+        "SERVER": 2,
+        "CLOUD_DB": 2,
+        "SEARCH_ENGINE": 2,
+        "DATA_STREAMING": 2,
+        "CLOUD_HADOOP": 2,
+        "NETWORK_INTERFACE": 3,
+        "TARGET_GROUP": 3,
+        "BLOCK_STORAGE": 3,
+        "NAS": 3,
+        "OBJECT_STORAGE": 3,
+        "BLOCK_STORAGE_SNAPSHOT": 4,
+        "BACKUP": 4,
+        "ARCHIVE_STORAGE": 4,
+    }
+    TOPOLOGY_NODE_WIDTH = 230
+    TOPOLOGY_NODE_HEIGHT = 196
+
+    def __init__(
+        self,
+        *,
+        topology_display_options: Dict[str, Any] | None = None,
+        topology_max_nodes: int | None = None,
+    ) -> None:
+        self._topology_options_override = (
+            dict(topology_display_options)
+            if isinstance(topology_display_options, dict)
+            else None
+        )
+        self._topology_max_nodes_override = topology_max_nodes
 
     def render(self, report: ReportResult) -> str:
         period = report.period
+        report_options = report.selected_report_options
         customer_name = str(report.customer.get("name") or "").strip()
         report_title = (
             f"{customer_name} · NCP 이용 보고서"
@@ -152,6 +201,210 @@ class HtmlReportRenderer:
         )
         activity_events = self._flatten_grouped(report.activity_events)
         infrastructure = report.display_infrastructure
+        topology_options, _ = self._topology_options(report)
+        infrastructure_topology = report.display_infrastructure_topology
+
+        inventory_enabled = report_options.section_enabled(
+            "infrastructure_inventory"
+        )
+        diagram_enabled = (
+            report_options.section_enabled("infrastructure_diagram")
+            and topology_options.enabled
+        )
+        monitoring_enabled = report_options.section_enabled("monitoring")
+        billing_enabled = report_options.section_enabled("billing")
+        organization_billing_enabled = report_options.section_enabled(
+            "organization_billing"
+        )
+
+        summary_html = ""
+        if report_options.section_enabled("executive_summary"):
+            summary_cards = []
+            if inventory_enabled or diagram_enabled:
+                summary_cards.append(
+                    self._summary_card("대표 인프라", len(infrastructure), "개")
+                )
+            if report_options.section_enabled("insight_events"):
+                summary_cards.append(
+                    self._summary_card(
+                        "Cloud Insight 이벤트",
+                        len(report.insight_events),
+                        "건",
+                    )
+                )
+            if report_options.section_enabled("collection_diagnostics"):
+                summary_cards.append(
+                    self._summary_card(
+                        "수집 오류",
+                        len(report.collection_errors),
+                        "건",
+                        warning=bool(report.collection_errors),
+                    )
+                )
+            if billing_enabled or organization_billing_enabled:
+                summary_cards.append(
+                    self._summary_card(
+                        billing_card_title,
+                        self._number(billing_card_amount, decimals=0),
+                        "원",
+                    )
+                )
+            summary_html = (
+                '<section class="summary-grid" aria-label="주요 요약">'
+                + "".join(summary_cards)
+                + "</section>"
+            )
+
+        inventory_html = (
+            self._infrastructure_section(infrastructure)
+            if inventory_enabled else ""
+        )
+        topology_html = (
+            self._infrastructure_topology_section(
+                infrastructure_topology,
+                topology_options,
+            )
+            if diagram_enabled else ""
+        )
+        server_detail_html = ""
+        if inventory_enabled and report_options.resource_enabled("SERVER"):
+            server_detail_html = self._section(
+                "서버 상세",
+                "보고서 기준 시점에 저장된 서버 구성입니다.",
+                self._table(
+                    self._records(report.servers),
+                    (
+                        ("server_name", "서버명"),
+                        ("status", "상태"),
+                        ("private_ip", "Private IP"),
+                        ("public_ip", "Public IP"),
+                        ("cpu_count", "vCPU", "number0"),
+                        ("memory_gb", "메모리(GB)", "number3"),
+                        ("zone_code", "Zone"),
+                    ),
+                ),
+                len(report.servers),
+            )
+
+        monitoring_html = ""
+        if monitoring_enabled:
+            monitoring_parts = []
+            if report_options.monitoring_enabled("SERVER"):
+                monitoring_parts.extend((
+                    self._section(
+                        "서버 메트릭",
+                        "보고 기간의 CPU, 메모리 및 파일시스템 사용률입니다.",
+                        self._metric_table(report.display_server_metrics),
+                        len(report.display_server_metrics),
+                    ),
+                    self._metric_chart_section(
+                        report.server_metrics,
+                        report.period,
+                    ),
+                ))
+            monitoring_parts.append(
+                self._infrastructure_metric_section(
+                    report.display_infrastructure_metrics,
+                    report.period,
+                    infrastructure,
+                )
+            )
+            monitoring_html = "".join(monitoring_parts)
+
+        billing_html = ""
+        if billing_enabled:
+            billing_html = "".join((
+                self._section(
+                    "과금 데이터 기준",
+                    "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
+                    self._billing_fact_cards(cost_facts),
+                    len(cost_facts),
+                ),
+                self._section(
+                    billing_section_title,
+                    billing_section_description,
+                    self._table(
+                        service_summary,
+                        (
+                            ("service_name", "서비스"),
+                            ("amount", "금액", "number0"),
+                            ("row_count", "항목", "number0"),
+                        ),
+                    ),
+                    len(service_summary),
+                ),
+                self._section(
+                    "네트워크 사용량",
+                    "서비스와 전송 방향별 네트워크 사용량입니다.",
+                    self._table(
+                        network_summary,
+                        (
+                            ("service_name", "서비스"),
+                            ("direction", "방향"),
+                            ("name", "항목"),
+                            ("usage_gb", "사용량(GB)", "number3"),
+                            ("row_count", "건수", "number0"),
+                        ),
+                    ),
+                    len(network_summary),
+                ),
+                self._section(
+                    "서비스별 사용량",
+                    "서비스 및 과금 항목별 사용량입니다.",
+                    self._table(
+                        usage_summary,
+                        (
+                            ("service_name", "서비스"),
+                            ("item_name", "항목"),
+                            ("usage_quantity", "사용량", "number3"),
+                            ("unit_code", "단위"),
+                            ("row_count", "건수", "number0"),
+                        ),
+                    ),
+                    len(usage_summary),
+                ),
+            ))
+
+        organization_billing_html = (
+            self._organization_cost_sections(account_costs)
+            if organization_billing_enabled else ""
+        )
+        insight_events_html = (
+            self._section(
+                "Cloud Insight 이벤트",
+                "보고 기간에 수집된 Cloud Insight 이벤트입니다.",
+                self._event_table(report.insight_events),
+                len(report.insight_events),
+            )
+            if report_options.section_enabled("insight_events") else ""
+        )
+        activity_html = (
+            self._section(
+                "Cloud Activity Tracer",
+                "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
+                self._activity_table(activity_events),
+                len(activity_events),
+            )
+            if report_options.section_enabled("activity_history") else ""
+        )
+        diagnostics_html = ""
+        if report_options.section_enabled("collection_diagnostics"):
+            diagnostics_html = "".join((
+                self._section(
+                    "수집 경고",
+                    "보고서 생성을 중단하지 않는 제한 사항입니다.",
+                    self._error_table(report.collection_warnings),
+                    len(report.collection_warnings),
+                    warning=bool(report.collection_warnings),
+                ),
+                self._section(
+                    "수집 오류",
+                    "부분 실패가 발생해도 완료된 데이터는 보고서에 포함합니다.",
+                    self._error_table(report.collection_errors),
+                    len(report.collection_errors),
+                    warning=bool(report.collection_errors),
+                ),
+            ))
 
         return f"""<!doctype html>
 <html lang="ko">
@@ -180,135 +433,16 @@ class HtmlReportRenderer:
       </div>
     </header>
 
-    <section class="summary-grid" aria-label="주요 요약">
-      {self._summary_card("대표 인프라", len(infrastructure), "개")}
-      {self._summary_card(
-          "Cloud Insight 이벤트",
-          len(report.insight_events),
-          "건",
-      )}
-      {self._summary_card(
-          "수집 오류",
-          len(report.collection_errors),
-          "건",
-          warning=bool(report.collection_errors),
-      )}
-      {self._summary_card(
-          billing_card_title,
-          self._number(
-              billing_card_amount,
-              decimals=0,
-          ),
-          "원",
-      )}
-    </section>
-
-    {self._infrastructure_section(infrastructure)}
-    {self._section(
-        "서버 상세",
-        "보고서 생성 시점에 조회된 서버의 상세 구성입니다.",
-        self._table(
-            self._records(report.servers),
-            (
-                ("server_name", "서버명"),
-                ("status", "상태"),
-                ("private_ip", "Private IP"),
-                ("public_ip", "Public IP"),
-                ("cpu_count", "vCPU", "number0"),
-                ("memory_gb", "메모리 (GB)", "number3"),
-                ("zone_code", "Zone"),
-            ),
-        ),
-        len(report.servers),
-    )}
-    {self._section(
-        "서버 메트릭",
-        "기간 중 CPU, 메모리 및 파일시스템 사용률입니다.",
-        self._metric_table(report.display_server_metrics),
-        len(report.display_server_metrics),
-    )}
-    {self._metric_chart_section(report.server_metrics, report.period)}
-    {self._infrastructure_metric_section(
-        report.display_infrastructure_metrics,
-        report.period,
-        infrastructure,
-    )}
-    {self._section(
-        "과금 데이터 기준",
-        "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
-        self._billing_fact_cards(cost_facts),
-        len(cost_facts),
-    )}
-    {self._organization_cost_sections(account_costs)}
-    {self._section(
-        billing_section_title,
-        billing_section_description,
-        self._table(
-            service_summary,
-            (
-                ("service_name", "서비스"),
-                ("amount", "금액", "number0"),
-                ("row_count", "항목", "number0"),
-            ),
-        ),
-        len(service_summary),
-    )}
-    {self._section(
-        "Cloud Insight 이벤트",
-        "보고 기간에 수집된 Cloud Insight 이벤트입니다.",
-        self._event_table(report.insight_events),
-        len(report.insight_events),
-    )}
-    {self._section(
-        "Cloud Activity Tracer",
-        "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
-        self._activity_table(activity_events),
-        len(activity_events),
-    )}
-    {self._section(
-        "네트워크 사용량",
-        "서비스와 전송 방향별 네트워크 사용량입니다.",
-        self._table(
-            network_summary,
-            (
-                ("service_name", "서비스"),
-                ("direction", "방향"),
-                ("name", "항목"),
-                ("usage_gb", "사용량 (GB)", "number3"),
-                ("row_count", "건수", "number0"),
-            ),
-        ),
-        len(network_summary),
-    )}
-    {self._section(
-        "서비스별 사용량",
-        "서비스 및 과금 항목별 사용량입니다.",
-        self._table(
-            usage_summary,
-            (
-                ("service_name", "서비스"),
-                ("item_name", "항목"),
-                ("usage_quantity", "사용량", "number3"),
-                ("unit_code", "단위"),
-                ("row_count", "건수", "number0"),
-            ),
-        ),
-        len(usage_summary),
-    )}
-    {self._section(
-        "수집 경고",
-        "보고서 생성을 중단하지 않는 제한 사항입니다.",
-        self._error_table(report.collection_warnings),
-        len(report.collection_warnings),
-        warning=bool(report.collection_warnings),
-    )}
-    {self._section(
-        "수집 오류",
-        "부분 실패가 발생해도 완료된 데이터는 보고서에 포함됩니다.",
-        self._error_table(report.collection_errors),
-        len(report.collection_errors),
-        warning=bool(report.collection_errors),
-    )}
+    {summary_html}
+    {inventory_html}
+    {topology_html}
+    {server_detail_html}
+    {monitoring_html}
+    {billing_html}
+    {organization_billing_html}
+    {insight_events_html}
+    {activity_html}
+    {diagnostics_html}
 
     <footer>
       <p>이 보고서는 구조화된 NCP 수집 결과로부터 생성되었습니다.</p>
@@ -392,13 +526,18 @@ class HtmlReportRenderer:
                 ),
             })
 
+        summary_categories = [
+            (category, label)
+            for category, label in self.INFRASTRUCTURE_CATEGORIES
+            if counts.get(category)
+        ]
         summary_cards = "".join(
             f"""
       <article class="infra-summary-card">
         <span>{self._text(label)}</span>
         <strong>{counts.get(category, 0):,}</strong>
       </article>"""
-            for category, label in self.INFRASTRUCTURE_CATEGORIES
+            for category, label in summary_categories
         )
         table = self._table(
             prepared,
@@ -413,10 +552,11 @@ class HtmlReportRenderer:
                 ("create_time_text", "생성 시각 (KST)"),
             ),
         )
-        content = (
+        summary = (
             f'<div class="infra-summary-grid">{summary_cards}</div>'
-            + table
+            if summary_cards else ""
         )
+        content = summary + table
         return self._section(
             "대표 인프라 현황",
             (
@@ -483,6 +623,476 @@ class HtmlReportRenderer:
             parsed = parsed.replace(tzinfo=self.KST)
         return parsed.astimezone(self.KST).strftime("%Y-%m-%d %H:%M KST")
 
+    def _topology_options(
+        self,
+        report: ReportResult,
+    ) -> tuple[TopologyDisplayOptions, int]:
+        raw_options = getattr(report, "report_options", None)
+        if not raw_options:
+            customer = report.customer if isinstance(report.customer, dict) else {}
+            raw_options = customer.get("report_options")
+        diagram = ReportOptions.from_value(raw_options).to_dict()["diagram"]
+        if self._topology_options_override is not None:
+            diagram.update(self._topology_options_override)
+        max_nodes = diagram.get(
+            "max_nodes",
+            InfrastructureTopologyBuilder.DEFAULT_MAX_NODES,
+        )
+        if self._topology_max_nodes_override is not None:
+            max_nodes = self._topology_max_nodes_override
+        return TopologyDisplayOptions.from_mapping(diagram), max_nodes
+
+    def _infrastructure_topology_section(
+        self,
+        topology: Dict[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> str:
+        nodes = self._records(topology.get("nodes"))
+        edges = self._records(topology.get("edges"))
+        summary = self._mapping(topology.get("summary"))
+        unmapped_ids = {
+            str(node_id)
+            for node_id in topology.get("unmapped_node_ids", [])
+            if node_id is not None
+        }
+        mapped_nodes = [
+            node for node in nodes
+            if str(node.get("node_id")) not in unmapped_ids
+        ]
+        unmapped_nodes = [
+            node for node in nodes
+            if str(node.get("node_id")) in unmapped_ids
+        ]
+        confidence = str(summary.get("confidence") or "UNMAPPED")
+        svg = self._topology_svg(mapped_nodes, edges, options)
+        if not svg:
+            if confidence == "UNAVAILABLE":
+                svg = (
+                    '<p class="empty-state">보고 기간 안에 실제 수집된 '
+                    "인프라 스냅샷이 없어 현재 구성을 대신 그리지 않았습니다.</p>"
+                )
+            else:
+                svg = (
+                    '<p class="empty-state">명시적인 리소스 ID 관계가 없어 '
+                    "연결선을 그리지 않았습니다.</p>"
+                )
+
+        accuracy_class = " verified" if confidence == "VERIFIED" else " warning"
+        relationship_confidence = str(
+            summary.get("relationship_confidence") or "UNAVAILABLE"
+        )
+        relationship_coverage = str(
+            summary.get("relationship_coverage") or "UNKNOWN"
+        )
+        inventory_completeness = str(
+            summary.get("inventory_completeness") or "UNKNOWN"
+        )
+        edge_count = int(summary.get("verified_edge_count") or 0)
+        total_edge_count = int(
+            summary.get("total_verified_edge_count") or edge_count
+        )
+        edge_text = (
+            f"{edge_count:,}/{total_edge_count:,}개"
+            if edge_count != total_edge_count else f"{edge_count:,}개"
+        )
+        truncated_text = (
+            f" · 잘림 {int(summary.get('omitted_node_count') or 0):,}개"
+            if summary.get("truncated") else " · 잘림 없음"
+        )
+        accuracy = f"""
+      <div class="topology-accuracy{accuracy_class}">
+        <strong>정확성 {self._text(confidence)}</strong>
+        <span>검증된 관계 {self._text(edge_text)}</span>
+        <span>미매핑 자원 {self._number(summary.get('unmapped_resource_count'), 0)}개</span>
+        <span>미해결 참조 {self._number(summary.get('unresolved_reference_count'), 0)}개</span>
+        <span>수집 시각 {self._text(summary.get('collected_at'))}</span>
+        <span>시간 기준 {self._text(summary.get('time_basis') or 'COLLECTION_TIME')}</span>
+        <span>스냅샷 출처 {self._text(summary.get('snapshot_source') or 'NORMALIZED_REPORT')}</span>
+        <span>표시 제한 {self._number(summary.get('max_nodes'), 0)}개{self._text(truncated_text)}</span>
+        <span>관계 근거 {self._text(relationship_confidence)}</span>
+        <span>관계 연결 범위 {self._text(relationship_coverage)}</span>
+        <span>인벤토리 완전성 {self._text(inventory_completeness)}</span>
+        <span>수집 이슈 {self._number(summary.get('collection_issue_count'), 0)}건</span>
+      </div>"""
+
+        warnings = self._records(topology.get("warnings"))
+        warning_html = ""
+        if warnings:
+            warning_html = (
+                '<ul class="topology-warnings">'
+                + "".join(
+                    "<li>"
+                    + self._text(warning.get("message"))
+                    + " <small>source="
+                    + self._text(warning.get("source"))
+                    + " · confidence="
+                    + self._text(warning.get("confidence"))
+                    + "</small></li>"
+                    for warning in warnings
+                )
+                + "</ul>"
+            )
+
+        unmapped_html = ""
+        if options.include_unmapped_resources and unmapped_nodes:
+            unmapped_html = (
+                "<h3 class=\"topology-subheading\">미매핑 그룹</h3>"
+                '<p class="topology-note">이름·IP·CIDR로 연결을 추측하지 '
+                "않았으며 명시 관계가 없는 자원만 모았습니다.</p>"
+                '<div class="topology-unmapped-grid">'
+                + "".join(
+                    self._topology_unmapped_card(node, options)
+                    for node in unmapped_nodes
+                )
+                + "</div>"
+            )
+
+        evidence = self._topology_evidence_table(edges, nodes, options)
+        content = (
+            accuracy
+            + warning_html
+            + '<div class="topology-canvas">'
+            + svg
+            + "</div>"
+            + unmapped_html
+            + "<h3 class=\"topology-subheading\">관계 근거</h3>"
+            + evidence
+        )
+        return self._section(
+            "클라우드 구성도",
+            (
+                "보고 기간 안에서 가장 늦게 실제 수집된 스냅샷을 기준으로, "
+                "API 또는 Resource Manager 응답이 리소스 ID로 명시한 관계만 "
+                "연결합니다. 이름·도메인·IP·CIDR 일치에 의한 추정 연결은 "
+                "생성하지 않습니다."
+            ),
+            content,
+            int(summary.get("representative_node_count") or 0),
+            warning=bool(
+                confidence != "VERIFIED"
+                or summary.get("unmapped_resource_count")
+                or summary.get("unresolved_reference_count")
+                or summary.get("truncated")
+            ),
+        )
+
+    def _topology_svg(
+        self,
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        options: TopologyDisplayOptions,
+    ) -> str:
+        if not nodes or not edges:
+            return ""
+        node_ids = {str(node.get("node_id")) for node in nodes}
+        visible_edges = [
+            edge for edge in edges
+            if (
+                str(edge.get("source_node_id")) in node_ids
+                and str(edge.get("target_node_id")) in node_ids
+            )
+        ]
+        if not visible_edges:
+            return ""
+
+        positions, width, height = self._topology_layout(nodes, options)
+        node_width = self.TOPOLOGY_NODE_WIDTH
+        node_height = self.TOPOLOGY_NODE_HEIGHT
+        edge_markup = []
+        for edge in visible_edges:
+            source = positions.get(str(edge.get("source_node_id")))
+            target = positions.get(str(edge.get("target_node_id")))
+            if source is None or target is None:
+                continue
+            sx, sy = source
+            tx, ty = target
+            if sx < tx:
+                start_x, start_y = sx + node_width, sy + node_height / 2
+                end_x, end_y = tx, ty + node_height / 2
+                offset = max(34, (end_x - start_x) / 2)
+                path = (
+                    f"M {start_x:.1f} {start_y:.1f} "
+                    f"C {start_x + offset:.1f} {start_y:.1f}, "
+                    f"{end_x - offset:.1f} {end_y:.1f}, "
+                    f"{end_x:.1f} {end_y:.1f}"
+                )
+            elif sx > tx:
+                start_x, start_y = sx, sy + node_height / 2
+                end_x, end_y = tx + node_width, ty + node_height / 2
+                offset = max(34, (start_x - end_x) / 2)
+                path = (
+                    f"M {start_x:.1f} {start_y:.1f} "
+                    f"C {start_x - offset:.1f} {start_y:.1f}, "
+                    f"{end_x + offset:.1f} {end_y:.1f}, "
+                    f"{end_x:.1f} {end_y:.1f}"
+                )
+            else:
+                start_x, start_y = sx + node_width / 2, sy + node_height
+                end_x, end_y = tx + node_width / 2, ty
+                bend = 36 if end_y >= start_y else -36
+                path = (
+                    f"M {start_x:.1f} {start_y:.1f} "
+                    f"C {start_x + bend:.1f} {start_y + bend:.1f}, "
+                    f"{end_x + bend:.1f} {end_y - bend:.1f}, "
+                    f"{end_x:.1f} {end_y:.1f}"
+                )
+            label = self._topology_relation_label(edge.get("relationship"))
+            label_x = (start_x + end_x) / 2
+            label_y = (start_y + end_y) / 2 - 5
+            title = (
+                f"{label} · source={edge.get('source') or '-'} · "
+                f"confidence={edge.get('confidence') or 'VERIFIED'}"
+            )
+            edge_markup.append(
+                '<g class="topology-edge">'
+                f'<path d="{path}" marker-end="url(#topology-arrow)">'
+                f"<title>{self._text(title)}</title></path>"
+                f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
+                f'class="topology-edge-label">{self._text(label)}</text>'
+                "</g>"
+            )
+
+        node_markup = []
+        for node in nodes:
+            node_id = str(node.get("node_id"))
+            position = positions.get(node_id)
+            if position is None:
+                continue
+            x, y = position
+            supporting = node.get("kind") != "representative"
+            css_class = " topology-node--supporting" if supporting else ""
+            lines = self._topology_node_lines(node, options)
+            title = (
+                f"source={node.get('source') or '-'} · "
+                f"confidence={node.get('confidence') or '-'} · "
+                f"resolution={node.get('resolution') or '-'}"
+            )
+            texts = [
+                f'<text x="{x + 14:.1f}" y="{y + 23:.1f}" '
+                'class="topology-node-title">'
+                f"{self._text(node.get('category_label') or node.get('category'))}"
+                "</text>"
+            ]
+            for index, line in enumerate(lines[:8]):
+                texts.append(
+                    f'<text x="{x + 14:.1f}" y="{y + 46 + index * 18:.1f}" '
+                    f'class="topology-node-detail">{self._text(line)}</text>'
+                )
+            node_markup.append(
+                f'<g class="topology-node{css_class}">'
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{node_width}" '
+                f'height="{node_height}" rx="12"><title>'
+                f"{self._text(title)}</title></rect>"
+                + "".join(texts)
+                + "</g>"
+            )
+
+        return (
+            f'<svg class="topology-svg" viewBox="0 0 {width} {height}" '
+            'role="img" aria-label="명시적으로 확인된 클라우드 자원 구성도">'
+            '<defs><marker id="topology-arrow" markerWidth="8" markerHeight="8" '
+            'refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
+            '<path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>'
+            + "".join(edge_markup)
+            + "".join(node_markup)
+            + "</svg>"
+        )
+
+    def _topology_layout(
+        self,
+        nodes: List[Dict[str, Any]],
+        options: TopologyDisplayOptions,
+    ) -> tuple[Dict[str, tuple[float, float]], int, int]:
+        layers = defaultdict(list)
+        if options.group_by_vpc:
+            for node in nodes:
+                category = str(node.get("category") or "")
+                layers[self.TOPOLOGY_LAYER_ORDER.get(category, 2)].append(node)
+        else:
+            categories = []
+            for node in nodes:
+                category = str(node.get("category") or "")
+                if category not in categories:
+                    categories.append(category)
+                layers[categories.index(category)].append(node)
+
+        ordered_layers = sorted(layers)
+        node_width = self.TOPOLOGY_NODE_WIDTH
+        node_height = self.TOPOLOGY_NODE_HEIGHT
+        horizontal_gap = 82
+        vertical_gap = 32
+        margin = 30
+        positions: Dict[str, tuple[float, float]] = {}
+        for column, layer in enumerate(ordered_layers):
+            layer_nodes = sorted(
+                layers[layer],
+                key=lambda node: (
+                    str(node.get("category") or ""),
+                    str(node.get("name") or "").casefold(),
+                    str(node.get("resource_id") or ""),
+                ),
+            )
+            for row, node in enumerate(layer_nodes):
+                positions[str(node.get("node_id"))] = (
+                    margin + column * (node_width + horizontal_gap),
+                    margin + row * (node_height + vertical_gap),
+                )
+        max_rows = max((len(value) for value in layers.values()), default=1)
+        width = (
+            margin * 2
+            + len(ordered_layers) * node_width
+            + max(0, len(ordered_layers) - 1) * horizontal_gap
+        )
+        height = (
+            margin * 2
+            + max_rows * node_height
+            + max(0, max_rows - 1) * vertical_gap
+        )
+        return positions, max(width, 320), max(height, 220)
+
+    def _topology_node_lines(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> List[str]:
+        lines = []
+        if node.get("resolution") == "UNRESOLVED":
+            lines.append("REFERENCE_ONLY / UNRESOLVED")
+        if options.show_resource_name and node.get("name"):
+            lines.append(self._topology_short_text(node.get("name")))
+        if options.show_private_ip and node.get("private_ips"):
+            lines.append(
+                "Private IP "
+                + self._topology_value_list(node.get("private_ips"))
+            )
+        if options.show_public_ip and node.get("public_ips"):
+            lines.append(
+                "Public IP "
+                + self._topology_value_list(node.get("public_ips"))
+            )
+        if options.show_network_cidr and node.get("network_cidrs"):
+            lines.append(
+                "CIDR " + self._topology_value_list(node.get("network_cidrs"))
+            )
+        if options.show_resource_id and node.get("resource_id"):
+            lines.append(
+                "ID " + self._topology_short_text(node.get("resource_id"), 28)
+            )
+        if options.show_status and node.get("status"):
+            lines.append("상태 " + self._topology_short_text(node.get("status")))
+        if options.show_zone and node.get("zone"):
+            lines.append("Zone " + self._topology_short_text(node.get("zone")))
+        if options.show_platform and node.get("platform"):
+            lines.append(
+                "플랫폼 " + self._topology_short_text(node.get("platform"))
+            )
+        return lines[:8]
+
+    def _topology_unmapped_card(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> str:
+        lines = self._topology_node_lines(node, options)
+        details = " · ".join(lines) if lines else "표시 속성 없음"
+        return (
+            '<article class="topology-unmapped-card">'
+            f"<strong>{self._text(node.get('category_label') or node.get('category'))}</strong>"
+            f"<span>{self._text(details)}</span>"
+            "<small>source="
+            + self._text(node.get("source"))
+            + " · confidence="
+            + self._text(node.get("confidence"))
+            + "</small></article>"
+        )
+
+    def _topology_evidence_table(
+        self,
+        edges: List[Dict[str, Any]],
+        nodes: List[Dict[str, Any]],
+        options: TopologyDisplayOptions,
+    ) -> str:
+        node_by_id = {
+            str(node.get("node_id")): node
+            for node in nodes
+        }
+        rows = []
+        for edge in edges:
+            source_node = node_by_id.get(str(edge.get("source_node_id")), {})
+            target_node = node_by_id.get(str(edge.get("target_node_id")), {})
+            rows.append({
+                "relation": (
+                    self._topology_node_reference(source_node, options)
+                    + " → "
+                    + self._topology_node_reference(target_node, options)
+                ),
+                "relationship": self._topology_relation_label(
+                    edge.get("relationship")
+                ),
+                "source": edge.get("source"),
+                "confidence": edge.get("confidence"),
+            })
+        return self._table(
+            rows,
+            (
+                ("relation", "연결"),
+                ("relationship", "관계"),
+                ("source", "근거 source"),
+                ("confidence", "신뢰도"),
+            ),
+        )
+
+    def _topology_node_reference(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> str:
+        category = str(
+            node.get("category_label") or node.get("category") or "리소스"
+        )
+        if options.show_resource_name and node.get("name"):
+            return f"{category}: {node.get('name')}"
+        if options.show_resource_id and node.get("resource_id"):
+            return f"{category}: {node.get('resource_id')}"
+        if node.get("resolution") == "UNRESOLVED":
+            return f"{category}: 미해결 참조"
+        return category
+
+    @staticmethod
+    def _topology_relation_label(value: Any) -> str:
+        labels = {
+            "CONTAINS": "포함",
+            "ATTACHED_TO": "연결",
+            "ATTACHED_STORAGE": "스토리지 부착",
+            "ASSIGNED_TO": "할당",
+            "TARGETS": "LB 대상",
+            "HAS_SNAPSHOT": "스냅샷",
+            "PEERS_FROM": "피어링 원본",
+            "PEERS_TO": "피어링 대상",
+            "RELATED_TO": "명시 관계",
+        }
+        normalized = str(value or "RELATED_TO").upper()
+        return labels.get(normalized, normalized.replace("_", " "))
+
+    def _topology_value_list(self, value: Any) -> str:
+        values = [
+            self._topology_short_text(item, 24)
+            for item in value
+            if item is not None and str(item).strip()
+        ] if isinstance(value, (list, tuple)) else []
+        if not values:
+            return "-"
+        visible = values[:2]
+        suffix = f" 외 {len(values) - 2}개" if len(values) > 2 else ""
+        return ", ".join(visible) + suffix
+
+    @staticmethod
+    def _topology_short_text(value: Any, limit: int = 32) -> str:
+        rendered = str(value or "").strip()
+        if len(rendered) <= limit:
+            return rendered
+        return rendered[: max(1, limit - 1)] + "…"
+
     def _infrastructure_metric_section(
         self,
         metric_groups: List[Dict[str, Any]],
@@ -490,9 +1100,16 @@ class HtmlReportRenderer:
         infrastructure: List[Dict[str, Any]],
     ) -> str:
         monitored_categories = {
-            "LOAD_BALANCER": "Load Balancer",
-            "CLOUD_DB": "Cloud DB",
-            "KUBERNETES": "Kubernetes",
+            category: (
+                "Kubernetes"
+                if category == "KUBERNETES"
+                else RESOURCE_CATEGORY_LABELS.get(
+                    category,
+                    category.replace("_", " ").title(),
+                )
+            )
+            for category in MONITORING_CATEGORY_OPTIONS
+            if category != "SERVER"
         }
         present_categories = {
             str(item.get("category") or "").upper()
@@ -568,7 +1185,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>LB, Cloud DB, Kubernetes의 보고 기간 Cloud Insight 시계열입니다.</p>
+          <p>선택한 대표 인프라의 보고 기간 Cloud Insight 시계열입니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
@@ -1913,6 +2530,84 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 }
 .infra-summary-card span { display: block; color: var(--muted); font-size: .76rem; }
 .infra-summary-card strong { display: block; margin-top: 3px; font-size: 1.2rem; }
+.topology-accuracy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: .76rem;
+}
+.topology-accuracy strong { color: var(--ink); }
+.topology-accuracy.verified { border-color: #86efac; background: #f0fdf4; }
+.topology-accuracy.warning { border-color: #fdba74; background: #fff7ed; }
+.topology-warnings {
+  margin: 0 0 12px;
+  padding: 10px 14px 10px 32px;
+  color: #9a3412;
+  background: #fff7ed;
+  border-radius: 10px;
+  font-size: .76rem;
+}
+.topology-warnings small { color: #7c2d12; }
+.topology-canvas {
+  overflow-x: auto;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.topology-svg { display: block; width: 100%; min-width: 720px; height: auto; }
+.topology-node rect {
+  fill: #ffffff;
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, .08));
+}
+.topology-node--supporting rect {
+  fill: #fff7ed;
+  stroke: #f59e0b;
+  stroke-dasharray: 5 4;
+}
+.topology-node-title { fill: #0f172a; font-size: 13px; font-weight: 800; }
+.topology-node-detail { fill: #475569; font-size: 11px; }
+.topology-edge path {
+  fill: none;
+  stroke: #64748b;
+  stroke-width: 1.6;
+}
+.topology-edge-label {
+  fill: #334155;
+  paint-order: stroke;
+  stroke: #f8fafc;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  font-size: 10px;
+  text-anchor: middle;
+}
+#topology-arrow path { fill: #64748b; }
+.topology-subheading { margin: 18px 0 3px; font-size: .95rem; }
+.topology-note { margin: 0 0 9px; color: var(--muted); font-size: .76rem; }
+.topology-unmapped-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+.topology-unmapped-card {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  background: #fff7ed;
+  border: 1px dashed #fdba74;
+  border-radius: 9px;
+  font-size: .75rem;
+}
+.topology-unmapped-card span { color: #475569; }
+.topology-unmapped-card small { color: #9a3412; overflow-wrap: anywhere; }
 .report-section {
   margin-top: 20px;
   padding: 26px;
@@ -2046,12 +2741,13 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .report-header { flex-direction: column; padding: 28px; }
   .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
   .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .topology-unmapped-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts, .infra-summary-grid, .topology-unmapped-grid { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
 }
 @media print {
@@ -2062,6 +2758,8 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .summary-grid, .report-section { break-inside: avoid; }
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
+  .topology-canvas { overflow: visible; }
+  .topology-svg { min-width: 0; }
   .report-section { padding: 18px; }
   table { font-size: 8pt; }
   tr { break-inside: avoid; }

@@ -31,7 +31,7 @@ spec:
       storage: {{ .Values.artifacts.persistence.storageSize }}
 ---
 {{- end }}
-{{- if and .Values.backups.enabled .Values.backups.createClaim }}
+{{- if and .Values.backups.enabled .Values.backups.createClaim (not .Values.backups.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

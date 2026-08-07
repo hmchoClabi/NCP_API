@@ -54,7 +54,7 @@ $helmArguments = @(
     "--set-string", "image.tag=$RuntimeTag",
     "--set-string", "sourceRevision=$SourceRevision",
     "--set", "migration.enabled=$($EnableMigration.IsPresent.ToString().ToLowerInvariant())",
-    "--atomic", "--wait", "--timeout", "10m"
+    "--atomic", "--wait", "--wait-for-jobs", "--timeout", "10m"
 )
 if ($EnableMigration) {
     $helmArguments += @(

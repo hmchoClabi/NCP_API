@@ -115,6 +115,16 @@ class EmptyLoadBalancerAPI:
             [],
         )
 
+    def get_target_group_list(self, **kwargs):
+        return wrapped(
+            "getTargetGroupListResponse",
+            "targetGroupList",
+            [],
+        )
+
+    def get_target_list(self, **kwargs):
+        return wrapped("getTargetListResponse", "targetList", [])
+
 
 class InventoryLoadBalancerAPI(EmptyLoadBalancerAPI):
     def get_load_balancer_instance_list(self, **kwargs):
@@ -233,6 +243,87 @@ class EmptyResourceManagerAPI:
         return {"items": [], "hasMore": False}
 
 
+class EmptyVpcAPI:
+    def get_vpc_list(self, **kwargs):
+        return wrapped("getVpcListResponse", "vpcList", [])
+
+    def get_subnet_list(self, **kwargs):
+        return wrapped("getSubnetListResponse", "subnetList", [])
+
+    def get_nat_gateway_instance_list(self, **kwargs):
+        return wrapped(
+            "getNatGatewayInstanceListResponse",
+            "natGatewayInstanceList",
+            [],
+        )
+
+    def get_vpc_peering_instance_list(self, **kwargs):
+        return wrapped(
+            "getVpcPeeringInstanceListResponse",
+            "vpcPeeringInstanceList",
+            [],
+        )
+
+    def get_route_table_list(self, **kwargs):
+        return wrapped(
+            "getRouteTableListResponse",
+            "routeTableList",
+            [],
+        )
+
+
+class EmptyVserverAPI:
+    def get_network_interface_instance_list(self, **kwargs):
+        return wrapped(
+            "getNetworkInterfaceListResponse",
+            "networkInterfaceList",
+            [],
+        )
+
+    def get_block_storage_instance_list(self, **kwargs):
+        return wrapped(
+            "getBlockStorageInstanceListResponse",
+            "blockStorageInstanceList",
+            [],
+        )
+
+    def get_public_ip_instance_list(self, **kwargs):
+        return wrapped(
+            "getPublicIpInstanceListResponse",
+            "publicIpInstanceList",
+            [],
+        )
+
+    def get_block_storage_snapshot_instance_list(self, **kwargs):
+        return wrapped(
+            "getBlockStorageSnapshotInstanceListResponse",
+            "blockStorageSnapshotInstanceList",
+            [],
+        )
+
+    def get_member_server_instance_list(self, **kwargs):
+        return wrapped(
+            "getMemberServerImageInstanceListResponse",
+            "memberServerImageInstanceList",
+            [],
+        )
+
+
+class EmptyGlobalDnsAPI:
+    def get_domain(self, **kwargs):
+        return {"content": [], "last": True}
+
+
+class EmptyCertificateManagerAPI:
+    def get_certificate_list(self):
+        return {"totalRows": 0, "sslCertificateList": []}
+
+
+class EmptyContainerAPI:
+    def get_registry_list(self, **kwargs):
+        return {"count": 0, "next": None, "results": []}
+
+
 class InventoryResourceManagerAPI:
     def get_resource_list(self, page, size, region_code=None):
         del region_code
@@ -283,6 +374,11 @@ def build_factory(**overrides):
         "kubernetes": EmptyKubernetesAPI(),
         "cdn": EmptyCdnAPI(),
         "resource_manager": EmptyResourceManagerAPI(),
+        "vpc": EmptyVpcAPI(),
+        "vserver": EmptyVserverAPI(),
+        "global_dns": EmptyGlobalDnsAPI(),
+        "certificate_manager": EmptyCertificateManagerAPI(),
+        "container": EmptyContainerAPI(),
     }
     apis.update(overrides)
     return FakeFactory(**apis)
@@ -393,6 +489,46 @@ class InfrastructureCollectorTests(unittest.TestCase):
             {"server-1", "server-2"},
         )
 
+    def test_same_name_without_ids_is_not_heuristically_merged(self):
+        resources = InfrastructureNormalizer().finalize([
+            {
+                "category": "SERVER",
+                "resource_name": "duplicate-name",
+                "platform": "VPC",
+                "region_code": "KR",
+                "zone_code": "KR-1",
+                "details": {"private_ip": "10.0.0.1"},
+            },
+            {
+                "category": "SERVER",
+                "resource_name": "duplicate-name",
+                "platform": "VPC",
+                "region_code": "KR",
+                "zone_code": "KR-2",
+                "details": {"private_ip": "10.0.0.2"},
+            },
+        ])
+
+        self.assertEqual(len(resources), 2)
+
+    def test_resource_manager_preserves_nrn_as_canonical_evidence(self):
+        resources = InfrastructureNormalizer().normalize_resource_manager([
+            {
+                "nrn": "nrn:PUB:Server:KR:123:Server/456",
+                "productName": "VPCServer",
+                "resourceType": "ServerInstance",
+                "resourceId": "456",
+                "resourceName": "server",
+                "platformType": "VPC",
+            }
+        ])
+
+        self.assertEqual(resources[0]["resource_id"], "456")
+        self.assertEqual(
+            resources[0]["details"]["source_nrn"],
+            "nrn:PUB:Server:KR:123:Server/456",
+        )
+
     def test_resource_manager_platform_aliases_match_direct_inventory(self):
         resources = InfrastructureNormalizer().normalize_resource_manager(
             [
@@ -485,6 +621,334 @@ class InfrastructureCollectorTests(unittest.TestCase):
             },
         )
 
+    def test_resource_manager_covers_extended_representative_resources(self):
+        specs = {
+            "vpc": ("VPC", "VPC", "VPC"),
+            "subnet": ("VPC", "Subnet", "SUBNET"),
+            "nat": ("VPC", "NATGateway", "NAT_GATEWAY"),
+            "public-ip": ("VPCServer", "PublicIP", "PUBLIC_IP"),
+            "peering": ("VPC", "VPCPeering", "VPC_PEERING"),
+            "vgw": (
+                "VPC",
+                "VirtualPrivateGateway",
+                "VIRTUAL_PRIVATE_GATEWAY",
+            ),
+            "asg": ("VPCAutoScaling", "AutoScalingGroup", "AUTO_SCALING"),
+            "edge": ("GlobalEdge", "Edge", "GLOBAL_EDGE"),
+            "dns": ("GlobalDNS", "Domain", "GLOBAL_DNS"),
+            "gtm": (
+                "GlobalTrafficManager",
+                "Profile",
+                "GLOBAL_TRAFFIC_MANAGER",
+            ),
+            "api": ("APIGateway", "API", "API_GATEWAY"),
+            "certificate": (
+                "CertificateManager",
+                "Certificate",
+                "CERTIFICATE",
+            ),
+            "snapshot": (
+                "VPCServer",
+                "Snapshot",
+                "BLOCK_STORAGE_SNAPSHOT",
+            ),
+            "image": ("VPCServer", "ServerImage", "SERVER_IMAGE"),
+            "archive": ("ArchiveStorage", "Container", "ARCHIVE_STORAGE"),
+            "search": ("VPCSearchEngine", "Cluster", "SEARCH_ENGINE"),
+            "streaming": (
+                "CloudDataStreamingService",
+                "Cluster",
+                "DATA_STREAMING",
+            ),
+            "hadoop": ("VPCCloudHadoop", "Cluster", "CLOUD_HADOOP"),
+            "data-stream": ("VPCDataStream", "Topic", "DATA_STREAM"),
+            "functions": (
+                "VPCCloudFunctions",
+                "Namespace",
+                "CLOUD_FUNCTIONS",
+            ),
+            "registry": (
+                "ContainerRegistry",
+                "Registry",
+                "CONTAINER_REGISTRY",
+            ),
+            "waf": (
+                "VPCSecurityMonitoring",
+                "WAF",
+                "SECURITY_SERVICE",
+            ),
+            "vpn": ("VPCIPsecVPN", "IPsecVPNGateway", "IPSEC_VPN"),
+            "connect": ("VPCCloudConnect", "CloudConnect", "CLOUD_CONNECT"),
+        }
+        excluded_specs = (
+            ("GlobalDNS", "Record", "dns-record"),
+            ("GlobalEdge", "Profile", "edge-profile"),
+            ("APIGateway", "Stage", "api-stage"),
+            ("VPCAutoScaling", "LaunchConfiguration", "launch-config"),
+            ("VPCSearchEngine", "Server", "search-child"),
+            ("CloudDataStreamingService", "Server", "streaming-child"),
+            ("VPCCloudHadoop", "Server", "hadoop-child"),
+            ("VPCDataStream", "Connector", "connector"),
+            ("VPCCloudFunctions", "Action", "function-action"),
+            ("ContainerRegistry", "Image", "container-image"),
+            ("VPCBackup", "Job", "backup-job"),
+            ("VPCBackup", "Policy", "backup-policy"),
+            ("VPCSecurityMonitoring", "Event", "security-event"),
+        )
+        raw_resources = [
+            {
+                "productName": product,
+                "resourceType": resource_type,
+                "resourceId": resource_id,
+                "resourceName": resource_id,
+                "platformType": "VPC",
+            }
+            for resource_id, (product, resource_type, _) in specs.items()
+        ]
+        raw_resources.extend(
+            {
+                "productName": product,
+                "resourceType": resource_type,
+                "resourceId": resource_id,
+                "resourceName": resource_id,
+                "platformType": "VPC",
+            }
+            for product, resource_type, resource_id in excluded_specs
+        )
+
+        resources = InfrastructureNormalizer().normalize_resource_manager(
+            raw_resources
+        )
+        by_id = {resource["resource_id"]: resource for resource in resources}
+
+        self.assertEqual(
+            {
+                resource_id: resource["category"]
+                for resource_id, resource in by_id.items()
+            },
+            {
+                resource_id: category
+                for resource_id, (_, _, category) in specs.items()
+            },
+        )
+        for resource in resources:
+            self.assertEqual(
+                resource["details"]["inventory_source"],
+                "RESOURCE_MANAGER",
+            )
+            self.assertTrue(resource["details"]["source_product"])
+            self.assertTrue(resource["details"]["source_resource_type"])
+        for _, _, resource_id in excluded_specs:
+            self.assertNotIn(resource_id, by_id)
+
+    def test_normalizers_keep_only_api_explicit_topology_evidence(self):
+        normalizer = InfrastructureNormalizer()
+        server = normalizer.normalize_servers(
+            [
+                {
+                    "server_id": "server-1",
+                    "server_name": "app-1",
+                    "private_ip": "10.0.1.4",
+                    "public_ip": "203.0.113.4",
+                    "vpc_id": "vpc-1",
+                    "subnet_id": "subnet-1",
+                }
+            ],
+            [
+                {
+                    "networkInterfaceNo": "nic-1",
+                    "serverInstanceNo": "server-1",
+                    "subnetNo": "subnet-1",
+                    "ip": "10.0.1.4",
+                    "secondaryIpList": ["10.0.1.5"],
+                }
+            ],
+        )[0]
+        self.assertEqual(
+            server["details"]["all_private_ips"],
+            ["10.0.1.4", "10.0.1.5"],
+        )
+        self.assertEqual(server["details"]["network_interface_nos"], ["nic-1"])
+        self.assertEqual(
+            {
+                (relation["target_category"], relation["target_id"])
+                for relation in server["details"]["explicit_relations"]
+            },
+            {
+                ("VPC", "vpc-1"),
+                ("SUBNET", "subnet-1"),
+                ("NETWORK_INTERFACE", "nic-1"),
+            },
+        )
+
+        load_balancer = normalizer.normalize_load_balancers(
+            [
+                {
+                    "loadBalancerInstanceNo": "lb-1",
+                    "loadBalancerName": "public-alb",
+                    "vpcNo": "vpc-1",
+                    "subnetNoList": ["subnet-1", "subnet-2"],
+                }
+            ],
+            [
+                {
+                    "targetGroupNo": "tg-1",
+                    "loadBalancerInstanceNo": "lb-1",
+                    "targetType": {"code": "VSVR"},
+                    "targetNoList": ["server-2"],
+                }
+            ],
+            {"tg-1": [{"targetNo": "server-1", "targetIp": "10.0.1.4"}]},
+        )[0]
+        self.assertEqual(load_balancer["details"]["target_group_nos"], ["tg-1"])
+        self.assertEqual(
+            load_balancer["details"]["target_server_instance_nos"],
+            ["server-2", "server-1"],
+        )
+        self.assertEqual(
+            {
+                relation["source_field"]
+                for relation in load_balancer["details"]["explicit_relations"]
+                if relation["target_category"] == "SERVER"
+            },
+            {
+                "targetGroupList[].targetNoList[]",
+                "targetList[].targetNo",
+            },
+        )
+
+        subnet = normalizer.normalize_subnets(
+            [
+                {
+                    "subnetNo": "subnet-1",
+                    "subnetName": "app-subnet",
+                    "vpcNo": "vpc-1",
+                    "subnet": "10.0.1.0/24",
+                }
+            ],
+            {
+                "subnet-1": {
+                    "route_table_nos": ["rt-1"],
+                    "routes": [
+                        {
+                            "targetType": {"code": "NATGW"},
+                            "targetNo": "nat-1",
+                        },
+                        {"targetType": {"code": "IGW"}},
+                        {
+                            "targetType": {"code": "NATGW"},
+                            "targetNo": "https://not-an-id.invalid",
+                        },
+                    ],
+                }
+            },
+        )[0]
+        self.assertEqual(
+            {
+                (relation["target_category"], relation["target_id"])
+                for relation in subnet["details"]["explicit_relations"]
+            },
+            {("VPC", "vpc-1"), ("NAT_GATEWAY", "nat-1")},
+        )
+        self.assertEqual(
+            subnet["details"]["reference_only_route_target_types"],
+            ["IGW"],
+        )
+        self.assertNotIn("not-an-id.invalid", json.dumps(subnet))
+
+        database = normalizer.normalize_cdb(
+            "MYSQL",
+            [
+                {
+                    "cloudMysqlInstanceNo": "db-1",
+                    "cloudMysqlServiceName": "orders-db",
+                    "cloudMysqlServerInstanceList": [
+                        {
+                            "cloudMysqlServerInstanceNo": "db-server-1",
+                            "cloudMysqlServerName": "orders-db-001",
+                            "cloudMysqlServerRole": {"code": "M"},
+                            "privateIp": "10.0.2.10",
+                            "vpcNo": "vpc-1",
+                            "subnetNo": "subnet-2",
+                        }
+                    ],
+                }
+            ],
+        )[0]
+        self.assertEqual(database["details"]["server_names"], ["orders-db-001"])
+        self.assertEqual(database["details"]["private_ips"], ["10.0.2.10"])
+
+        registry = normalizer.normalize_container_registries(
+            [
+                {
+                    "name": "production-images",
+                    "private_id": "private-access-1",
+                    "end_point": "registry.example.invalid",
+                    "private_end_point": "private.registry.example.invalid",
+                    "end_point_enabled": True,
+                    "status": "running",
+                }
+            ]
+        )[0]
+        self.assertEqual(registry["resource_id"], "production-images")
+        self.assertIsNone(registry["platform"])
+        self.assertEqual(
+            registry["details"]["private_access_id"],
+            "private-access-1",
+        )
+        self.assertTrue(registry["details"]["client_access_enabled"])
+        self.assertNotIn("registry.example.invalid", json.dumps(registry))
+
+    def test_selected_category_calls_only_relevant_direct_service(self):
+        vpc = Mock()
+        vpc.get_vpc_list.return_value = wrapped(
+            "getVpcListResponse",
+            "vpcList",
+            [
+                {
+                    "vpcNo": "vpc-1",
+                    "vpcName": "production",
+                    "ipv4CidrBlock": "10.0.0.0/16",
+                }
+            ],
+        )
+        factory = build_factory(vpc=vpc)
+        collector = InfrastructureCollector(factory)
+
+        resources = collector.collect([], {}, categories=("VPC",))
+
+        self.assertEqual(
+            [(resource["category"], resource["resource_id"]) for resource in resources],
+            [("VPC", "vpc-1")],
+        )
+        self.assertEqual(factory.requests, ["vpc"])
+        vpc.get_vpc_list.assert_called_once_with()
+
+        resource_manager_factory = build_factory()
+        self.assertEqual(
+            InfrastructureCollector(resource_manager_factory).collect(
+                [],
+                {},
+                categories=("OBJECT_STORAGE",),
+            ),
+            [],
+        )
+        self.assertEqual(
+            resource_manager_factory.requests,
+            ["resource_manager"],
+        )
+
+        empty_factory = build_factory()
+        self.assertEqual(
+            InfrastructureCollector(empty_factory).collect(
+                [],
+                {},
+                categories=(),
+            ),
+            [],
+        )
+        self.assertEqual(empty_factory.requests, [])
+
     def test_collects_allowlisted_inventory_and_never_persists_secrets(self):
         factory = build_factory(
             loadbalancer=InventoryLoadBalancerAPI(),
@@ -512,6 +976,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             }
         ]
         raw_data = {
+            "nics": [],
             "storages": [
                 {
                     "blockStorageInstanceNo": "storage-1",
@@ -524,7 +989,20 @@ class InfrastructureCollectorTests(unittest.TestCase):
             ]
         }
 
-        resources = collector.collect(servers, raw_data)
+        resources = collector.collect(
+            servers,
+            raw_data,
+            categories=(
+                "SERVER",
+                "BLOCK_STORAGE",
+                "LOAD_BALANCER",
+                "NAS",
+                "CLOUD_DB",
+                "KUBERNETES",
+                "CDN",
+                "OBJECT_STORAGE",
+            ),
+        )
 
         self.assertEqual(
             [resource["category"] for resource in resources],

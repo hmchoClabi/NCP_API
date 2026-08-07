@@ -140,12 +140,26 @@ class PortalIntegrationTests(unittest.TestCase):
                 cipher,
                 admin_id,
             )
+            self.repository.update_tenant_report_settings(
+                tenant_id,
+                {
+                    "sections": ["billing"],
+                    "resource_categories": ["SERVER"],
+                    "monitoring_categories": [],
+                    "diagram": {"enabled": False, "max_nodes": 40},
+                },
+                admin_id,
+            )
             customer, credentials = self.repository.account_credentials(
                 account_id, cipher
             )
 
         self.assertEqual(customer.customer_id, self.TENANT_CODE)
         self.assertEqual(customer.cloud_account_id, account_id)
+        self.assertTrue(customer.report_options.section_enabled("billing"))
+        self.assertFalse(
+            customer.report_options.section_enabled("activity_history")
+        )
         self.assertEqual(credentials.access_key, "PORTAL-ACCESS-KEY")
         self.assertEqual(credentials.secret_key, "PORTAL-SECRET-KEY")
 

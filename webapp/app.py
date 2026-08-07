@@ -16,6 +16,16 @@ from flask import (
 
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
+from app.report_options import (
+    DIAGRAM_BOOLEAN_OPTIONS,
+    DIAGRAM_OPTION_LABELS,
+    MONITORING_CATEGORY_OPTIONS,
+    REPORT_SECTION_LABELS,
+    REPORT_SECTION_OPTIONS,
+    RESOURCE_CATEGORY_LABELS,
+    RESOURCE_CATEGORY_OPTIONS,
+    default_report_options,
+)
 from database.config import DatabaseSettings
 from webapp.repository import PortalRepository
 from webapp.jobs import ReportJobRepository
@@ -364,6 +374,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         tenant = repository.tenant_detail(tenant_id)
         if not tenant:
             abort(404)
+        tenant.setdefault("report_options", default_report_options())
         return render_template(
             "customer_detail.html",
             tenant=tenant,
@@ -375,7 +386,42 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             jobs=repository.jobs_for_tenants([tenant_id]),
             can_manage_schedules=_can_manage_tenant(g.user, tenant_id),
             can_delete_reports=True,
+            report_section_options=REPORT_SECTION_OPTIONS,
+            report_section_labels=REPORT_SECTION_LABELS,
+            resource_category_options=RESOURCE_CATEGORY_OPTIONS,
+            resource_category_labels=RESOURCE_CATEGORY_LABELS,
+            monitoring_category_options=MONITORING_CATEGORY_OPTIONS,
+            diagram_boolean_options=DIAGRAM_BOOLEAN_OPTIONS,
+            diagram_option_labels=DIAGRAM_OPTION_LABELS,
         )
+
+    @app.post("/msp/customer/<tenant_id>/report-settings")
+    @_msp_admin_required
+    def update_customer_report_settings(tenant_id: str):
+        try:
+            diagram = {
+                key: request.form.get(f"diagram_{key}") == "true"
+                for key in DIAGRAM_BOOLEAN_OPTIONS
+            }
+            diagram["max_nodes"] = request.form.get("diagram_max_nodes", "120")
+            repository.update_tenant_report_settings(
+                tenant_id,
+                {
+                    "sections": request.form.getlist("sections"),
+                    "resource_categories": request.form.getlist(
+                        "resource_categories"
+                    ),
+                    "monitoring_categories": request.form.getlist(
+                        "monitoring_categories"
+                    ),
+                    "diagram": diagram,
+                },
+                str(g.user["id"]),
+            )
+            flash("고객별 보고서 출력 설정을 저장했습니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_customer", tenant_id=tenant_id))
 
     @app.post("/msp/customer/<tenant_id>/credentials")
     @_msp_admin_required

@@ -31,6 +31,31 @@ class InfrastructureNormalizer:
         "KUBERNETES": "Kubernetes",
         "CDN": "CDN",
         "OBJECT_STORAGE": "Object Storage",
+        "VPC": "VPC",
+        "SUBNET": "Subnet",
+        "NAT_GATEWAY": "NAT Gateway",
+        "PUBLIC_IP": "Public IP",
+        "VPC_PEERING": "VPC Peering",
+        "VIRTUAL_PRIVATE_GATEWAY": "Virtual Private Gateway",
+        "AUTO_SCALING": "Auto Scaling",
+        "GLOBAL_EDGE": "Global Edge",
+        "GLOBAL_DNS": "Global DNS",
+        "GLOBAL_TRAFFIC_MANAGER": "Global Traffic Manager",
+        "API_GATEWAY": "API Gateway",
+        "CERTIFICATE": "Certificate",
+        "BLOCK_STORAGE_SNAPSHOT": "Block Storage Snapshot",
+        "SERVER_IMAGE": "Server Image",
+        "BACKUP": "Backup",
+        "ARCHIVE_STORAGE": "Archive Storage",
+        "SEARCH_ENGINE": "Search Engine Service",
+        "DATA_STREAMING": "Cloud Data Streaming Service",
+        "CLOUD_HADOOP": "Cloud Hadoop",
+        "DATA_STREAM": "Data Stream",
+        "CLOUD_FUNCTIONS": "Cloud Functions",
+        "CONTAINER_REGISTRY": "Container Registry",
+        "SECURITY_SERVICE": "Security Service",
+        "IPSEC_VPN": "IPsec VPN",
+        "CLOUD_CONNECT": "Cloud Connect",
     }
     CATEGORY_ORDER = {
         category: index
@@ -41,6 +66,15 @@ class InfrastructureNormalizer:
         "CDB": "CLOUD_DB",
         "NKS": "KUBERNETES",
         "LB": "LOAD_BALANCER",
+        "NATGW": "NAT_GATEWAY",
+        "VPCPEERING": "VPC_PEERING",
+        "VGW": "VIRTUAL_PRIVATE_GATEWAY",
+        "AUTOSCALING": "AUTO_SCALING",
+        "GTM": "GLOBAL_TRAFFIC_MANAGER",
+        "APIGW": "API_GATEWAY",
+        "SNAPSHOT": "BLOCK_STORAGE_SNAPSHOT",
+        "IPSECVPN": "IPSEC_VPN",
+        "CLOUDCONNECT": "CLOUD_CONNECT",
     }
 
     _SENSITIVE_KEY_FRAGMENTS = (
@@ -60,7 +94,6 @@ class InfrastructureNormalizer:
         "ALARM",
         "EVENT",
         "IAM",
-        "MONITORING",
         "POLICY",
         "ROLE",
         "RULE",
@@ -108,6 +141,35 @@ class InfrastructureNormalizer:
         ),
         "CDN": frozenset({"CDN", "CDNPLUS", "GCDN", "GLOBALCDN"}),
         "OBJECT_STORAGE": frozenset({"OBJECTSTORAGE"}),
+        "VPC": frozenset({"VPC"}),
+        "SUBNET": frozenset({"VPC"}),
+        "NAT_GATEWAY": frozenset({"VPC"}),
+        "PUBLIC_IP": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
+        "VPC_PEERING": frozenset({"VPC"}),
+        "VIRTUAL_PRIVATE_GATEWAY": frozenset({"VPC"}),
+        "AUTO_SCALING": frozenset({"AUTOSCALING", "VPCAUTOSCALING"}),
+        "GLOBAL_EDGE": frozenset({"GLOBALEDGE"}),
+        "GLOBAL_DNS": frozenset({"GLOBALDNS"}),
+        "GLOBAL_TRAFFIC_MANAGER": frozenset({"GLOBALTRAFFICMANAGER"}),
+        "API_GATEWAY": frozenset({"APIGATEWAY"}),
+        "CERTIFICATE": frozenset({"CERTIFICATEMANAGER"}),
+        "BLOCK_STORAGE_SNAPSHOT": frozenset(
+            {"SERVER", "VPCSERVER", "VSERVER"}
+        ),
+        "SERVER_IMAGE": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
+        "BACKUP": frozenset({"BACKUP", "VPCBACKUP"}),
+        "ARCHIVE_STORAGE": frozenset({"ARCHIVESTORAGE"}),
+        "SEARCH_ENGINE": frozenset({"SEARCHENGINE", "VPCSEARCHENGINE"}),
+        "DATA_STREAMING": frozenset({"CLOUDDATASTREAMINGSERVICE"}),
+        "CLOUD_HADOOP": frozenset({"CLOUDHADOOP", "VPCCLOUDHADOOP"}),
+        "DATA_STREAM": frozenset({"DATASTREAM", "VPCDATASTREAM"}),
+        "CLOUD_FUNCTIONS": frozenset({"CLOUDFUNCTIONS", "VPCCLOUDFUNCTIONS"}),
+        "CONTAINER_REGISTRY": frozenset({"CONTAINERREGISTRY"}),
+        "SECURITY_SERVICE": frozenset(
+            {"SECURITYMONITORING", "VPCSECURITYMONITORING"}
+        ),
+        "IPSEC_VPN": frozenset({"IPSECVPN", "VPCIPSECVPN"}),
+        "CLOUD_CONNECT": frozenset({"CLOUDCONNECT", "VPCCLOUDCONNECT"}),
     }
     _RESOURCE_MANAGER_TYPES = {
         "SERVER": frozenset(
@@ -145,6 +207,31 @@ class InfrastructureNormalizer:
             }
         ),
         "OBJECT_STORAGE": frozenset({"BUCKET", "OBJECTSTORAGEBUCKET"}),
+        "VPC": frozenset({"VPC"}),
+        "SUBNET": frozenset({"SUBNET"}),
+        "NAT_GATEWAY": frozenset({"NATGATEWAY"}),
+        "PUBLIC_IP": frozenset({"PUBLICIP"}),
+        "VPC_PEERING": frozenset({"VPCPEERING"}),
+        "VIRTUAL_PRIVATE_GATEWAY": frozenset({"VIRTUALPRIVATEGATEWAY"}),
+        "AUTO_SCALING": frozenset({"AUTOSCALINGGROUP"}),
+        "GLOBAL_EDGE": frozenset({"EDGE"}),
+        "GLOBAL_DNS": frozenset({"DOMAIN"}),
+        "GLOBAL_TRAFFIC_MANAGER": frozenset({"PROFILE"}),
+        "API_GATEWAY": frozenset({"API"}),
+        "CERTIFICATE": frozenset({"CERTIFICATE"}),
+        "BLOCK_STORAGE_SNAPSHOT": frozenset({"SNAPSHOT"}),
+        "SERVER_IMAGE": frozenset({"SERVERIMAGE"}),
+        "BACKUP": frozenset({"DBINSTANCE", "RESOURCE", "STORAGE"}),
+        "ARCHIVE_STORAGE": frozenset({"CONTAINER"}),
+        "SEARCH_ENGINE": frozenset({"CLUSTER"}),
+        "DATA_STREAMING": frozenset({"CLUSTER"}),
+        "CLOUD_HADOOP": frozenset({"CLUSTER"}),
+        "DATA_STREAM": frozenset({"TOPIC"}),
+        "CLOUD_FUNCTIONS": frozenset({"NAMESPACE"}),
+        "CONTAINER_REGISTRY": frozenset({"REGISTRY"}),
+        "SECURITY_SERVICE": frozenset({"AV", "DDOS", "IDS", "IPS", "WAF"}),
+        "IPSEC_VPN": frozenset({"IPSECVPNGATEWAY"}),
+        "CLOUD_CONNECT": frozenset({"CLOUDCONNECT"}),
     }
 
     _CDB_SPECS = {
@@ -178,10 +265,74 @@ class InfrastructureNormalizer:
     def normalize_servers(
         self,
         servers: Iterable[Mapping[str, Any]],
+        network_interfaces: Iterable[Mapping[str, Any]] = (),
     ) -> List[Dict[str, Any]]:
+        nics_by_server: Dict[str, List[Dict[str, Any]]] = {}
+        for nic in self._dict_items(network_interfaces):
+            server_no = self._string(nic.get("serverInstanceNo"))
+            if server_no:
+                nics_by_server.setdefault(server_no, []).append(nic)
+
         result = []
         for server in self._dict_items(servers):
             raw_server = self._mapping(server.get("raw_server"))
+            nics = self._dict_items(server.get("nics"))
+            server_no = self._string(
+                self._value(server, "server_id", "serverInstanceNo")
+            )
+            known_nic_ids = {
+                self._string(self._value(nic, "nic_id", "networkInterfaceNo"))
+                for nic in nics
+            }
+            for nic in nics_by_server.get(server_no or "", []):
+                nic_no = self._string(nic.get("networkInterfaceNo"))
+                if nic_no and nic_no in known_nic_ids:
+                    continue
+                nics.append(nic)
+                if nic_no:
+                    known_nic_ids.add(nic_no)
+            network_interface_nos = self._unique_values(
+                self._value(nic, "nic_id", "networkInterfaceNo")
+                for nic in nics
+            )
+            all_private_ips = self._unique_values(
+                ip
+                for nic in nics
+                for ip in self._nic_private_ips(nic)
+            )
+            if not all_private_ips:
+                all_private_ips = self._unique_values(
+                    [self._value(server, "private_ip", "privateIp")]
+                )
+            relation_specs = [
+                ("BELONGS_TO", "VPC", self._value(server, "vpc_id", "vpcNo"), "vpcNo"),
+                (
+                    "BELONGS_TO",
+                    "SUBNET",
+                    self._value(server, "subnet_id", "subnetNo"),
+                    "subnetNo",
+                ),
+            ]
+            relation_specs.extend(
+                (
+                    "USES",
+                    "NETWORK_INTERFACE",
+                    network_interface_no,
+                    "networkInterfaceNoList[]",
+                )
+                for network_interface_no in network_interface_nos
+            )
+            for nic in nics:
+                subnet_no = self._value(nic, "subnet_id", "subnetNo")
+                if subnet_no is not None:
+                    relation_specs.append(
+                        (
+                            "BELONGS_TO",
+                            "SUBNET",
+                            subnet_no,
+                            "networkInterfaceList[].subnetNo",
+                        )
+                    )
             result.append(
                 self._resource(
                     category="SERVER",
@@ -243,6 +394,31 @@ class InfrastructureNormalizer:
                         ),
                         "storage_count": len(
                             self._as_list(server.get("storages"))
+                        ),
+                        "server_instance_no": self._value(
+                            server,
+                            "server_id",
+                            "serverInstanceNo",
+                        ),
+                        "private_ip": self._value(
+                            server,
+                            "private_ip",
+                            "privateIp",
+                        ),
+                        "public_ip": self._value(
+                            server,
+                            "public_ip",
+                            "publicIp",
+                        ),
+                        "all_private_ips": all_private_ips,
+                        "network_interface_no": self._value(
+                            server,
+                            "nic_id",
+                            "networkInterfaceNo",
+                        ),
+                        "network_interface_nos": network_interface_nos,
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
                         ),
                     },
                 )
@@ -323,6 +499,11 @@ class InfrastructureNormalizer:
                             "server_id",
                             "serverInstanceNo",
                         ),
+                        "server_instance_no": self._value(
+                            storage,
+                            "server_id",
+                            "serverInstanceNo",
+                        ),
                         "encrypted": self._value(
                             storage,
                             "is_encrypted",
@@ -338,6 +519,18 @@ class InfrastructureNormalizer:
                             storage,
                             "throughput_mbps",
                         ),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "ATTACHED_TO",
+                                "SERVER",
+                                self._value(
+                                    storage,
+                                    "server_id",
+                                    "serverInstanceNo",
+                                ),
+                                "serverInstanceNo",
+                            )
+                        ),
                     },
                 )
             )
@@ -346,9 +539,101 @@ class InfrastructureNormalizer:
     def normalize_load_balancers(
         self,
         load_balancers: Iterable[Mapping[str, Any]],
+        target_groups: Iterable[Mapping[str, Any]] = (),
+        targets_by_group: Optional[
+            Mapping[str, Iterable[Mapping[str, Any]]]
+        ] = None,
     ) -> List[Dict[str, Any]]:
+        group_map: Dict[str, List[Dict[str, Any]]] = {}
+        for group in self._dict_items(target_groups):
+            load_balancer_no = self._string(
+                group.get("loadBalancerInstanceNo")
+            )
+            if load_balancer_no:
+                group_map.setdefault(load_balancer_no, []).append(group)
+        normalized_targets_by_group = (
+            targets_by_group if isinstance(targets_by_group, Mapping) else {}
+        )
+
         result = []
         for load_balancer in self._dict_items(load_balancers):
+            load_balancer_no = self._string(
+                load_balancer.get("loadBalancerInstanceNo")
+            )
+            associated_groups = group_map.get(load_balancer_no or "", [])
+            target_group_nos = self._unique_values(
+                group.get("targetGroupNo") for group in associated_groups
+            )
+            group_target_server_instance_nos = []
+            listed_target_server_instance_nos = []
+            for group in associated_groups:
+                target_type = self._code_value(group.get("targetType"))
+                if str(target_type or "").upper() != "VSVR":
+                    continue
+                group_target_server_instance_nos.extend(
+                    self._as_list(group.get("targetNoList"))
+                )
+                group_no = self._string(group.get("targetGroupNo"))
+                target_items = self._dict_items(
+                    normalized_targets_by_group.get(group_no or "", [])
+                )
+                listed_target_server_instance_nos.extend(
+                    target.get("targetNo") for target in target_items
+                )
+            group_target_server_instance_nos = self._unique_values(
+                group_target_server_instance_nos
+            )
+            listed_target_server_instance_nos = self._unique_values(
+                listed_target_server_instance_nos
+            )
+            target_server_instance_nos = self._unique_values(
+                [
+                    *group_target_server_instance_nos,
+                    *listed_target_server_instance_nos,
+                ]
+            )
+            subnet_nos = self._unique_values(
+                load_balancer.get("subnetNoList") or []
+            )
+            relation_specs = [
+                (
+                    "BELONGS_TO",
+                    "VPC",
+                    load_balancer.get("vpcNo"),
+                    "vpcNo",
+                )
+            ]
+            relation_specs.extend(
+                ("BELONGS_TO", "SUBNET", subnet_no, "subnetNoList[]")
+                for subnet_no in subnet_nos
+            )
+            relation_specs.extend(
+                (
+                    "USES",
+                    "TARGET_GROUP",
+                    target_group_no,
+                    "targetGroupList[].targetGroupNo",
+                )
+                for target_group_no in target_group_nos
+            )
+            relation_specs.extend(
+                (
+                    "ROUTES_TO",
+                    "SERVER",
+                    server_instance_no,
+                    "targetGroupList[].targetNoList[]",
+                )
+                for server_instance_no in group_target_server_instance_nos
+            )
+            relation_specs.extend(
+                (
+                    "ROUTES_TO",
+                    "SERVER",
+                    server_instance_no,
+                    "targetList[].targetNo",
+                )
+                for server_instance_no in listed_target_server_instance_nos
+            )
             result.append(
                 self._resource(
                     category="LOAD_BALANCER",
@@ -379,6 +664,15 @@ class InfrastructureNormalizer:
                             load_balancer.get("throughputType")
                         ),
                         "vpc_no": load_balancer.get("vpcNo"),
+                        "subnet_nos": subnet_nos,
+                        "load_balancer_instance_no": load_balancer_no,
+                        "ip_addresses": self._unique_values(
+                            load_balancer.get("loadBalancerIpList") or []
+                        ),
+                        "target_group_nos": target_group_nos,
+                        "target_server_instance_nos": (
+                            target_server_instance_nos
+                        ),
                         "subnet_count": len(
                             self._as_list(
                                 load_balancer.get("subnetNoList")
@@ -386,6 +680,9 @@ class InfrastructureNormalizer:
                         ),
                         "idle_timeout_seconds": load_balancer.get(
                             "idleTimeout"
+                        ),
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
                         ),
                     },
                 )
@@ -427,6 +724,22 @@ class InfrastructureNormalizer:
                             "isSnapshotConfiguration"
                         ),
                         "encrypted": volume.get("isEncryptedVolume"),
+                        "vpc_no": volume.get("vpcNo"),
+                        "subnet_no": volume.get("subnetNo"),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "BELONGS_TO",
+                                "VPC",
+                                volume.get("vpcNo"),
+                                "vpcNo",
+                            ),
+                            (
+                                "BELONGS_TO",
+                                "SUBNET",
+                                volume.get("subnetNo"),
+                                "subnetNo",
+                            ),
+                        ),
                     },
                 )
             )
@@ -446,6 +759,50 @@ class InfrastructureNormalizer:
         for instance in self._dict_items(instances):
             servers = self._dict_items(instance.get(server_list_key, []))
             first_server = servers[0] if servers else {}
+            vpc_nos = self._unique_values(
+                [
+                    *(server.get("vpcNo") for server in servers),
+                    instance.get("vpcNo"),
+                ]
+            )
+            subnet_nos = self._unique_values(
+                [
+                    *(server.get("subnetNo") for server in servers),
+                    instance.get("subnetNo"),
+                ]
+            )
+            server_instance_nos = self._unique_values(
+                server.get(f"{prefix}ServerInstanceNo")
+                for server in servers
+            )
+            server_names = self._unique_values(
+                server.get(f"{prefix}ServerName") for server in servers
+            )
+            private_ips = self._unique_values(
+                server.get("privateIp") for server in servers
+            )
+            server_roles = self._unique_values(
+                self._code_value(server.get(f"{prefix}ServerRole"))
+                for server in servers
+            )
+            relation_specs = [
+                (
+                    "BELONGS_TO",
+                    "VPC",
+                    vpc_no,
+                    "cloudDbServerInstanceList[].vpcNo",
+                )
+                for vpc_no in vpc_nos
+            ]
+            relation_specs.extend(
+                (
+                    "BELONGS_TO",
+                    "SUBNET",
+                    subnet_no,
+                    "cloudDbServerInstanceList[].subnetNo",
+                )
+                for subnet_no in subnet_nos
+            )
             result.append(
                 self._resource(
                     category="CLOUD_DB",
@@ -466,18 +823,21 @@ class InfrastructureNormalizer:
                     details={
                         "engine": normalized_engine,
                         "server_count": len(servers),
-                        "server_instance_nos": [
-                            str(server[f"{prefix}ServerInstanceNo"])
-                            for server in servers
-                            if server.get(f"{prefix}ServerInstanceNo")
-                            is not None
-                        ],
+                        "server_instance_nos": server_instance_nos,
+                        "server_names": server_names,
+                        "private_ips": private_ips,
+                        "server_roles": server_roles,
                         "high_availability": instance.get("isHa"),
                         "generation": instance.get("generationCode"),
                         "vpc_no": first_server.get("vpcNo")
                         or instance.get("vpcNo"),
                         "subnet_no": first_server.get("subnetNo")
                         or instance.get("subnetNo"),
+                        "vpc_nos": vpc_nos,
+                        "subnet_nos": subnet_nos,
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
+                        ),
                         "cpu_count_total": self._sum_numbers(
                             server.get("cpuCount") for server in servers
                         ),
@@ -504,6 +864,20 @@ class InfrastructureNormalizer:
     ) -> List[Dict[str, Any]]:
         result = []
         for cluster in self._dict_items(clusters):
+            subnet_nos = self._unique_values(
+                [
+                    *self._as_list(cluster.get("subnetNoList")),
+                    cluster.get("subnetNo"),
+                    cluster.get("subnetLbNo"),
+                ]
+            )
+            relation_specs = [
+                ("BELONGS_TO", "VPC", cluster.get("vpcNo"), "vpcNo")
+            ]
+            relation_specs.extend(
+                ("BELONGS_TO", "SUBNET", subnet_no, "subnetNoList[]")
+                for subnet_no in subnet_nos
+            )
             result.append(
                 self._resource(
                     category="KUBERNETES",
@@ -527,12 +901,18 @@ class InfrastructureNormalizer:
                             self._as_list(cluster.get("nodePool"))
                         ),
                         "vpc_no": cluster.get("vpcNo"),
+                        "subnet_nos": subnet_nos,
+                        "cluster_uuid": cluster.get("uuid"),
+                        "cluster_no": cluster.get("instanceNo"),
                         "network_plugin": cluster.get("kubeNetworkPlugin")
                         or cluster.get("kuberNetworkPlugin"),
                         "regional": cluster.get("isRegional"),
                         "public_network": cluster.get("publicNetwork"),
                         "termination_protection": cluster.get(
                             "returnProtection"
+                        ),
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
                         ),
                     },
                 )
@@ -591,6 +971,473 @@ class InfrastructureNormalizer:
             )
         return result
 
+    def normalize_vpcs(
+        self,
+        vpcs: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        return [
+            self._resource(
+                category="VPC",
+                service_name="VPC",
+                resource_type="VPC",
+                resource_id=item.get("vpcNo"),
+                resource_name=item.get("vpcName"),
+                status=self._code_name(item.get("vpcStatus")),
+                region_code=item.get("regionCode"),
+                zone_code=None,
+                platform="VPC",
+                create_time=item.get("createDate"),
+                details={
+                    "vpc_no": item.get("vpcNo"),
+                    "ipv4_cidr_block": item.get("ipv4CidrBlock"),
+                },
+            )
+            for item in self._dict_items(vpcs)
+        ]
+
+    def normalize_subnets(
+        self,
+        subnets: Iterable[Mapping[str, Any]],
+        route_evidence: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        evidence_by_subnet = (
+            route_evidence if isinstance(route_evidence, Mapping) else {}
+        )
+        target_categories = {
+            "NATGW": "NAT_GATEWAY",
+            "VPCPEERING": "VPC_PEERING",
+            "VGW": "VIRTUAL_PRIVATE_GATEWAY",
+        }
+        result = []
+        for item in self._dict_items(subnets):
+            subnet_no = self._string(item.get("subnetNo"))
+            evidence = self._mapping(
+                evidence_by_subnet.get(subnet_no or "", {})
+            )
+            route_table_nos = self._unique_values(
+                evidence.get("route_table_nos") or []
+            )
+            routes = self._dict_items(evidence.get("routes"))
+            relation_specs = [
+                ("BELONGS_TO", "VPC", item.get("vpcNo"), "vpcNo")
+            ]
+            route_target_nos = []
+            route_target_types = []
+            reference_only_target_types = []
+            for route in routes:
+                target_type = str(
+                    self._code_value(route.get("targetType")) or ""
+                ).upper()
+                target_no = route.get("targetNo")
+                if target_type:
+                    route_target_types.append(target_type)
+                target_category = target_categories.get(target_type)
+                if target_category and target_no is not None and str(
+                    target_no
+                ).strip():
+                    route_target_nos.append(target_no)
+                    relation_specs.append(
+                        (
+                            "ROUTES_TO",
+                            target_category,
+                            target_no,
+                            "routeList[].targetNo",
+                        )
+                    )
+                elif target_type:
+                    reference_only_target_types.append(target_type)
+
+            result.append(
+                self._resource(
+                    category="SUBNET",
+                    service_name="VPC",
+                    resource_type="Subnet",
+                    resource_id=subnet_no,
+                    resource_name=item.get("subnetName"),
+                    status=self._code_name(item.get("subnetStatus")),
+                    region_code=item.get("regionCode"),
+                    zone_code=item.get("zoneCode"),
+                    platform="VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "subnet_no": subnet_no,
+                        "vpc_no": item.get("vpcNo"),
+                        "ipv4_cidr_block": item.get("subnet"),
+                        "subnet_type": self._code_value(
+                            item.get("subnetType")
+                        ),
+                        "usage_type": self._code_value(
+                            item.get("usageType")
+                        ),
+                        "network_acl_no": item.get("networkAclNo"),
+                        "route_table_nos": route_table_nos,
+                        "route_target_nos": self._unique_values(
+                            route_target_nos
+                        ),
+                        "route_target_types": self._unique_values(
+                            route_target_types
+                        ),
+                        "reference_only_route_target_types": (
+                            self._unique_values(reference_only_target_types)
+                        ),
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_nat_gateways(
+        self,
+        gateways: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(gateways):
+            gateway_ips = self._dict_items(item.get("natGatewayIpList"))
+            public_ip_instance_nos = self._unique_values(
+                [
+                    item.get("publicIpInstanceNo"),
+                    *(ip.get("publicIpInstanceNo") for ip in gateway_ips),
+                ]
+            )
+            public_ips = self._unique_values(
+                [item.get("publicIp"), *(ip.get("publicIp") for ip in gateway_ips)]
+            )
+            private_ips = self._unique_values(
+                [
+                    item.get("privateIp"),
+                    *(ip.get("privateIp") for ip in gateway_ips),
+                ]
+            )
+            relation_specs = [
+                ("BELONGS_TO", "VPC", item.get("vpcNo"), "vpcNo"),
+                ("BELONGS_TO", "SUBNET", item.get("subnetNo"), "subnetNo"),
+            ]
+            relation_specs.extend(
+                (
+                    "USES",
+                    "PUBLIC_IP",
+                    public_ip_instance_no,
+                    "natGatewayIpList[].publicIpInstanceNo",
+                )
+                for public_ip_instance_no in public_ip_instance_nos
+            )
+            result.append(
+                self._resource(
+                    category="NAT_GATEWAY",
+                    service_name="VPC",
+                    resource_type="NATGateway",
+                    resource_id=item.get("natGatewayInstanceNo"),
+                    resource_name=item.get("natGatewayName"),
+                    status=item.get("natGatewayInstanceStatusName")
+                    or self._code_name(item.get("natGatewayInstanceStatus")),
+                    region_code=item.get("regionCode"),
+                    zone_code=item.get("zoneCode"),
+                    platform="VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "nat_gateway_instance_no": item.get(
+                            "natGatewayInstanceNo"
+                        ),
+                        "vpc_no": item.get("vpcNo"),
+                        "subnet_no": item.get("subnetNo"),
+                        "gateway_type": self._code_value(
+                            item.get("natGatewayType")
+                        ),
+                        "public_ips": public_ips,
+                        "private_ips": private_ips,
+                        "public_ip_instance_nos": public_ip_instance_nos,
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_vpc_peerings(
+        self,
+        peerings: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(peerings):
+            result.append(
+                self._resource(
+                    category="VPC_PEERING",
+                    service_name="VPC",
+                    resource_type="VPCPeering",
+                    resource_id=item.get("vpcPeeringInstanceNo"),
+                    resource_name=item.get("vpcPeeringName"),
+                    status=self._code_name(
+                        item.get("vpcPeeringInstanceStatus")
+                    ),
+                    region_code=item.get("regionCode"),
+                    zone_code=None,
+                    platform="VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "source_vpc_no": item.get("sourceVpcNo"),
+                        "target_vpc_no": item.get("targetVpcNo"),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "SOURCE_VPC",
+                                "VPC",
+                                item.get("sourceVpcNo"),
+                                "sourceVpcNo",
+                            ),
+                            (
+                                "TARGET_VPC",
+                                "VPC",
+                                item.get("targetVpcNo"),
+                                "targetVpcNo",
+                            ),
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_public_ips(
+        self,
+        public_ips: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(public_ips):
+            associated_server = self._mapping(
+                item.get("serverInstanceAssociatedWithPublicIp")
+            )
+            server_instance_no = item.get("serverInstanceNo") or (
+                associated_server.get("serverInstanceNo")
+            )
+            result.append(
+                self._resource(
+                    category="PUBLIC_IP",
+                    service_name="Server",
+                    resource_type="PublicIP",
+                    resource_id=item.get("publicIpInstanceNo"),
+                    resource_name=item.get("publicIp"),
+                    status=item.get("publicIpInstanceStatusName")
+                    or self._code_name(item.get("publicIpInstanceStatus")),
+                    region_code=item.get("regionCode"),
+                    zone_code=item.get("zoneCode")
+                    or self._mapping(item.get("zone")).get("zoneCode"),
+                    platform="VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "public_ip_instance_no": item.get(
+                            "publicIpInstanceNo"
+                        ),
+                        "public_ip": item.get("publicIp"),
+                        "private_ip": item.get("privateIp"),
+                        "server_instance_no": server_instance_no,
+                        "attached_server_id": server_instance_no,
+                        "vpc_no": item.get("vpcNo"),
+                        "associated": item.get("isAssociated"),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "ASSIGNED_TO",
+                                "SERVER",
+                                server_instance_no,
+                                "serverInstanceNo",
+                            ),
+                            (
+                                "BELONGS_TO",
+                                "VPC",
+                                item.get("vpcNo"),
+                                "vpcNo",
+                            ),
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_snapshots(
+        self,
+        snapshots: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(snapshots):
+            source_storage_no = item.get("originalBlockStorageInstanceNo")
+            result.append(
+                self._resource(
+                    category="BLOCK_STORAGE_SNAPSHOT",
+                    service_name="Server",
+                    resource_type="Snapshot",
+                    resource_id=item.get("blockStorageSnapshotInstanceNo"),
+                    resource_name=item.get("blockStorageSnapshotName"),
+                    status=item.get("blockStorageSnapshotInstanceStatusName")
+                    or self._code_name(
+                        item.get("blockStorageSnapshotInstanceStatus")
+                    ),
+                    region_code=item.get("regionCode"),
+                    zone_code=item.get("zoneCode"),
+                    platform="VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "block_storage_instance_no": source_storage_no,
+                        "snapshot_volume_size_gb": self._bytes_to_gb(
+                            item.get("blockStorageSnapshotVolumeSize")
+                        ),
+                        "encrypted": item.get(
+                            "isEncryptedOriginalBlockStorageVolume"
+                        ),
+                        "bootable": item.get("isBootable"),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "SNAPSHOT_OF",
+                                "BLOCK_STORAGE",
+                                source_storage_no,
+                                "originalBlockStorageInstanceNo",
+                            )
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_server_images(
+        self,
+        images: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(images):
+            original_server_no = item.get("originalServerInstanceNo")
+            result.append(
+                self._resource(
+                    category="SERVER_IMAGE",
+                    service_name="Server",
+                    resource_type="ServerImage",
+                    resource_id=item.get("memberServerImageInstanceNo"),
+                    resource_name=item.get("memberServerImageName"),
+                    status=item.get("memberServerImageInstanceStatusName")
+                    or self._code_name(
+                        item.get("memberServerImageInstanceStatus")
+                    ),
+                    region_code=item.get("regionCode"),
+                    zone_code=item.get("zoneCode"),
+                    platform=self._code_value(item.get("platformType"))
+                    or "VPC",
+                    create_time=item.get("createDate"),
+                    details={
+                        "server_instance_no": original_server_no,
+                        "original_server_instance_no": original_server_no,
+                        "block_storage_size_gb": self._bytes_to_gb(
+                            item.get("blockStorageSize")
+                        ),
+                        "explicit_relations": self._explicit_relations(
+                            (
+                                "IMAGE_OF",
+                                "SERVER",
+                                original_server_no,
+                                "originalServerInstanceNo",
+                            )
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_global_dns(
+        self,
+        domains: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        return [
+            self._resource(
+                category="GLOBAL_DNS",
+                service_name="Global DNS",
+                resource_type="Domain",
+                resource_id=item.get("id"),
+                resource_name=item.get("name"),
+                status=item.get("status"),
+                region_code=None,
+                zone_code=None,
+                platform="GLOBAL",
+                create_time=item.get("createdDate") or item.get("createDate"),
+                details={
+                    "domain_id": item.get("id"),
+                    "complete": item.get("completeYn"),
+                    "dnssec_enabled": item.get("dnssecYn"),
+                },
+            )
+            for item in self._dict_items(domains)
+        ]
+
+    def normalize_certificates(
+        self,
+        certificates: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        result = []
+        for item in self._dict_items(certificates):
+            used_instances = item.get("usedInstanceNoList")
+            if isinstance(used_instances, str):
+                used_instances = [
+                    part.strip()
+                    for part in used_instances.split(",")
+                    if part.strip()
+                ]
+            result.append(
+                self._resource(
+                    category="CERTIFICATE",
+                    service_name="Certificate Manager",
+                    resource_type="Certificate",
+                    resource_id=item.get("certificateNo"),
+                    resource_name=item.get("certificateName"),
+                    status=item.get("statusName") or item.get("statusCode"),
+                    region_code=None,
+                    zone_code=None,
+                    platform=item.get("domainCode"),
+                    create_time=item.get("regDate"),
+                    details={
+                        "certificate_no": item.get("certificateNo"),
+                        "certificate_type": item.get("certificateType"),
+                        "domain_address": item.get("domainAddress")
+                        or item.get("commonName"),
+                        "valid_start_date": item.get("validStartDate"),
+                        "valid_end_date": item.get("validEndDate"),
+                        "external": item.get("externalYn"),
+                        "used_instance_nos": self._unique_values(
+                            used_instances or []
+                        ),
+                    },
+                )
+            )
+        return result
+
+    def normalize_container_registries(
+        self,
+        registries: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        return [
+            self._resource(
+                category="CONTAINER_REGISTRY",
+                service_name="Container Registry",
+                resource_type="Registry",
+                resource_id=item.get("name"),
+                resource_name=item.get("name"),
+                status=item.get("status"),
+                region_code=item.get("regionCode"),
+                zone_code=None,
+                platform=None,
+                create_time=item.get("created"),
+                details={
+                    "registry_name": item.get("name"),
+                    "private_access_id": item.get("private_id"),
+                    "bucket_name": item.get("bucket"),
+                    "public_read": item.get("public_reg_status"),
+                    "scan_on_push_enabled": item.get(
+                        "scan_on_push_enabled"
+                    ),
+                    "storage_type": item.get("storage_type"),
+                    "client_access_enabled": item.get(
+                        "end_point_enabled"
+                    ),
+                },
+            )
+            for item in self._dict_items(registries)
+        ]
+
     def normalize_resource_manager(
         self,
         items: Iterable[Mapping[str, Any]],
@@ -607,6 +1454,7 @@ class InfrastructureNormalizer:
                 category,
                 product_name,
                 self._string(item.get("platformType")),
+                resource_type,
             )
             result.append(
                 self._resource(
@@ -617,14 +1465,19 @@ class InfrastructureNormalizer:
                     or product_name
                     or self.CATEGORY_LABELS[category],
                     resource_type=resource_type or category,
-                    resource_id=item.get("resourceId"),
+                    resource_id=item.get("resourceId") or item.get("nrn"),
                     resource_name=item.get("resourceName"),
                     status=None,
                     region_code=item.get("regionCode"),
                     zone_code=None,
                     platform=platform,
                     create_time=item.get("createTime"),
-                    details={"inventory_source": "RESOURCE_MANAGER"},
+                    details={
+                        "inventory_source": "RESOURCE_MANAGER",
+                        "source_product": product_name,
+                        "source_resource_type": resource_type,
+                        "source_nrn": item.get("nrn"),
+                    },
                 )
             )
         return result
@@ -634,8 +1487,7 @@ class InfrastructureNormalizer:
         resources: Iterable[Mapping[str, Any]],
     ) -> List[Dict[str, Any]]:
         result: List[Dict[str, Any]] = []
-        index_by_id: Dict[tuple[str, str], int] = {}
-        index_by_name: Dict[tuple[str, str, str, str], int] = {}
+        index_by_id: Dict[tuple[str, str, str], int] = {}
 
         for candidate in self._dict_items(resources):
             candidate_category = self._string(candidate.get("category"))
@@ -666,29 +1518,15 @@ class InfrastructureNormalizer:
 
             id_key = None
             if resource["resource_id"]:
-                id_key = (category, resource["resource_id"])
-            name_key = None
-            if resource["resource_name"]:
-                name_key = (
+                id_key = (
                     category,
                     self._string(resource.get("platform")) or "",
-                    self._string(resource.get("region_code")) or "",
-                    resource["resource_name"].casefold(),
+                    resource["resource_id"],
                 )
 
             existing_index = (
                 index_by_id.get(id_key) if id_key is not None else None
             )
-            if existing_index is None and name_key is not None:
-                name_index = index_by_name.get(name_key)
-                if name_index is not None:
-                    existing_id = result[name_index].get("resource_id")
-                    if not (
-                        resource["resource_id"]
-                        and existing_id
-                        and resource["resource_id"] != existing_id
-                    ):
-                        existing_index = name_index
 
             if existing_index is not None:
                 self._merge_missing(result[existing_index], resource)
@@ -698,8 +1536,6 @@ class InfrastructureNormalizer:
             current_index = len(result) - 1
             if id_key is not None:
                 index_by_id[id_key] = current_index
-            if name_key is not None:
-                index_by_name[name_key] = current_index
 
         return sorted(
             result,
@@ -733,6 +1569,7 @@ class InfrastructureNormalizer:
         category: str,
         product_name: Optional[str],
         platform_type: Optional[str],
+        resource_type: Optional[str] = None,
     ) -> Optional[str]:
         product = self._token(product_name)
         if category == "CLOUD_DB":
@@ -748,6 +1585,15 @@ class InfrastructureNormalizer:
                 return "GLOBAL_CDN"
             if "PLUS" in product:
                 return "CDN_PLUS"
+        if category == "SECURITY_SERVICE":
+            return self._string(resource_type) or self._string(platform_type)
+        if category in {
+            "AUTO_SCALING",
+            "CLOUD_FUNCTIONS",
+            "IPSEC_VPN",
+            "CLOUD_CONNECT",
+        }:
+            return "VPC" if product.startswith("VPC") else platform_type
         return platform_type
 
     def _resource(
@@ -765,6 +1611,10 @@ class InfrastructureNormalizer:
         create_time: Any,
         details: Mapping[str, Any],
     ) -> Dict[str, Any]:
+        normalized_details = dict(details)
+        normalized_details.setdefault("inventory_source", "SERVICE_API")
+        normalized_details.setdefault("source_product", service_name)
+        normalized_details.setdefault("source_resource_type", resource_type)
         return {
             "category": category,
             "category_label": self.CATEGORY_LABELS[category],
@@ -777,7 +1627,7 @@ class InfrastructureNormalizer:
             "zone_code": self._string(zone_code),
             "platform": self._string(platform),
             "create_time": create_time,
-            "details": self._sanitize_details(details),
+            "details": self._sanitize_details(normalized_details),
         }
 
     def _sanitize_details(self, value: Mapping[str, Any]) -> Dict[str, Any]:
@@ -790,6 +1640,11 @@ class InfrastructureNormalizer:
             ):
                 continue
             if item is None:
+                continue
+            if str(key) == "explicit_relations":
+                relations = self._sanitize_explicit_relations(item)
+                if relations:
+                    sanitized[str(key)] = relations
                 continue
             if isinstance(item, str) and "://" in item:
                 continue
@@ -809,6 +1664,85 @@ class InfrastructureNormalizer:
                 if safe_items:
                     sanitized[str(key)] = safe_items
         return sanitized
+
+    def _sanitize_explicit_relations(self, value: Any) -> List[Dict[str, str]]:
+        if not isinstance(value, (list, tuple)):
+            return []
+
+        result: List[Dict[str, str]] = []
+        seen = set()
+        for candidate in value[:1000]:
+            if not isinstance(candidate, Mapping):
+                continue
+            relation_type = self._safe_relation_value(
+                candidate.get("type"),
+                maximum=64,
+            )
+            target_category = self._safe_relation_value(
+                candidate.get("target_category"),
+                maximum=64,
+            )
+            target_id = self._safe_relation_value(
+                candidate.get("target_id"),
+                maximum=256,
+            )
+            source_field = self._safe_relation_value(
+                candidate.get("source_field"),
+                maximum=160,
+            )
+            if not all(
+                (relation_type, target_category, target_id, source_field)
+            ):
+                continue
+            relation = {
+                "type": relation_type,
+                "target_category": target_category,
+                "target_id": target_id,
+                "source_field": source_field,
+            }
+            identity = tuple(relation.values())
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(relation)
+        return result
+
+    @staticmethod
+    def _safe_relation_value(value: Any, *, maximum: int) -> Optional[str]:
+        if value is None:
+            return None
+        rendered = str(value).strip()
+        if not rendered or "://" in rendered:
+            return None
+        return rendered[:maximum]
+
+    def _explicit_relations(
+        self,
+        *relations: tuple[str, str, Any, str],
+    ) -> List[Dict[str, str]]:
+        candidates = [
+            {
+                "type": relation_type,
+                "target_category": target_category,
+                "target_id": target_id,
+                "source_field": source_field,
+            }
+            for relation_type, target_category, target_id, source_field
+            in relations
+            if target_id is not None and str(target_id).strip()
+        ]
+        return self._sanitize_explicit_relations(candidates)
+
+    def _nic_private_ips(self, nic: Mapping[str, Any]) -> List[Any]:
+        normalized = self._as_list(nic.get("all_private_ips"))
+        if normalized:
+            return normalized
+        return [
+            self._value(nic, "primary_ip", "ip", "privateIp"),
+            *self._as_list(
+                self._value(nic, "secondary_ips", "secondaryIpList")
+            ),
+        ]
 
     def _merge_missing(
         self,
@@ -873,6 +1807,12 @@ class InfrastructureNormalizer:
         return value
 
     @staticmethod
+    def _code_value(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return value.get("code") or value.get("codeName")
+        return value
+
+    @staticmethod
     def _sum_numbers(values: Iterable[Any]) -> Optional[float]:
         numbers_found = [
             value
@@ -888,6 +1828,20 @@ class InfrastructureNormalizer:
         if not isinstance(value, numbers.Real) or isinstance(value, bool):
             return None
         return round(float(value) / (1024 ** 3), 2)
+
+    @staticmethod
+    def _unique_values(values: Iterable[Any]) -> List[Any]:
+        result = []
+        seen = set()
+        for value in values:
+            if value is None:
+                continue
+            rendered = str(value).strip()
+            if not rendered or rendered in seen:
+                continue
+            seen.add(rendered)
+            result.append(value)
+        return result
 
 
 __all__ = ["InfrastructureNormalizer"]

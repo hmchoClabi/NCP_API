@@ -17,6 +17,7 @@ class FakePortalRepository:
         self.permanently_deleted_tenants = []
         self.deleted_reports = []
         self.created_msp_users = []
+        self.updated_report_settings = []
 
     def session_user(self, session_token):
         if not session_token:
@@ -57,6 +58,10 @@ class FakePortalRepository:
 
     def account_tenant(self, account_id):
         return "tenant-1" if account_id == "account-1" else None
+
+    def update_tenant_report_settings(self, tenant_id, options, actor_id):
+        self.updated_report_settings.append((tenant_id, options, actor_id))
+        return options
 
     def tenant_detail(self, tenant_id):
         if tenant_id != "tenant-1":
@@ -552,6 +557,56 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("2026-08-03 09:05:00 KST".encode("utf-8"), response.data)
         self.assertIn("2분 5초".encode("utf-8"), response.data)
         self.assertIn("보고서 삭제".encode("utf-8"), response.data)
+        self.assertIn("고객별 보고서 출력 설정".encode("utf-8"), response.data)
+        self.assertNotIn(b'name="resource_categories" value="SECRET', response.data)
+
+    def test_msp_admin_can_update_customer_report_settings(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/report-settings",
+            data={
+                "csrf_token": "csrf-token",
+                "sections": ["billing", "infrastructure_diagram"],
+                "resource_categories": ["SERVER", "VPC"],
+                "monitoring_categories": ["SERVER"],
+                "diagram_enabled": "true",
+                "diagram_show_resource_name": "true",
+                "diagram_show_resource_id": "true",
+                "diagram_show_private_ip": "true",
+                "diagram_max_nodes": "80",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        tenant_id, options, actor_id = self.repository.updated_report_settings[0]
+        self.assertEqual((tenant_id, actor_id), ("tenant-1", "user-1"))
+        self.assertEqual(options["sections"], [
+            "billing", "infrastructure_diagram",
+        ])
+        self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
+        self.assertTrue(options["diagram"]["show_resource_id"])
+        self.assertFalse(options["diagram"]["show_public_ip"])
+
+    def test_customer_viewer_cannot_update_report_settings(self):
+        original_session_user = self.repository.session_user
+
+        def customer_viewer(session_token):
+            user = original_session_user(session_token)
+            if user:
+                user["platform_roles"] = []
+            return user
+
+        self.repository.session_user = customer_viewer
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/report-settings",
+            data={"csrf_token": "csrf-token", "sections": "billing"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.repository.updated_report_settings, [])
 
     def test_msp_account_can_delete_report(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

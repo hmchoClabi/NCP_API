@@ -49,10 +49,12 @@ def test_database_backups_support_a_replacement_claim_and_are_verified():
 
     assert ".Values.backups.existingClaim" in backup
     assert ".Values.backups.createClaim" in storage
+    assert "(not .Values.backups.existingClaim)" in storage
     assert 'pg_restore --list "$tmpfile"' in backup
     assert 'mv "$tmpfile" "$finalfile"' in backup
     assert "'ncp-report-*.dump' -mtime +" in backup
     assert "existingClaim: ncp-report-backups-v2" in pilot_values
+    assert "createClaim: false" in pilot_values
 
 
 def test_runtime_and_migration_images_are_separate():
@@ -86,8 +88,8 @@ def test_forced_test_customer_deletion_is_audited():
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "130"' in values
-    assert 'REPORT_SCHEMA_VERSION:-130' in (
+    assert 'schemaVersion: "140"' in values
+    assert 'REPORT_SCHEMA_VERSION:-140' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
 
@@ -113,6 +115,33 @@ def test_organization_account_billing_is_migrated():
     assert "billing_account_cost_facts" in migration
     assert "member_no" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
+
+
+def test_tenant_report_settings_are_migrated_with_rls():
+    migration = (
+        ROOT / "database" / "schema" / "140_tenant_report_settings.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "control.tenant_report_settings" in migration
+    assert "settings jsonb NOT NULL" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "tenant_report_settings_public_worker_access" in migration
+    assert "tenant_report_settings_gov_worker_access" in migration
+    assert migration.index("ENABLE ROW LEVEL SECURITY") < migration.index(
+        "GRANT SELECT ON control.tenant_report_settings"
+    )
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE" not in migration
+    assert "BEGIN;" in migration
+    assert "COMMIT;" in migration
+    assert "VALUES ('140'" in migration
+
+
+def test_sourcebuild_deployment_waits_for_migration_job():
+    script = (
+        ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert '"--wait-for-jobs"' in script
 
 
 def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():

@@ -1,7 +1,9 @@
 from app.apifactory import APIFactory
 from app.customer import CustomerProfile
+from app.infrastructure_topology import InfrastructureTopologyBuilder
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
+from app.report_options import ReportOptions
 from collectors import (
     ServerCollector,
     InsightMetricCollector,
@@ -144,8 +146,8 @@ class ReportRunner:
         start_kst = self._as_kst(start)
         end_kst = self._as_kst(end)
         effective_end = end_kst - timedelta(milliseconds=1)
-        start_text = start_kst.strftime("%Y-%m-%d %H:%M:%S")
-        end_text = end_kst.strftime("%Y-%m-%d %H:%M:%S")
+        start_text = self._format_period_boundary(start_kst)
+        end_text = self._format_period_boundary(end_kst)
 
         return {
             "period_type": "datetime_range",
@@ -165,6 +167,14 @@ class ReportRunner:
             "is_closed_month": False,
             "billing_scope": "date_only",
         }
+
+    @staticmethod
+    def _format_period_boundary(value: datetime) -> str:
+        timespec = "milliseconds" if value.microsecond else "seconds"
+        return value.replace(tzinfo=None).isoformat(
+            sep=" ",
+            timespec=timespec,
+        )
 
     def build_period(
         self,
@@ -277,6 +287,284 @@ class ReportRunner:
             "calculated_at": datetime.now(self.KST).isoformat(timespec="seconds"),
         }
 
+    def _selected_report_options(self) -> ReportOptions:
+        customer = getattr(self, "customer", None)
+        return ReportOptions.from_value(
+            getattr(customer, "report_options", None)
+        )
+
+    def _now_kst_iso(self) -> str:
+        return datetime.now(self.KST).isoformat(timespec="microseconds")
+
+    def _period_bounds_kst(
+        self,
+        period: Dict[str, Any],
+    ) -> tuple[datetime, datetime]:
+        """Return canonical ``[start, end)`` report bounds in KST."""
+        period_start = self._parse_kst_datetime(period["start_dt"])
+        period_end = self._parse_kst_datetime(period["end_dt"])
+        if not period.get("end_exclusive"):
+            period_end += timedelta(seconds=1)
+        if period_start >= period_end:
+            raise ValueError("Report period is invalid.")
+        return period_start, period_end
+
+    def _snapshot_eligibility_window(
+        self,
+        period: Dict[str, Any],
+        reference_at: Any,
+    ) -> Optional[Dict[str, datetime]]:
+        """Return the report-period window observed up to ``reference_at``."""
+        try:
+            period_start, period_end = self._period_bounds_kst(period)
+            requested_reference = self._parse_kst_datetime(str(reference_at))
+        except (KeyError, TypeError, ValueError):
+            return None
+        if requested_reference < period_start:
+            return None
+
+        reference = min(
+            requested_reference,
+            period_end - timedelta(microseconds=1),
+        )
+        eligible_start = period_start
+        eligible_end = min(
+            period_end,
+            reference + timedelta(microseconds=1),
+        )
+        if eligible_start >= eligible_end:
+            return None
+        return {
+            "reference_at": reference,
+            "eligible_start": eligible_start,
+            "eligible_end": eligible_end,
+        }
+
+    @staticmethod
+    def _snapshot_window_metadata(
+        window: Optional[Dict[str, datetime]],
+        observed_at: Any = None,
+    ) -> Dict[str, Any]:
+        if not window:
+            return {
+                "reference_at": None,
+                "eligible_start": None,
+                "eligible_end": None,
+                "snapshot_age_seconds": None,
+            }
+        metadata: Dict[str, Any] = {
+            key: window[key].isoformat()
+            for key in ("reference_at", "eligible_start", "eligible_end")
+        }
+        metadata["snapshot_age_seconds"] = None
+        if isinstance(observed_at, datetime):
+            metadata["snapshot_age_seconds"] = max(
+                0,
+                int((window["reference_at"] - observed_at).total_seconds()),
+            )
+        return metadata
+
+    def _snapshot_observed_in_window(
+        self,
+        period: Dict[str, Any],
+        observed_at: Any,
+        reference_at: Any,
+    ) -> bool:
+        try:
+            observed = self._parse_kst_datetime(str(observed_at))
+        except (TypeError, ValueError):
+            return False
+        window = self._snapshot_eligibility_window(period, reference_at)
+        return bool(
+            window
+            and window["eligible_start"] <= observed < window["eligible_end"]
+        )
+
+    def _period_contains_timestamp(
+        self,
+        period: Dict[str, Any],
+        timestamp: Any,
+    ) -> bool:
+        try:
+            observed_at = self._parse_kst_datetime(str(timestamp))
+            period_start, period_end = self._period_bounds_kst(period)
+        except (KeyError, TypeError, ValueError):
+            return False
+        return period_start <= observed_at < period_end
+
+    def _load_period_infrastructure_snapshot(
+        self,
+        period: Dict[str, Any],
+        customer: Dict[str, Any],
+        reference_at: Any,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        repository = getattr(self, "report_repository", None)
+        loader = getattr(
+            repository,
+            "load_period_infrastructure_snapshot",
+            None,
+        )
+        if not callable(loader):
+            return None, None
+        try:
+            snapshot = loader(
+                period,
+                customer,
+                reference_at=reference_at,
+            )
+        except Exception as exc:
+            return None, {
+                "collector": "InfrastructureSnapshotRepository",
+                "stage": "historical_snapshot_lookup",
+                "target_type": "infrastructure",
+                "api": "postgresql",
+                "severity": "warning",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+        if not isinstance(snapshot, dict):
+            return None, None
+
+        snapshot_reference = snapshot.get("_snapshot_reference")
+        if not isinstance(snapshot_reference, dict):
+            snapshot_reference = {}
+        snapshot_metadata = snapshot.get("collection_metadata")
+        infrastructure_metadata = (
+            snapshot_metadata.get("infrastructure")
+            if isinstance(snapshot_metadata, dict)
+            else None
+        )
+        if not isinstance(infrastructure_metadata, dict):
+            infrastructure_metadata = {}
+        observed_at = (
+            snapshot_reference.get("observed_at")
+            or infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+        )
+        effective_reference = (
+            snapshot_reference.get("reference_at") or reference_at
+        )
+        if not self._snapshot_observed_in_window(
+            period,
+            observed_at,
+            effective_reference,
+        ):
+            return None, {
+                "collector": "InfrastructureSnapshotRepository",
+                "stage": "historical_snapshot_validation",
+                "target_type": "infrastructure",
+                "severity": "warning",
+                "code": "SNAPSHOT_OUTSIDE_REFERENCE_WINDOW",
+                "message": (
+                    "저장된 인프라 스냅샷이 보고 기준일의 허용 범위를 "
+                    "벗어나 사용하지 않았습니다."
+                ),
+            }
+        return snapshot, None
+
+    def _build_period_topology(
+        self,
+        *,
+        period: Dict[str, Any],
+        infrastructure: List[Dict[str, Any]],
+        collection_metadata: Dict[str, Any],
+        report_options: ReportOptions,
+    ) -> Dict[str, Any]:
+        infrastructure_metadata = collection_metadata.get("infrastructure")
+        if not isinstance(infrastructure_metadata, dict):
+            infrastructure_metadata = {}
+        observed_at = (
+            infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+        )
+        source = str(infrastructure_metadata.get("source") or "UNAVAILABLE")
+        reference_at = (
+            infrastructure_metadata.get("reference_at")
+            or self._now_kst_iso()
+        )
+        window = self._snapshot_eligibility_window(period, reference_at)
+        try:
+            parsed_observed_at = self._parse_kst_datetime(str(observed_at))
+        except (TypeError, ValueError):
+            parsed_observed_at = None
+        window_metadata = self._snapshot_window_metadata(
+            window,
+            parsed_observed_at,
+        )
+        if (
+            not observed_at
+            or not self._snapshot_observed_in_window(
+                period,
+                observed_at,
+                reference_at,
+            )
+        ):
+            return {
+                "nodes": [],
+                "edges": [],
+                "unmapped_node_ids": [],
+                "unresolved_node_ids": [],
+                "warnings": [{
+                    "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
+                    "message": (
+                        "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
+                        "현재 구성을 대신 그리지 않았습니다."
+                    ),
+                    "source": "stored_report_snapshot",
+                    "confidence": "UNAVAILABLE",
+                }],
+                "summary": {
+                    "representative_node_count": 0,
+                    "supporting_node_count": 0,
+                    "verified_edge_count": 0,
+                    "total_verified_edge_count": 0,
+                    "unmapped_resource_count": 0,
+                    "unresolved_reference_count": 0,
+                    "collected_at": observed_at,
+                    "max_nodes": report_options.diagram_option("max_nodes"),
+                    "truncated": False,
+                    "omitted_node_count": 0,
+                    "confidence": "UNAVAILABLE",
+                    "relationship_confidence": "UNAVAILABLE",
+                    "relationship_coverage": "UNAVAILABLE",
+                    "inventory_completeness": "UNAVAILABLE",
+                    "collection_issue_count": 1,
+                    "time_basis": "REPORT_PERIOD",
+                    "snapshot_source": source,
+                    "period_start": period.get("start_dt"),
+                    "period_end": period.get("end_dt"),
+                    **window_metadata,
+                },
+            }
+
+        topology = InfrastructureTopologyBuilder().build(
+            infrastructure,
+            collected_at=str(observed_at),
+            max_nodes=report_options.diagram_option("max_nodes"),
+            allowed_reference_categories=report_options.to_dict()[
+                "resource_categories"
+            ],
+            inventory_completeness=str(
+                infrastructure_metadata.get("inventory_completeness")
+                or "UNKNOWN"
+            ),
+            collection_issue_count=(
+                infrastructure_metadata.get("collection_issue_count") or 0
+            ),
+        )
+        summary = topology.setdefault("summary", {})
+        summary.update({
+            "time_basis": "REPORT_PERIOD",
+            "snapshot_source": source,
+            "period_start": period.get("start_dt"),
+            "period_end": period.get("end_dt"),
+            "source_report_run_id": infrastructure_metadata.get(
+                "source_report_run_id"
+            ),
+            **window_metadata,
+        })
+        return topology
+
     def run(
         self,
         target_month: Optional[str] = None,
@@ -298,51 +586,620 @@ class ReportRunner:
         period.update(billing_context)
 
         self.print_period_summary(period)
+        report_options = self._selected_report_options()
+        report_options_snapshot = report_options.to_dict()
+        customer_snapshot = (
+            getattr(self, "customer", None).to_dict()
+            if getattr(self, "customer", None) is not None
+            else {}
+        )
+        selected_resource_categories = set(
+            report_options_snapshot["resource_categories"]
+        )
+        selected_monitoring_categories = set(
+            report_options_snapshot["monitoring_categories"]
+        )
+        inventory_enabled = report_options.section_enabled(
+            "infrastructure_inventory"
+        )
+        diagram_enabled = (
+            report_options.section_enabled("infrastructure_diagram")
+            and bool(report_options.diagram_option("enabled", True))
+        )
+        monitoring_enabled = report_options.section_enabled("monitoring")
+        active_monitoring_categories = (
+            selected_monitoring_categories if monitoring_enabled else set()
+        )
+        monitored_infrastructure_categories = (
+            active_monitoring_categories - {"SERVER"}
+        )
+        collection_resource_categories = set()
+        if inventory_enabled or diagram_enabled:
+            collection_resource_categories.update(
+                selected_resource_categories
+            )
+        collection_resource_categories.update(active_monitoring_categories)
+        needs_infrastructure_collection = bool(
+            collection_resource_categories
+        )
+        needs_resource_snapshot = (
+            needs_infrastructure_collection
+            or (
+                monitoring_enabled
+                and "SERVER" in selected_monitoring_categories
+            )
+        )
 
-        server_collector = ServerCollector(api_factory=self.api_factory)
-        server_data = server_collector.collect()
-        server_errors = list(getattr(server_collector, "last_errors", []))
+        observation_check_at = self._now_kst_iso()
+        request_snapshot_window = self._snapshot_eligibility_window(
+            period,
+            observation_check_at,
+        )
+        live_snapshot_in_period = self._period_contains_timestamp(
+            period,
+            observation_check_at,
+        )
+        period_snapshot = None
+        snapshot_lookup_warning = None
+        if needs_resource_snapshot and not live_snapshot_in_period:
+            (
+                period_snapshot,
+                snapshot_lookup_warning,
+            ) = self._load_period_infrastructure_snapshot(
+                period,
+                customer_snapshot,
+                observation_check_at,
+            )
+        needs_server_collection = (
+            live_snapshot_in_period
+            and (
+                "SERVER" in collection_resource_categories
+                or (
+                    monitoring_enabled
+                    and "SERVER" in selected_monitoring_categories
+                )
+            )
+        )
 
-        (
-            infrastructure_data,
-            infrastructure_errors,
-            infrastructure_warnings,
-        ) = self.collect_infrastructure(
-            servers=server_data,
-            server_raw_data=getattr(
+        collection_metadata: Dict[str, Any] = {}
+        server_data: List[Dict[str, Any]] = []
+        server_errors: List[Dict[str, Any]] = []
+        server_raw_data: Dict[str, Any] = {}
+        infrastructure_collected_data: List[Dict[str, Any]] = []
+        infrastructure_errors: List[Dict[str, Any]] = []
+        infrastructure_warnings: List[Dict[str, Any]] = []
+        if snapshot_lookup_warning:
+            infrastructure_warnings.append(snapshot_lookup_warning)
+
+        if period_snapshot is not None:
+            server_data = self._dict_records(
+                period_snapshot.get("servers")
+            )
+            infrastructure_collected_data = self._dict_records(
+                period_snapshot.get("infrastructure")
+            )
+            snapshot_options_value = period_snapshot.get("report_options")
+            snapshot_resource_categories: Optional[set[str]] = None
+            if isinstance(snapshot_options_value, dict):
+                snapshot_resource_categories = set(
+                    ReportOptions.from_value(
+                        snapshot_options_value
+                    ).to_dict()["resource_categories"]
+                )
+            snapshot_metadata = period_snapshot.get("collection_metadata")
+            snapshot_infrastructure_metadata = (
+                snapshot_metadata.get("infrastructure")
+                if isinstance(snapshot_metadata, dict)
+                else None
+            )
+            if not isinstance(snapshot_infrastructure_metadata, dict):
+                snapshot_infrastructure_metadata = {}
+            metadata_categories = (
+                snapshot_infrastructure_metadata.get(
+                    "collected_categories"
+                )
+                or snapshot_infrastructure_metadata.get(
+                    "resource_categories"
+                )
+            )
+            if isinstance(metadata_categories, list):
+                snapshot_resource_categories = {
+                    str(category).upper()
+                    for category in metadata_categories
+                }
+            snapshot_reference = period_snapshot.get("_snapshot_reference")
+            if not isinstance(snapshot_reference, dict):
+                snapshot_reference = {}
+            stored_observed_at = (
+                snapshot_infrastructure_metadata.get("completed_at")
+                or snapshot_infrastructure_metadata.get("started_at")
+                or snapshot_reference.get("observed_at")
+            )
+            stored_reference_at = (
+                snapshot_reference.get("reference_at")
+                or observation_check_at
+            )
+            stored_window = self._snapshot_eligibility_window(
+                period,
+                stored_reference_at,
+            )
+            try:
+                parsed_stored_observed_at = self._parse_kst_datetime(
+                    str(stored_observed_at)
+                )
+            except (TypeError, ValueError):
+                parsed_stored_observed_at = None
+            collection_metadata["infrastructure"] = {
+                **snapshot_infrastructure_metadata,
+                "completed_at": stored_observed_at,
+                "source": "STORED_REPORT_SNAPSHOT",
+                "time_basis": "REPORT_PERIOD",
+                "source_report_run_id": snapshot_reference.get(
+                    "report_run_id"
+                ),
+                **self._snapshot_window_metadata(
+                    stored_window,
+                    parsed_stored_observed_at,
+                ),
+            }
+
+            original_issue_count = snapshot_infrastructure_metadata.get(
+                "collection_issue_count"
+            )
+            try:
+                original_issue_count = max(0, int(original_issue_count or 0))
+            except (TypeError, ValueError):
+                original_issue_count = 1
+            original_completeness = str(
+                snapshot_infrastructure_metadata.get(
+                    "inventory_completeness"
+                )
+                or "UNKNOWN"
+            ).upper()
+            coverage_issue_count = 0
+            if snapshot_resource_categories is None:
+                infrastructure_warnings.append({
+                    "collector": "InfrastructureSnapshotRepository",
+                    "stage": "historical_snapshot_coverage",
+                    "target_type": "infrastructure",
+                    "severity": "warning",
+                    "code": "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN",
+                    "message": (
+                        "저장된 과거 스냅샷에 수집 자원 범주 메타데이터가 없어 "
+                        "현재 선택 항목의 전체 포함 여부를 검증할 수 없습니다."
+                    ),
+                })
+                collection_metadata["infrastructure"].update({
+                    "inventory_completeness": "PARTIAL",
+                    "collection_issue_count": original_issue_count + 1,
+                })
+            else:
+                missing_categories = sorted(
+                    collection_resource_categories
+                    - snapshot_resource_categories
+                )
+                if missing_categories:
+                    coverage_issue_count = 1
+                    infrastructure_warnings.append({
+                        "collector": "InfrastructureSnapshotRepository",
+                        "stage": "historical_snapshot_coverage",
+                        "target_type": "infrastructure",
+                        "severity": "warning",
+                        "code": "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE",
+                        "missing_categories": missing_categories,
+                        "message": (
+                            "저장된 과거 스냅샷이 현재 선택한 일부 자원 범주를 "
+                            "수집하지 않아 구성도에서 제외했습니다."
+                        ),
+                    })
+                collection_metadata["infrastructure"].update({
+                    "inventory_completeness": (
+                        "PARTIAL"
+                        if (
+                            missing_categories
+                            or original_issue_count
+                            or original_completeness
+                            not in {
+                                "COMPLETE_FOR_SELECTED_SCOPE",
+                                "COMPLETE_FOR_SNAPSHOT_SCOPE",
+                            }
+                        )
+                        else "COMPLETE_FOR_SNAPSHOT_SCOPE"
+                    ),
+                    "collection_issue_count": (
+                        original_issue_count + coverage_issue_count
+                    ),
+                })
+        elif needs_resource_snapshot and not live_snapshot_in_period:
+            collection_metadata["infrastructure"] = {
+                "source": "UNAVAILABLE",
+                "time_basis": "REPORT_PERIOD",
+                "period_start": period.get("start_dt"),
+                "period_end": period.get("end_dt"),
+                "inventory_completeness": "UNAVAILABLE",
+                "collection_issue_count": 1,
+                **self._snapshot_window_metadata(request_snapshot_window),
+            }
+            infrastructure_warnings.append({
+                "collector": "InfrastructureCollector",
+                "stage": "historical_snapshot_lookup",
+                "target_type": "infrastructure",
+                "severity": "warning",
+                "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
+                "message": (
+                    "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
+                    "현재 자원 목록과 구성도를 대신 사용하지 않았습니다."
+                ),
+            })
+
+        if needs_server_collection:
+            server_collector = ServerCollector(api_factory=self.api_factory)
+            server_data = server_collector.collect()
+            server_errors = list(
+                getattr(server_collector, "last_errors", [])
+            )
+            server_raw_data = getattr(
                 server_collector,
                 "last_raw_data",
                 {},
-            ),
+            )
+
+        if needs_infrastructure_collection and live_snapshot_in_period:
+            infrastructure_started_at = self._now_kst_iso()
+            (
+                infrastructure_collected_data,
+                infrastructure_errors,
+                infrastructure_warnings,
+            ) = self.collect_infrastructure(
+                servers=server_data,
+                server_raw_data=server_raw_data,
+                categories=collection_resource_categories,
+            )
+            infrastructure_completed_at = self._now_kst_iso()
+            live_snapshot_window = self._snapshot_eligibility_window(
+                period,
+                infrastructure_completed_at,
+            )
+            parsed_live_completed_at = self._parse_kst_datetime(
+                infrastructure_completed_at
+            )
+            collection_metadata["infrastructure"] = {
+                "started_at": infrastructure_started_at,
+                "completed_at": infrastructure_completed_at,
+                "source": "LIVE_API_COLLECTION",
+                "time_basis": "REPORT_PERIOD",
+                "resource_categories": sorted(
+                    selected_resource_categories
+                ),
+                "collected_categories": sorted(
+                    collection_resource_categories
+                ),
+                "persisted_categories": sorted({
+                    str(item.get("category") or "").upper()
+                    for item in infrastructure_collected_data
+                    if isinstance(item, dict) and item.get("category")
+                }),
+                "persisted_resource_count": len(
+                    infrastructure_collected_data
+                ),
+                "persisted_server_count": len(server_data),
+                "inventory_completeness": (
+                    "PARTIAL"
+                    if (
+                        server_errors
+                        or infrastructure_errors
+                        or infrastructure_warnings
+                    )
+                    else "COMPLETE_FOR_SELECTED_SCOPE"
+                ),
+                "collection_issue_count": (
+                    len(server_errors)
+                    + len(infrastructure_errors)
+                    + len(infrastructure_warnings)
+                ),
+                **self._snapshot_window_metadata(
+                    live_snapshot_window,
+                    parsed_live_completed_at,
+                ),
+            }
+
+            completed_at = collection_metadata["infrastructure"].get(
+                "completed_at"
+            )
+            if not self._period_contains_timestamp(period, completed_at):
+                boundary_snapshot, boundary_lookup_warning = (
+                    self._load_period_infrastructure_snapshot(
+                        period,
+                        customer_snapshot,
+                        completed_at,
+                    )
+                )
+                infrastructure_warnings.append({
+                    "collector": "InfrastructureCollector",
+                    "stage": "period_boundary_validation",
+                    "target_type": "infrastructure",
+                    "severity": "warning",
+                    "code": "LIVE_SNAPSHOT_OUTSIDE_PERIOD",
+                    "message": (
+                        "인프라 수집이 보고 기간 종료 경계를 넘어 완료되어 "
+                        "해당 실시간 결과를 보고서에서 제외했습니다."
+                    ),
+                })
+                if boundary_lookup_warning:
+                    infrastructure_warnings.append(
+                        boundary_lookup_warning
+                    )
+                if boundary_snapshot is not None:
+                    server_data = self._dict_records(
+                        boundary_snapshot.get("servers")
+                    )
+                    infrastructure_collected_data = self._dict_records(
+                        boundary_snapshot.get("infrastructure")
+                    )
+                    boundary_metadata = boundary_snapshot.get(
+                        "collection_metadata"
+                    )
+                    if not isinstance(boundary_metadata, dict):
+                        boundary_metadata = {}
+                    boundary_infrastructure_metadata = (
+                        boundary_metadata.get("infrastructure")
+                    )
+                    if not isinstance(
+                        boundary_infrastructure_metadata,
+                        dict,
+                    ):
+                        boundary_infrastructure_metadata = {}
+                    boundary_reference = boundary_snapshot.get(
+                        "_snapshot_reference"
+                    )
+                    if not isinstance(boundary_reference, dict):
+                        boundary_reference = {}
+                    boundary_observed_at = (
+                        boundary_infrastructure_metadata.get(
+                            "completed_at"
+                        )
+                        or boundary_infrastructure_metadata.get(
+                            "started_at"
+                        )
+                        or boundary_reference.get("observed_at")
+                    )
+                    boundary_reference_at = (
+                        boundary_reference.get("reference_at")
+                        or completed_at
+                    )
+                    boundary_window = self._snapshot_eligibility_window(
+                        period,
+                        boundary_reference_at,
+                    )
+                    try:
+                        parsed_boundary_observed_at = (
+                            self._parse_kst_datetime(
+                                str(boundary_observed_at)
+                            )
+                        )
+                    except (TypeError, ValueError):
+                        parsed_boundary_observed_at = None
+                    collection_metadata["infrastructure"] = {
+                        **boundary_infrastructure_metadata,
+                        "completed_at": boundary_observed_at,
+                        "source": "STORED_REPORT_SNAPSHOT",
+                        "time_basis": "REPORT_PERIOD",
+                        "source_report_run_id": boundary_reference.get(
+                            "report_run_id"
+                        ),
+                        **self._snapshot_window_metadata(
+                            boundary_window,
+                            parsed_boundary_observed_at,
+                        ),
+                    }
+                    boundary_observed_at = collection_metadata[
+                        "infrastructure"
+                    ].get("completed_at")
+                    if not self._period_contains_timestamp(
+                        period,
+                        boundary_observed_at,
+                    ):
+                        server_data = []
+                        infrastructure_collected_data = []
+                        server_raw_data = {}
+                        collection_metadata["infrastructure"] = {
+                            "source": "UNAVAILABLE",
+                            "time_basis": "REPORT_PERIOD",
+                            "period_start": period.get("start_dt"),
+                            "period_end": period.get("end_dt"),
+                            "inventory_completeness": "UNAVAILABLE",
+                            "collection_issue_count": 1,
+                        }
+                        infrastructure_warnings.append({
+                            "collector": "InfrastructureSnapshotRepository",
+                            "stage": "period_boundary_fallback_validation",
+                            "target_type": "infrastructure",
+                            "severity": "warning",
+                            "code": "SNAPSHOT_OUTSIDE_REPORT_PERIOD",
+                            "message": (
+                                "경계 대체 스냅샷의 관측 시각이 보고 기간 "
+                                "밖이어서 사용하지 않았습니다."
+                            ),
+                        })
+                    else:
+                        boundary_categories = (
+                            boundary_infrastructure_metadata.get(
+                                "collected_categories"
+                            )
+                            or boundary_infrastructure_metadata.get(
+                                "resource_categories"
+                            )
+                        )
+                        missing_boundary_categories = []
+                        coverage_unknown = not isinstance(
+                            boundary_categories,
+                            list,
+                        )
+                        if not coverage_unknown:
+                            missing_boundary_categories = sorted(
+                                collection_resource_categories
+                                - {
+                                    str(category).upper()
+                                    for category in boundary_categories
+                                }
+                            )
+                        original_boundary_issue_count = (
+                            boundary_infrastructure_metadata.get(
+                                "collection_issue_count"
+                            )
+                        )
+                        try:
+                            original_boundary_issue_count = max(
+                                0,
+                                int(original_boundary_issue_count or 0),
+                            )
+                        except (TypeError, ValueError):
+                            original_boundary_issue_count = 1
+                        original_boundary_completeness = str(
+                            boundary_infrastructure_metadata.get(
+                                "inventory_completeness"
+                            )
+                            or "UNKNOWN"
+                        ).upper()
+                        coverage_issue_count = int(
+                            coverage_unknown
+                            or bool(missing_boundary_categories)
+                        )
+                        if coverage_unknown or missing_boundary_categories:
+                            infrastructure_warnings.append({
+                                "collector": (
+                                    "InfrastructureSnapshotRepository"
+                                ),
+                                "stage": (
+                                    "period_boundary_fallback_coverage"
+                                ),
+                                "target_type": "infrastructure",
+                                "severity": "warning",
+                                "code": (
+                                    "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN"
+                                    if coverage_unknown
+                                    else (
+                                        "SNAPSHOT_CATEGORY_COVERAGE_"
+                                        "INCOMPLETE"
+                                    )
+                                ),
+                                "missing_categories": (
+                                    missing_boundary_categories
+                                ),
+                                "message": (
+                                    "경계 대체 스냅샷이 현재 선택 범주의 "
+                                    "전체 수집 범위를 충족하지 않습니다."
+                                ),
+                            })
+                        collection_metadata["infrastructure"].update({
+                            "inventory_completeness": (
+                                "PARTIAL"
+                                if (
+                                    coverage_issue_count
+                                    or original_boundary_issue_count
+                                    or original_boundary_completeness
+                                    not in {
+                                        "COMPLETE_FOR_SELECTED_SCOPE",
+                                        "COMPLETE_FOR_SNAPSHOT_SCOPE",
+                                    }
+                                )
+                                else "COMPLETE_FOR_SNAPSHOT_SCOPE"
+                            ),
+                            "collection_issue_count": (
+                                original_boundary_issue_count
+                                + coverage_issue_count
+                            ),
+                        })
+                else:
+                    server_data = []
+                    infrastructure_collected_data = []
+                    server_raw_data = {}
+                    collection_metadata["infrastructure"] = {
+                        "source": "UNAVAILABLE",
+                        "time_basis": "REPORT_PERIOD",
+                        "period_start": period.get("start_dt"),
+                        "period_end": period.get("end_dt"),
+                        "inventory_completeness": "UNAVAILABLE",
+                        "collection_issue_count": 1,
+                        **self._snapshot_window_metadata(
+                            self._snapshot_eligibility_window(
+                                period,
+                                completed_at,
+                            )
+                        ),
+                    }
+
+        infrastructure_data = [
+            item for item in infrastructure_collected_data
+            if str(item.get("category") or "").upper()
+            in selected_resource_categories
+        ]
+        report_server_data = (
+            server_data
+            if (
+                "SERVER" in selected_resource_categories
+                or (
+                    monitoring_enabled
+                    and "SERVER" in selected_monitoring_categories
+                )
+            )
+            else []
         )
 
-        insight_data, insight_metric_errors = self.collect_insight_metrics(
-            server_data=server_data,
-            period=period,
-        )
+        insight_data: List[Dict[str, Any]] = []
+        insight_metric_errors: List[Dict[str, Any]] = []
+        if (
+            monitoring_enabled
+            and "SERVER" in selected_monitoring_categories
+        ):
+            insight_data, insight_metric_errors = self.collect_insight_metrics(
+                server_data=server_data,
+                period=period,
+            )
 
-        (
-            infrastructure_metric_data,
-            infrastructure_metric_errors,
-            infrastructure_metric_warnings,
-        ) = self.collect_infrastructure_metrics(
-            infrastructure=infrastructure_data,
-            start_time=period["start_time"],
-            end_time=period["end_time"],
-        )
+        infrastructure_metric_data: List[Dict[str, Any]] = []
+        infrastructure_metric_errors: List[Dict[str, Any]] = []
+        infrastructure_metric_warnings: List[Dict[str, Any]] = []
+        if monitored_infrastructure_categories:
+            monitoring_infrastructure = [
+                item for item in infrastructure_collected_data
+                if str(item.get("category") or "").upper()
+                in monitored_infrastructure_categories
+            ]
+            (
+                infrastructure_metric_data,
+                infrastructure_metric_errors,
+                infrastructure_metric_warnings,
+            ) = self.collect_infrastructure_metrics(
+                infrastructure=monitoring_infrastructure,
+                start_time=period["start_time"],
+                end_time=period["end_time"],
+                categories=monitored_infrastructure_categories,
+            )
 
-        insight_events, insight_grouped_events, insight_event_errors = self.collect_insight_events(
-            period=period,
-        )
+        insight_events: List[Dict[str, Any]] = []
+        insight_grouped_events: Dict[str, List[Dict[str, Any]]] = {}
+        insight_event_errors: List[Dict[str, Any]] = []
+        if report_options.section_enabled("insight_events"):
+            (
+                insight_events,
+                insight_grouped_events,
+                insight_event_errors,
+            ) = self.collect_insight_events(period=period)
 
-        activity_collector = ActivityTracerEventCollector(api_factory=self.api_factory)
-        activity_data = activity_collector.collect(
-            start_time=period["start_time"],
-            end_time=period["end_time"],
-        )
-        activity_errors = list(
-            getattr(activity_collector, "last_errors", [])
-        )
+        activity_data: Dict[str, Any] = {}
+        activity_errors: List[Dict[str, Any]] = []
+        if report_options.section_enabled("activity_history"):
+            activity_collector = ActivityTracerEventCollector(
+                api_factory=self.api_factory
+            )
+            activity_data = activity_collector.collect(
+                start_time=period["start_time"],
+                end_time=period["end_time"],
+            )
+            activity_errors = list(
+                getattr(activity_collector, "last_errors", [])
+            )
 
         all_insight_errors = self._merge_error_lists(
             insight_metric_errors,
@@ -413,111 +1270,136 @@ class ReportRunner:
             ),
         )
 
-        billing_collector = None
-        billing_stage = "collection"
-
-        try:
-            organization_context = OrganizationCollector(
-                api_factory=self.api_factory
-            ).discover()
-            billing_collector = BillingCollector(
-                api_factory=self.api_factory
-            )
-            billing_raw = billing_collector.collect_raw(
-                use_start_date=period["use_start_date"],
-                use_end_date=period["usage_query_end_date"],
-                demand_month=period["billing_month"],
-                region_code="KR",
-                pay_currency_code="KRW",
-                confirmed_demand_month=period["confirmed_demand_month"],
-                month_to_date_start=period["month_to_date_start"],
-                month_to_date_end=period["month_to_date_end"],
-                organization_context=organization_context,
-            )
-            billing_errors = list(
-                getattr(billing_collector, "last_errors", [])
-            )
-            all_collection_errors = self._merge_error_lists(
-                all_collection_errors,
-                billing_errors,
-            )
-            all_collection_warnings = self._merge_error_lists(
-                all_collection_warnings,
-                getattr(billing_collector, "last_warnings", []),
-            )
-            self.save_json_file(
-                data=all_collection_errors,
-                output_dir=self.output_dir,
-                filename=(
-                    f"collection_errors_{period['file_suffix']}.json"
-                ),
-            )
-            self.save_json_file(
-                data=billing_raw,
-                output_dir=self.output_dir,
-                filename=f"billing_raw_{period['file_suffix']}.json",
-            )
-
-            billing_stage = "normalization"
-            billing_result = BillingNormalizer().normalize(
-                raw_data=billing_raw,
-                current_month=period["billing_month"],
-                billing_month=period["billing_month"],
-                use_end_date=period["use_end_date"],
-                comparison_enabled=bool(
-                    period.get("is_closed_month", False)
-                ),
-                report_period=period,
-                calculated_at=period["calculated_at"],
-            )
-            self.save_json_file(
-                data=billing_result,
-                output_dir=self.output_dir,
-                filename=f"billing_result_{period['file_suffix']}.json",
-            )
-        except Exception as exc:
-            billing_failure = {
-                "collector": (
-                    "BillingCollector"
-                    if billing_stage == "collection"
-                    else "BillingNormalizer"
-                ),
-                "stage": billing_stage,
-                "target_type": "billing",
-                "api": "platform",
-                "exception_type": type(exc).__name__,
-                "message": safe_exception_message(exc),
-            }
-            all_collection_errors = self._merge_error_lists(
-                all_collection_errors,
-                getattr(billing_collector, "last_errors", []),
-                [billing_failure],
-            )
-            self.save_json_file(
-                data=all_collection_errors,
-                output_dir=self.output_dir,
-                filename=(
-                    f"collection_errors_{period['file_suffix']}.json"
-                ),
-            )
-            raise
-
-        self.print_network_usage_summary(
-            billing_result.get("network_usage_summary", [])
+        billing_result: Dict[str, Any] = {}
+        billing_enabled = (
+            report_options.section_enabled("billing")
+            or report_options.section_enabled("organization_billing")
         )
-        self.print_billing_summary(billing_result, period=period)
-        self.print_usage_summary(billing_result.get("usage_summary", []))
+        if billing_enabled:
+            billing_collector = None
+            billing_stage = "collection"
+
+            try:
+                organization_context = (
+                    OrganizationCollector(
+                        api_factory=self.api_factory
+                    ).discover()
+                    if report_options.section_enabled(
+                        "organization_billing"
+                    )
+                    else {"scope": "SELF", "members": []}
+                )
+                billing_collector = BillingCollector(
+                    api_factory=self.api_factory
+                )
+                billing_raw = billing_collector.collect_raw(
+                    use_start_date=period["use_start_date"],
+                    use_end_date=period["usage_query_end_date"],
+                    demand_month=period["billing_month"],
+                    region_code="KR",
+                    pay_currency_code="KRW",
+                    confirmed_demand_month=(
+                        period["confirmed_demand_month"]
+                    ),
+                    month_to_date_start=period["month_to_date_start"],
+                    month_to_date_end=period["month_to_date_end"],
+                    organization_context=organization_context,
+                )
+                billing_errors = list(
+                    getattr(billing_collector, "last_errors", [])
+                )
+                all_collection_errors = self._merge_error_lists(
+                    all_collection_errors,
+                    billing_errors,
+                )
+                all_collection_warnings = self._merge_error_lists(
+                    all_collection_warnings,
+                    getattr(billing_collector, "last_warnings", []),
+                )
+                self.save_json_file(
+                    data=all_collection_errors,
+                    output_dir=self.output_dir,
+                    filename=(
+                        f"collection_errors_{period['file_suffix']}.json"
+                    ),
+                )
+                self.save_json_file(
+                    data=billing_raw,
+                    output_dir=self.output_dir,
+                    filename=f"billing_raw_{period['file_suffix']}.json",
+                )
+
+                billing_stage = "normalization"
+                billing_result = BillingNormalizer().normalize(
+                    raw_data=billing_raw,
+                    current_month=period["billing_month"],
+                    billing_month=period["billing_month"],
+                    use_end_date=period["use_end_date"],
+                    comparison_enabled=bool(
+                        period.get("is_closed_month", False)
+                    ),
+                    report_period=period,
+                    calculated_at=period["calculated_at"],
+                )
+                self.save_json_file(
+                    data=billing_result,
+                    output_dir=self.output_dir,
+                    filename=(
+                        f"billing_result_{period['file_suffix']}.json"
+                    ),
+                )
+            except Exception as exc:
+                billing_failure = {
+                    "collector": (
+                        "BillingCollector"
+                        if billing_stage == "collection"
+                        else "BillingNormalizer"
+                    ),
+                    "stage": billing_stage,
+                    "target_type": "billing",
+                    "api": "platform",
+                    "exception_type": type(exc).__name__,
+                    "message": safe_exception_message(exc),
+                }
+                all_collection_errors = self._merge_error_lists(
+                    all_collection_errors,
+                    getattr(billing_collector, "last_errors", []),
+                    [billing_failure],
+                )
+                self.save_json_file(
+                    data=all_collection_errors,
+                    output_dir=self.output_dir,
+                    filename=(
+                        f"collection_errors_{period['file_suffix']}.json"
+                    ),
+                )
+                raise
+
+            self.print_network_usage_summary(
+                billing_result.get("network_usage_summary", [])
+            )
+            self.print_billing_summary(billing_result, period=period)
+            self.print_usage_summary(
+                billing_result.get("usage_summary", [])
+            )
+
+        infrastructure_topology: Dict[str, Any] = {}
+        if diagram_enabled:
+            infrastructure_topology = self._build_period_topology(
+                period=period,
+                infrastructure=self._dict_records(infrastructure_data),
+                collection_metadata=collection_metadata,
+                report_options=report_options,
+            )
 
         report = ReportResult(
             period=period,
-            customer=(
-                getattr(self, "customer", None).to_dict()
-                if getattr(self, "customer", None) is not None
-                else {}
-            ),
-            servers=self._dict_records(server_data),
+            customer=customer_snapshot,
+            servers=self._dict_records(report_server_data),
             server_metrics=self._dict_records(insight_data),
-            infrastructure=self._dict_records(infrastructure_data),
+            infrastructure=self._dict_records(
+                infrastructure_collected_data
+            ),
             infrastructure_metrics=self._dict_records(
                 infrastructure_metric_data
             ),
@@ -525,6 +1407,9 @@ class ReportRunner:
             grouped_insight_events=insight_grouped_events,
             activity_events=activity_data,
             billing=billing_result,
+            report_options=report_options_snapshot,
+            collection_metadata=collection_metadata,
+            infrastructure_topology=infrastructure_topology,
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,
         )
@@ -602,6 +1487,7 @@ class ReportRunner:
         self,
         servers: List[Dict[str, Any]],
         server_raw_data: Dict[str, Any],
+        categories: Optional[set[str]] = None,
     ) -> tuple[
         List[Dict[str, Any]],
         List[Dict[str, Any]],
@@ -610,12 +1496,27 @@ class ReportRunner:
         collector = None
         try:
             collector = InfrastructureCollector(api_factory=self.api_factory)
-            data = collector.collect(
-                servers=servers,
-                server_raw_data=server_raw_data,
-            )
+            normalized_categories = {
+                str(category).upper() for category in (categories or set())
+            }
+            collect_kwargs: Dict[str, Any] = {
+                "servers": servers,
+                "server_raw_data": server_raw_data,
+            }
+            if categories is not None:
+                collect_kwargs["categories"] = sorted(
+                    normalized_categories
+                )
+            data = collector.collect(**collect_kwargs)
+            normalized_data = self._dict_records(data)
+            if normalized_categories:
+                normalized_data = [
+                    item for item in normalized_data
+                    if str(item.get("category") or "").upper()
+                    in normalized_categories
+                ]
             return (
-                self._dict_records(data),
+                normalized_data,
                 self._dict_records(getattr(collector, "last_errors", [])),
                 self._dict_records(getattr(collector, "last_warnings", [])),
             )
@@ -644,6 +1545,7 @@ class ReportRunner:
         infrastructure: List[Dict[str, Any]],
         start_time: int,
         end_time: int,
+        categories: Optional[set[str]] = None,
     ) -> tuple[
         List[Dict[str, Any]],
         List[Dict[str, Any]],
@@ -654,10 +1556,26 @@ class ReportRunner:
             collector = InfrastructureMetricCollector(
                 api_factory=self.api_factory
             )
+            normalized_categories = {
+                str(category).upper() for category in (categories or set())
+            }
+            metric_infrastructure = (
+                [
+                    item for item in infrastructure
+                    if str(item.get("category") or "").upper()
+                    in normalized_categories
+                ]
+                if normalized_categories
+                else infrastructure
+            )
             data = collector.collect(
-                infrastructure=infrastructure,
+                infrastructure=metric_infrastructure,
                 start_time=start_time,
                 end_time=end_time,
+                selected_categories=(
+                    sorted(normalized_categories)
+                    if categories is not None else None
+                ),
             )
             return (
                 self._dict_records(data),
