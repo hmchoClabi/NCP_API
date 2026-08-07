@@ -243,6 +243,37 @@ class ReportRunner:
             return value.replace(tzinfo=self.KST)
         return value.astimezone(self.KST)
 
+    def _billing_period_context(self, period: Dict[str, Any]) -> Dict[str, Any]:
+        target_month = datetime.strptime(period["billing_month"], "%Y%m").date()
+        target_month = target_month.replace(day=1)
+        current_month = self._today_kst().replace(day=1)
+        target_month_closed = target_month < current_month
+        if target_month_closed:
+            confirmed_month = target_month
+        else:
+            confirmed_month = current_month - timedelta(days=1)
+            confirmed_month = confirmed_month.replace(day=1)
+
+        requested_end = datetime.strptime(
+            period["use_end_date"], "%Y%m%d"
+        ).date()
+        usage_end = min(requested_end, self._today_kst())
+        month_to_date_start = target_month
+        month_to_date_end = usage_end if usage_end >= target_month else None
+
+        return {
+            "confirmed_demand_month": confirmed_month.strftime("%Y%m"),
+            "target_month_closed": target_month_closed,
+            "usage_query_end_date": usage_end.strftime("%Y%m%d"),
+            "month_to_date_start": month_to_date_start.strftime("%Y%m%d"),
+            "month_to_date_end": (
+                month_to_date_end.strftime("%Y%m%d")
+                if month_to_date_end is not None
+                else None
+            ),
+            "calculated_at": datetime.now(self.KST).isoformat(timespec="seconds"),
+        }
+
     def run(
         self,
         target_month: Optional[str] = None,
@@ -260,6 +291,8 @@ class ReportRunner:
             start_datetime=start_datetime,
             end_datetime=end_datetime,
         )
+        billing_context = self._billing_period_context(period)
+        period.update(billing_context)
 
         self.print_period_summary(period)
 
@@ -294,6 +327,7 @@ class ReportRunner:
             all_insight_errors,
             activity_errors,
         )
+        all_collection_warnings: List[Dict[str, Any]] = []
 
         # Billing이 실패하더라도 먼저 완료된 수집 결과는 보존한다.
         self.print_server_metric_summary(
@@ -342,10 +376,13 @@ class ReportRunner:
             )
             billing_raw = billing_collector.collect_raw(
                 use_start_date=period["use_start_date"],
-                use_end_date=period["use_end_date"],
+                use_end_date=period["usage_query_end_date"],
                 demand_month=period["billing_month"],
                 region_code="KR",
                 pay_currency_code="KRW",
+                confirmed_demand_month=period["confirmed_demand_month"],
+                month_to_date_start=period["month_to_date_start"],
+                month_to_date_end=period["month_to_date_end"],
             )
             billing_errors = list(
                 getattr(billing_collector, "last_errors", [])
@@ -353,6 +390,9 @@ class ReportRunner:
             all_collection_errors = self._merge_error_lists(
                 all_collection_errors,
                 billing_errors,
+            )
+            all_collection_warnings = self._merge_error_lists(
+                getattr(billing_collector, "last_warnings", []),
             )
             self.save_json_file(
                 data=all_collection_errors,
@@ -376,6 +416,8 @@ class ReportRunner:
                 comparison_enabled=bool(
                     period.get("is_closed_month", False)
                 ),
+                report_period=period,
+                calculated_at=period["calculated_at"],
             )
             self.save_json_file(
                 data=billing_result,
@@ -429,6 +471,7 @@ class ReportRunner:
             activity_events=activity_data,
             billing=billing_result,
             collection_errors=all_collection_errors,
+            collection_warnings=all_collection_warnings,
         )
         report_json_path = self.save_json_file(
             data=report.to_dict(),

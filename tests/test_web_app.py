@@ -86,7 +86,11 @@ class FakePortalRepository:
                 "account_name": "Primary",
                 "status": "SUCCESS",
                 "error_count": 0,
-                "completed_at": datetime(2026, 8, 3),
+                "created_at": datetime(2026, 8, 3, 0, 5, tzinfo=timezone.utc),
+                "completed_at": datetime(
+                    2026, 8, 3, 0, 7, 5, tzinfo=timezone.utc
+                ),
+                "execution_seconds": 125,
             }],
         }
 
@@ -377,6 +381,23 @@ class WebAppTests(unittest.TestCase):
             "2026-08-04 09:30:00 KST",
         )
 
+    def test_duration_template_filter_formats_elapsed_seconds(self):
+        formatter = self.app.jinja_env.filters["duration"]
+
+        self.assertEqual(formatter(None), "-")
+        self.assertEqual(formatter(0), "0초")
+        self.assertEqual(formatter(125), "2분 5초")
+        self.assertEqual(formatter(3_661), "1시간 1분 1초")
+
+    def test_inclusive_end_filter_converts_exclusive_month_boundary(self):
+        formatter = self.app.jinja_env.filters["inclusive_end"]
+
+        converted = formatter(
+            datetime(2026, 8, 1, tzinfo=timezone.utc), True
+        )
+
+        self.assertEqual(converted.date().isoformat(), "2026-07-31")
+
 
 class MspCustomerDetailTests(unittest.TestCase):
     def setUp(self):
@@ -404,6 +425,9 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"report-1", response.data)
         self.assertIn(b"customer@example.com", response.data)
+        self.assertIn("생성 시각".encode("utf-8"), response.data)
+        self.assertIn("2026-08-03 09:05:00 KST".encode("utf-8"), response.data)
+        self.assertIn("2분 5초".encode("utf-8"), response.data)
 
     def test_msp_admin_can_open_user_management(self):
         response = self.client.get("/msp/users")

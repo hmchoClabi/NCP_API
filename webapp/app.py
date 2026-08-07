@@ -71,6 +71,49 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return f"{parsed.astimezone(KST).strftime(format_string)} KST"
 
+    @app.template_filter("duration")
+    def format_duration(value: Any) -> str:
+        if value is None:
+            return "-"
+        try:
+            total_seconds = max(int(value), 0)
+        except (TypeError, ValueError, OverflowError):
+            return str(value)
+        days, remainder = divmod(total_seconds, 86_400)
+        hours, remainder = divmod(remainder, 3_600)
+        minutes, seconds = divmod(remainder, 60)
+        parts = []
+        if days:
+            parts.append(f"{days}일")
+        if hours:
+            parts.append(f"{hours}시간")
+        if minutes:
+            parts.append(f"{minutes}분")
+        if seconds or not parts:
+            parts.append(f"{seconds}초")
+        return " ".join(parts)
+
+    @app.template_filter("inclusive_end")
+    def inclusive_period_end(value: Any, end_exclusive: Any = True) -> Any:
+        exclusive = (
+            end_exclusive
+            if isinstance(end_exclusive, bool)
+            else _as_bool(end_exclusive, True)
+            if isinstance(end_exclusive, str)
+            else True
+        )
+        if value is None or not exclusive:
+            return value
+        parsed = value
+        if isinstance(parsed, str):
+            try:
+                parsed = datetime.fromisoformat(parsed.replace("Z", "+00:00"))
+            except ValueError:
+                return value
+        if not isinstance(parsed, datetime):
+            return value
+        return parsed - timedelta(microseconds=1)
+
     @app.before_request
     def load_user_and_validate_csrf():
         session_token = request.cookies.get(SESSION_COOKIE, "")

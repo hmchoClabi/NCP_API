@@ -3,6 +3,15 @@ from datetime import datetime
 
 from database.config import DatabaseSettings
 from database.report_repository import PostgresReportRepository
+from app.report_models import ReportResult
+
+
+class RecordingCursor:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, query, parameters):
+        self.calls.append((query, parameters))
 
 
 class ReportRepositoryTests(unittest.TestCase):
@@ -32,6 +41,45 @@ class ReportRepositoryTests(unittest.TestCase):
     def test_invalid_source_ip_is_not_sent_to_inet_column(self):
         self.assertIsNone(self.repository._ip_address("not-an-ip"))
         self.assertEqual(self.repository._ip_address("218.38.161.126"), "218.38.161.126")
+
+    def test_period_aware_billing_fact_is_inserted(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-07-01 00:00:00",
+                "end_dt": "2026-07-31 23:59:59",
+            },
+            billing={
+                "cost_facts": [{
+                    "cost_type": "CONFIRMED",
+                    "status": "AVAILABLE",
+                    "period_start": "2026-07-01",
+                    "period_end": "2026-07-31",
+                    "coverage_start": "2026-07-01",
+                    "coverage_end": "2026-07-31",
+                    "calculated_at": "2026-08-07T12:00:00+09:00",
+                    "total_amount": 110,
+                    "currency": "KRW",
+                    "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+                    "includes_discount": True,
+                    "includes_vat": True,
+                    "confidence": "CONFIRMED",
+                    "source_api": "getDemandCostList",
+                }]
+            },
+        )
+
+        self.repository._insert_billing_cost_facts(
+            cursor, "public_data", report,
+            "report-id", "tenant-id", "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        query, parameters = cursor.calls[0]
+        self.assertIn("public_data.billing_cost_facts", query)
+        self.assertEqual(parameters[3], "CONFIRMED")
+        self.assertEqual(parameters[6], "2026-07-31")
+        self.assertEqual(parameters[13], 110)
 
 
 if __name__ == "__main__":

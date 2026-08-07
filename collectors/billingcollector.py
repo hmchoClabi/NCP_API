@@ -1,16 +1,26 @@
 from typing import Any, Callable, Dict, List, Optional
 
+import requests
+
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
 
 
 class BillingCollector:
     MAX_PAGES = 10_000
+    DISCOUNT_SOURCES = frozenset({
+        "product_demand_cost_by_discount",
+        "discount_list",
+        "credit_history",
+        "product_discount_history",
+        "coin_history",
+    })
 
     def __init__(self, api_factory: Any):
         self.api_factory = api_factory
         self.platform_api = self.api_factory.get("platform")
         self.last_errors: List[Dict[str, Any]] = []
+        self.last_warnings: List[Dict[str, Any]] = []
 
     def collect_raw(
         self,
@@ -22,8 +32,13 @@ class BillingCollector:
         member_no_list: Optional[List[str]] = None,
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
+        confirmed_demand_month: Optional[str] = None,
+        month_to_date_start: Optional[str] = None,
+        month_to_date_end: Optional[str] = None,
     ) -> Dict[str, Any]:
         self.last_errors = []
+        self.last_warnings = []
+        confirmed_demand_month = confirmed_demand_month or demand_month
 
         common_params = {
             "member_no_list": member_no_list,
@@ -73,6 +88,19 @@ class BillingCollector:
             **common_params,
         )
 
+        if month_to_date_start and month_to_date_end:
+            raw["month_to_date_usage"] = self._collect_paged_source(
+                source="month_to_date_usage",
+                func=self.platform_api.get_contract_usage_list_by_daily,
+                expected_keys=("contractUsageListByDaily",),
+                use_start_date=month_to_date_start,
+                use_end_date=month_to_date_end,
+                region_code=region_code,
+                **common_params,
+            )
+        else:
+            raw["month_to_date_usage"] = []
+
         raw["contract_usage"] = self._collect_paged_source(
             source="contract_usage",
             func=self.platform_api.get_contract_usage_list,
@@ -83,7 +111,10 @@ class BillingCollector:
             **common_params,
         )
 
-        price_no_list = self.extract_price_no_list(raw["daily_usage"])
+        price_no_list = sorted(set(
+            self.extract_price_no_list(raw["daily_usage"])
+            + self.extract_price_no_list(raw["month_to_date_usage"])
+        ))
 
         raw["price_list"] = self._collect_source(
             source="price_list",
@@ -101,6 +132,28 @@ class BillingCollector:
             region_code=region_code,
             pay_currency_code=pay_currency_code,
         )
+
+        if confirmed_demand_month == demand_month:
+            raw["confirmed_demand_cost"] = raw["demand_cost"]
+            raw["confirmed_product_demand_cost"] = raw["product_demand_cost"]
+        else:
+            raw["confirmed_demand_cost"] = self._collect_paged_source(
+                source="confirmed_demand_cost",
+                func=self.platform_api.get_demand_cost_list,
+                expected_keys=("demandCostList",),
+                start_month=confirmed_demand_month,
+                end_month=confirmed_demand_month,
+                **common_params,
+            )
+            raw["confirmed_product_demand_cost"] = self._collect_paged_source(
+                source="confirmed_product_demand_cost",
+                func=self.platform_api.get_product_demand_cost_list,
+                expected_keys=("productDemandCostList",),
+                comparison_required=True,
+                start_month=confirmed_demand_month,
+                end_month=confirmed_demand_month,
+                **common_params,
+            )
 
         raw["product_demand_cost_by_discount"] = self._collect_paged_source(
             source="product_demand_cost_by_discount",
@@ -160,6 +213,10 @@ class BillingCollector:
             "price_no_list": price_no_list,
             "discount_no_list": discount_no_list,
             "collection_errors": list(self.last_errors),
+            "collection_warnings": list(self.last_warnings),
+            "confirmed_demand_month": confirmed_demand_month,
+            "month_to_date_start": month_to_date_start,
+            "month_to_date_end": month_to_date_end,
         }
 
         return raw
@@ -211,19 +268,52 @@ class BillingCollector:
         try:
             return operation()
         except Exception as exc:
-            self.last_errors.append(
-                {
-                    "collector": self.__class__.__name__,
-                    "stage": "collection",
-                    "target_type": "billing",
-                    "api": source,
-                    "source": source,
-                    "comparison_required": comparison_required,
-                    "exception_type": type(exc).__name__,
-                    "message": safe_exception_message(exc),
-                }
-            )
+            issue = {
+                "collector": self.__class__.__name__,
+                "stage": "collection",
+                "target_type": "billing",
+                "api": source,
+                "source": source,
+                "comparison_required": comparison_required,
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+            discount_response = self._discount_unavailable_response(exc)
+            if source in self.DISCOUNT_SOURCES and discount_response:
+                issue.update(discount_response)
+                issue["severity"] = "WARNING"
+                issue["message"] = (
+                    "NCP 계정에서 Discount API를 사용할 수 없습니다 "
+                    "(returnCode 2300). 할인 합계는 청구 비용 데이터로 표시하며 "
+                    "할인 상세 이력은 제외합니다."
+                )
+                self.last_warnings.append(issue)
+            else:
+                self.last_errors.append(issue)
             return []
+
+    def _discount_unavailable_response(
+        self, exc: Exception
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(exc, requests.HTTPError) or exc.response is None:
+            return None
+        try:
+            payload = exc.response.json()
+        except (ValueError, TypeError):
+            return None
+        return_code = self.find_first_value(payload, "returnCode")
+        if str(return_code) != "2300":
+            return None
+        request_id = self.find_first_value(payload, "requestId")
+        return {
+            "status_code": exc.response.status_code,
+            "error_code": "2300",
+            "return_message": str(
+                self.find_first_value(payload, "returnMessage") or ""
+            )[:500],
+            "request_id": str(request_id)[:100] if request_id else None,
+            "retryable": False,
+        }
 
     def collect_paged(
         self,

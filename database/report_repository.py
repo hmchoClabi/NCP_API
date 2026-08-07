@@ -63,7 +63,8 @@ class PostgresReportRepository:
                         cursor, report, tenant_id, environment, cloud_account_id
                     )
                     self._replace_report_details(
-                        cursor, report, report_run_id, tenant_id, environment
+                        cursor, report, report_run_id, tenant_id, environment,
+                        cloud_account_id,
                     )
                     self._replace_artifacts(
                         cursor, report_run_id, tenant_id, artifacts or {}
@@ -219,11 +220,13 @@ class PostgresReportRepository:
         report_run_id: Any,
         tenant_id: Any,
         environment: str,
+        cloud_account_id: Any,
     ) -> None:
         schema = self.SCHEMAS[environment]
         for table in (
             "report_snapshots", "insight_events", "activity_events",
-            "metric_series", "metric_summaries", "cost_details", "raw_payload_refs",
+            "metric_series", "metric_summaries", "cost_details",
+            "billing_cost_facts", "raw_payload_refs",
         ):
             cursor.execute(
                 f"DELETE FROM {schema}.{table} WHERE report_run_id = %s",
@@ -239,7 +242,7 @@ class PostgresReportRepository:
                 report_run_id, tenant_id, schema_version, normalized_data,
                 content_hash_sha256, collector_version, normalizer_version,
                 renderer_version
-            ) VALUES (%s, %s, '1.0', %s::jsonb, %s, '1.0', '1.0', '1.0')
+            ) VALUES (%s, %s, '1.1', %s::jsonb, %s, '1.0', '1.1', '1.1')
             """,
             (
                 report_run_id,
@@ -259,6 +262,10 @@ class PostgresReportRepository:
         )
         self._insert_cost_details(
             cursor, schema, report, report_run_id, tenant_id
+        )
+        self._insert_billing_cost_facts(
+            cursor, schema, report, report_run_id, tenant_id,
+            cloud_account_id,
         )
 
     def _insert_insight_events(
@@ -412,6 +419,62 @@ class PostgresReportRepository:
                 ),
             )
 
+    def _insert_billing_cost_facts(
+        self, cursor: Any, schema: str, report: ReportResult,
+        report_run_id: Any, tenant_id: Any, cloud_account_id: Any,
+    ) -> None:
+        billing = report.billing if isinstance(report.billing, dict) else {}
+        allowed_types = {
+            "CONFIRMED", "PERIOD_ESTIMATE",
+            "MONTH_TO_DATE_ESTIMATE", "MONTH_END_PROJECTION",
+        }
+        for fact in billing.get("cost_facts", []):
+            if not isinstance(fact, dict):
+                continue
+            cost_type = str(fact.get("cost_type") or "")
+            status = str(fact.get("status") or "")
+            if cost_type not in allowed_types or status not in {
+                "AVAILABLE", "UNAVAILABLE"
+            }:
+                continue
+            cursor.execute(
+                f"""
+                INSERT INTO {schema}.billing_cost_facts (
+                    report_run_id, tenant_id, cloud_account_id, cost_type,
+                    status, period_start, period_end, coverage_start,
+                    coverage_end, calculated_at, subtotal_amount,
+                    discount_amount, vat_amount, total_amount, currency,
+                    amount_basis, includes_discount, includes_vat, confidence,
+                    excluded_item_count, source_api, calculation_version,
+                    details
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s::jsonb
+                )
+                """,
+                (
+                    report_run_id, tenant_id, cloud_account_id, cost_type,
+                    status, fact.get("period_start"), fact.get("period_end"),
+                    fact.get("coverage_start"), fact.get("coverage_end"),
+                    fact.get("calculated_at") or report.generated_at,
+                    fact.get("subtotal_amount"), fact.get("discount_amount"),
+                    fact.get("vat_amount"), fact.get("total_amount"),
+                    self._text(fact.get("currency") or "KRW", 3),
+                    self._text(fact.get("amount_basis") or "UNKNOWN", 60),
+                    bool(fact.get("includes_discount")),
+                    bool(fact.get("includes_vat")),
+                    self._text(fact.get("confidence") or "UNAVAILABLE", 30),
+                    max(int(fact.get("excluded_item_count") or 0), 0),
+                    self._text(fact.get("source_api"), 500),
+                    self._text(fact.get("calculation_version") or "1.1", 40),
+                    self._json(
+                        fact.get("details")
+                        if isinstance(fact.get("details"), dict) else {}
+                    ),
+                ),
+            )
+
     def _replace_artifacts(
         self, cursor: Any, report_run_id: Any, tenant_id: Any,
         artifacts: Mapping[str, Path | str],
@@ -477,10 +540,13 @@ class PostgresReportRepository:
         levels = [str(event.get("level") or "").upper() for event in insight]
         activities = list(self._event_records(report.activity_events))
         billing_summary = report.billing.get("summary", {}) if isinstance(report.billing, dict) else {}
-        comparison_status = str(billing_summary.get("comparison_status") or "")
-        confidence = (
-            "VERIFIED_ESTIMATE" if comparison_status == "OK"
-            else "PARTIAL" if billing_summary else "UNAVAILABLE"
+        billing = report.billing if isinstance(report.billing, dict) else {}
+        period_estimate = billing.get("period_estimate", {})
+        invoice_summary = billing.get("invoice_summary", {})
+        confidence = str(
+            period_estimate.get("confidence")
+            or invoice_summary.get("confidence")
+            or "UNAVAILABLE"
         )
         cursor.execute(
             """
@@ -514,8 +580,8 @@ class PostgresReportRepository:
                     and str(event.get("result")).upper() not in {"SUCCESS", "SUCCEED"}
                     for event in activities
                 ),
-                len(report.collection_errors), billing_summary.get("expected_total_amount"),
-                billing_summary.get("confirmed_total_amount"), confidence,
+                len(report.collection_errors), period_estimate.get("total_amount"),
+                invoice_summary.get("total_amount"), confidence,
             ),
         )
 

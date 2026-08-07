@@ -19,6 +19,7 @@ class ReportResult:
     activity_events: Any = field(default_factory=dict)
     billing: Dict[str, Any] = field(default_factory=dict)
     collection_errors: List[Dict[str, Any]] = field(default_factory=list)
+    collection_warnings: List[Dict[str, Any]] = field(default_factory=list)
     generated_at: str = field(
         default_factory=lambda: datetime.now(
             ZoneInfo("Asia/Seoul")
@@ -43,7 +44,7 @@ class ReportResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "report_id": self.report_id,
             "generated_at": self.generated_at,
             "customer": self.customer,
@@ -55,6 +56,7 @@ class ReportResult:
             "activity_events": self.activity_events,
             "billing": self.billing,
             "collection_errors": self.collection_errors,
+            "collection_warnings": self.collection_warnings,
         }
 
     @classmethod
@@ -77,5 +79,6 @@ class ReportResult:
             activity_events=payload.get("activity_events") or {},
             billing=payload.get("billing") or {},
             collection_errors=payload.get("collection_errors") or [],
+            collection_warnings=payload.get("collection_warnings") or [],
             generated_at=str(payload.get("generated_at") or "-"),
         )

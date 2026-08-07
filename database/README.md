@@ -73,7 +73,7 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 
 ### Environment data schemas
 
-`public_data` and `gov_data` contain the same seven tables. A constant
+`public_data` and `gov_data` contain the same eight tables. A constant
 environment check and a composite foreign key prevent a report run from being
 written to the wrong schema.
 
@@ -85,6 +85,7 @@ written to the wrong schema.
 | `metric_series` | Chart points or an external artifact URI |
 | `metric_summaries` | Minimum, average and maximum metric values |
 | `cost_details` | Confirmed/estimated costs and calculation confidence |
+| `billing_cost_facts` | Period-aware confirmed, estimated and projected billing totals |
 | `raw_payload_refs` | URI and checksum for raw collector payloads |
 
 ### `audit` schema

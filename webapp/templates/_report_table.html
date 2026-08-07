@@ -1,12 +1,14 @@
 {% if reports %}
 <div class="table-wrap">
   <table>
-    <thead><tr>{% if show_customer|default(false) %}<th>고객</th>{% endif %}<th>기간</th><th>계정</th><th>유형</th><th>상태</th><th>오류</th><th></th></tr></thead>
+    <thead><tr>{% if show_customer|default(false) %}<th>고객</th>{% endif %}<th>기간</th><th>계정</th><th>유형</th><th>생성 시각</th><th>실행 시간</th><th>상태</th><th>오류</th><th></th></tr></thead>
     <tbody>{% for item in reports %}<tr>
       {% if show_customer|default(false) %}<td><strong>{{ item.customer_name }}</strong></td>{% endif %}
-      <td><strong>{{ item.period_start|kst('%Y-%m-%d') }}</strong><small>{{ item.period_start|kst('%H:%M') }}–{{ item.period_end|kst('%m-%d %H:%M') }}</small></td>
+      <td><strong>{{ item.period_start|kst('%Y-%m-%d') }}</strong><small>{{ item.period_start|kst('%H:%M') }}–{{ item.period_end|inclusive_end(item.end_exclusive)|kst('%m-%d %H:%M') }}</small></td>
       <td>{{ item.account_name or '기본 계정' }}</td>
       <td>{{ '일일' if item.report_type == 'DAILY' else ('월간' if item.report_type == 'MONTHLY' else item.report_type) }}</td>
+      <td>{{ item.created_at|kst('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>{{ item.execution_seconds|duration }}</td>
       <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}">{{ item.status }}</span></td>
       <td>{{ item.error_count }}</td>
       <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a></td>

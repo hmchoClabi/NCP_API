@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 import calendar
+from datetime import date, datetime, timedelta
 
 
 class BillingNormalizer:
@@ -22,93 +23,84 @@ class BillingNormalizer:
         billing_month: str = None,
         use_end_date: str = None,
         comparison_enabled: bool = True,
+        report_period: Optional[Dict[str, Any]] = None,
+        calculated_at: Optional[str] = None,
     ) -> Dict[str, Any]:
-
         billing_month = billing_month or current_month
+        report_period = report_period or {}
         days_in_month = self.get_days_in_month(billing_month, use_end_date)
         raw_meta = self.as_dict(raw_data.get("_meta"))
-        collection_errors = [
-            error
-            for error in raw_meta.get("collection_errors", [])
-            if isinstance(error, dict)
-        ]
+        collection_errors = self._dict_list(raw_meta.get("collection_errors"))
+        collection_warnings = self._dict_list(raw_meta.get("collection_warnings"))
         comparison_input_errors = [
-            error
-            for error in collection_errors
+            error for error in collection_errors
             if error.get("comparison_required")
         ]
 
         demand_rows = self.extract_rows(
-            raw_data.get("product_demand_cost", []),
-            "productDemandCostList",
+            raw_data.get("product_demand_cost", []), "productDemandCostList"
         )
-
+        confirmed_demand_rows = self.extract_rows(
+            raw_data.get("confirmed_demand_cost", []), "demandCostList"
+        )
+        confirmed_product_rows = self.extract_rows(
+            raw_data.get("confirmed_product_demand_cost", []),
+            "productDemandCostList",
+        ) or demand_rows
         demand_discount_rows = self.extract_rows(
             raw_data.get("product_demand_cost_by_discount", []),
             "productDemandCostByDiscountList",
         )
-
         daily_usage_rows = self.extract_rows(
-            raw_data.get("daily_usage", []),
+            raw_data.get("daily_usage", []), "contractUsageListByDaily"
+        )
+        month_to_date_usage_rows = self.extract_rows(
+            raw_data.get("month_to_date_usage", []),
             "contractUsageListByDaily",
         )
-
-        price_rows = self.extract_rows(
-            raw_data.get("price_list", []),
-            "priceList",
-        )
-
+        price_rows = self.extract_rows(raw_data.get("price_list", []), "priceList")
         discount_rows = self.extract_rows(
-            raw_data.get("discount_list", []),
-            "discountList",
+            raw_data.get("discount_list", []), "discountList"
         )
 
-        service_summary = self.summarize_confirmed_by_service(demand_rows)
+        service_summary = self.summarize_confirmed_by_service(
+            confirmed_product_rows
+        )
+        target_service_summary = self.summarize_confirmed_by_service(demand_rows)
         discount_summary = self.summarize_discount_by_service(demand_discount_rows)
         usage_summary = self.summarize_usage(daily_usage_rows)
         network_usage_summary = self.summarize_network_usage(daily_usage_rows)
-
         expected_cost_summary = self.summarize_expected_cost(
             usage_rows=daily_usage_rows,
             price_rows=price_rows,
             days_in_month=days_in_month,
         )
+        month_to_date_cost_summary = self.summarize_expected_cost(
+            usage_rows=month_to_date_usage_rows,
+            price_rows=price_rows,
+            days_in_month=days_in_month,
+        )
 
-        verified_expected_rows = [
-            row
-            for row in expected_cost_summary
-            if row.get("calculation_status") == "OK"
-        ]
+        verified_expected_rows = self._verified_cost_rows(expected_cost_summary)
         expected_by_service = self.summarize_expected_by_service(
             verified_expected_rows
         )
-        confirmed_total = sum(row["amount"] for row in service_summary)
         confirmed_use_total = sum(
-            row["use_amount"]
-            for row in service_summary
+            row["use_amount"] for row in target_service_summary
         )
-        expected_total = sum(
-            row["expected_amount"] for row in verified_expected_rows
-        )
+        expected_total = sum(row["expected_amount"] for row in verified_expected_rows)
         expected_total_all = sum(
             row["expected_amount"] for row in expected_cost_summary
         )
         unverified_expected_amount = expected_total_all - expected_total
-        calculation_status_counts = dict(
-            Counter(
-                row.get("calculation_status") or "UNKNOWN"
-                for row in expected_cost_summary
-            )
-        )
+        calculation_status_counts = dict(Counter(
+            row.get("calculation_status") or "UNKNOWN"
+            for row in expected_cost_summary
+        ))
         has_unverified_expected = any(
-            status != "OK"
-            for status in calculation_status_counts
+            status != "OK" for status in calculation_status_counts
         )
-        if (
-            comparison_enabled
-            and not expected_cost_summary
-            and confirmed_use_total != 0
-        ):
+        if comparison_enabled and not expected_cost_summary and confirmed_use_total != 0:
             has_unverified_expected = True
 
         if not comparison_enabled:
@@ -120,38 +112,77 @@ class BillingNormalizer:
         else:
             comparison_status = "OK"
 
-        comparison_is_valid = comparison_status == "OK"
         comparison_summary = (
             self.compare_confirmed_and_expected(
-                confirmed_summary=service_summary,
+                confirmed_summary=target_service_summary,
                 expected_summary=expected_by_service,
             )
-            if comparison_is_valid
-            else []
+            if comparison_status == "OK" else []
         )
-
         diff_amount: Optional[float] = None
         diff_rate: Optional[float] = None
-        if comparison_is_valid:
+        if comparison_status == "OK":
             diff_amount = round(expected_total - confirmed_use_total, 2)
             diff_rate = self.safe_rate(diff_amount, confirmed_use_total)
+
+        confirmed_month = str(
+            raw_meta.get("confirmed_demand_month")
+            or report_period.get("confirmed_demand_month")
+            or billing_month
+        )
+        invoice_summary = self.summarize_confirmed_invoice(
+            confirmed_demand_rows, confirmed_month, calculated_at
+        )
+        requested_start, requested_end = self.report_period_dates(
+            report_period, billing_month
+        )
+        period_estimate = self.build_estimate_fact(
+            "PERIOD_ESTIMATE", requested_start, requested_end,
+            self.usage_coverage(daily_usage_rows), expected_cost_summary,
+            calculated_at,
+        )
+        month_to_date_start = (
+            self._parse_api_date(report_period.get("month_to_date_start"))
+            or self.month_start_date(billing_month)
+        )
+        month_to_date_coverage = self.usage_coverage(month_to_date_usage_rows)
+        month_to_date_end = (
+            month_to_date_coverage[1]
+            or self._parse_api_date(report_period.get("month_to_date_end"))
+            or requested_end
+        )
+        month_to_date_estimate = self.build_estimate_fact(
+            "MONTH_TO_DATE_ESTIMATE", month_to_date_start, month_to_date_end,
+            month_to_date_coverage, month_to_date_cost_summary, calculated_at,
+        )
+        month_end_projection = self.build_month_end_projection(
+            billing_month,
+            bool(report_period.get("target_month_closed", False)),
+            month_to_date_estimate,
+            calculated_at,
+        )
+        confirmed_total = self.first_present(
+            invoice_summary.get("total_amount"),
+            sum(row["amount"] for row in service_summary),
+            default=0.0,
+        )
+        cost_facts = [invoice_summary, period_estimate, month_to_date_estimate]
+        if month_end_projection.get("status") != "NOT_APPLICABLE":
+            cost_facts.append(month_end_projection)
 
         return {
             "summary": {
                 "billing_month": billing_month,
+                "confirmed_billing_month": confirmed_month,
                 "days_in_month": days_in_month,
-                "confirmed_total_amount": round(confirmed_total, 2),
-                "confirmed_use_total_amount": round(
-                    confirmed_use_total,
-                    2,
-                ),
-                "comparison_base_total_amount": round(
-                    confirmed_use_total,
-                    2,
-                ),
+                "confirmed_total_amount": round(self.to_float(confirmed_total), 2),
+                "confirmed_use_total_amount": round(confirmed_use_total, 2),
+                "comparison_base_total_amount": round(confirmed_use_total, 2),
                 "comparison_basis": "PRE_DISCOUNT_USE_AMOUNT",
                 "expected_total_amount": round(expected_total, 2),
                 "expected_total_amount_all": round(expected_total_all, 2),
+                "month_to_date_expected_amount": month_to_date_estimate["total_amount"],
+                "month_end_projection_amount": month_end_projection.get("total_amount"),
                 "unverified_expected_amount": round(unverified_expected_amount, 2),
                 "diff_amount": diff_amount,
                 "diff_rate": diff_rate,
@@ -163,23 +194,310 @@ class BillingNormalizer:
                 "expected_cost_count": len(expected_cost_summary),
                 "discount_count": len(discount_rows),
                 "collection_error_count": len(collection_errors),
-                "comparison_input_error_count": len(
-                    comparison_input_errors
-                ),
+                "collection_warning_count": len(collection_warnings),
+                "comparison_input_error_count": len(comparison_input_errors),
             },
             "service_summary": service_summary,
+            "target_service_summary": target_service_summary,
             "discount_summary": discount_summary,
             "usage_summary": usage_summary,
             "network_usage_summary": network_usage_summary,
             "expected_cost_summary": expected_cost_summary,
+            "month_to_date_cost_summary": month_to_date_cost_summary,
             "expected_by_service": expected_by_service,
             "comparison_summary": comparison_summary,
             "discount_rows": discount_rows,
             "demand_cost_rows": demand_rows,
+            "confirmed_demand_cost_rows": confirmed_demand_rows,
             "demand_discount_rows": demand_discount_rows,
             "daily_usage_rows": daily_usage_rows,
+            "month_to_date_usage_rows": month_to_date_usage_rows,
             "price_rows": price_rows,
             "collection_errors": collection_errors,
+            "collection_warnings": collection_warnings,
+            "invoice_summary": invoice_summary,
+            "period_estimate": period_estimate,
+            "month_to_date_estimate": month_to_date_estimate,
+            "month_end_projection": month_end_projection,
+            "cost_facts": cost_facts,
+        }
+
+    @staticmethod
+    def _dict_list(value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, dict)]
+
+    @staticmethod
+    def _verified_cost_rows(
+        rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        return [row for row in rows if row.get("calculation_status") == "OK"]
+
+    @staticmethod
+    def month_start_date(billing_month: str) -> date:
+        return datetime.strptime(str(billing_month), "%Y%m").date().replace(day=1)
+
+    @classmethod
+    def month_bounds(cls, billing_month: str) -> Tuple[date, date]:
+        start = cls.month_start_date(billing_month)
+        end = start.replace(
+            day=calendar.monthrange(start.year, start.month)[1]
+        )
+        return start, end
+
+    @classmethod
+    def report_period_dates(
+        cls, period: Dict[str, Any], billing_month: str
+    ) -> Tuple[date, date]:
+        if not period.get("start_dt") or not period.get("end_dt"):
+            return cls.month_bounds(billing_month)
+        start = datetime.fromisoformat(str(period["start_dt"]).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(period["end_dt"]).replace("Z", "+00:00"))
+        if period.get("end_exclusive"):
+            end -= timedelta(microseconds=1)
+        return start.date(), end.date()
+
+    @classmethod
+    def usage_coverage(
+        cls, rows: List[Dict[str, Any]]
+    ) -> Tuple[Optional[date], Optional[date]]:
+        starts: List[date] = []
+        ends: List[date] = []
+        for row in rows:
+            use_date = cls.as_dict(row.get("useDate"))
+            start = cls._parse_api_date(use_date.get("useStartDate"))
+            end = cls._parse_api_date(use_date.get("useEndDate"))
+            if start:
+                starts.append(start)
+            if end:
+                ends.append(end)
+        return (min(starts) if starts else None, max(ends) if ends else None)
+
+    @staticmethod
+    def _parse_api_date(value: Any) -> Optional[date]:
+        if value in (None, ""):
+            return None
+        normalized = str(value).strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized).date()
+        except ValueError:
+            try:
+                return datetime.strptime(normalized[:8], "%Y%m%d").date()
+            except ValueError:
+                return None
+
+    def summarize_confirmed_invoice(
+        self,
+        rows: List[Dict[str, Any]],
+        billing_month: str,
+        calculated_at: Optional[str],
+    ) -> Dict[str, Any]:
+        period_start, period_end = self.month_bounds(billing_month)
+        if not rows:
+            return {
+                "cost_type": "CONFIRMED",
+                "status": "UNAVAILABLE",
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+                "coverage_start": None,
+                "coverage_end": None,
+                "calculated_at": calculated_at,
+                "subtotal_amount": None,
+                "discount_amount": None,
+                "vat_amount": None,
+                "total_amount": None,
+                "currency": "KRW",
+                "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+                "includes_discount": True,
+                "includes_vat": True,
+                "confidence": "UNAVAILABLE",
+                "excluded_item_count": 0,
+                "source_api": "getDemandCostList",
+                "calculation_version": "1.1",
+                "details": {},
+            }
+
+        subtotal = sum(self.to_float(row.get("thisMonthDemandAmount")) for row in rows)
+        vat = sum(self.to_float(row.get("thisMonthVatAmount")) for row in rows)
+        total_demand = sum(
+            self.to_float(row.get("totalDemandAmount")) for row in rows
+        )
+        current_including_vat = sum(
+            self.to_float(row.get("thisMonthAmountIncludingVat")) for row in rows
+        )
+        has_current_invoice_total = any(
+            row.get("thisMonthAmountIncludingVat") not in (None, "")
+            for row in rows
+        )
+        has_current_components = any(
+            row.get("thisMonthDemandAmount") not in (None, "")
+            or row.get("thisMonthVatAmount") not in (None, "")
+            for row in rows
+        )
+        total = (
+            current_including_vat
+            if has_current_invoice_total
+            else subtotal + vat
+            if has_current_components
+            else total_demand
+        )
+        use_amount = sum(self.to_float(row.get("useAmount")) for row in rows)
+        discount_keys = (
+            "promiseDiscountAmount", "promotionDiscountAmount",
+            "etcDiscountAmount", "customerDiscountAmount",
+            "productDiscountAmount", "creditDiscountAmount",
+            "rounddownDiscountAmount", "currencyDiscountAmount",
+            "coinUseAmount", "memberPriceDiscountAmount",
+            "memberPromiseDiscountAddAmount",
+        )
+        discount = sum(
+            self.to_float(row.get(key)) for row in rows for key in discount_keys
+        )
+        write_dates = sorted(
+            str(row.get("writeDate")) for row in rows if row.get("writeDate")
+        )
+        currencies = [
+            str(self.as_dict(row.get("payCurrency")).get("code"))
+            for row in rows
+            if self.as_dict(row.get("payCurrency")).get("code")
+        ]
+        return {
+            "cost_type": "CONFIRMED",
+            "status": "AVAILABLE",
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "coverage_start": period_start.isoformat(),
+            "coverage_end": period_end.isoformat(),
+            "calculated_at": calculated_at,
+            "subtotal_amount": round(subtotal, 2),
+            "discount_amount": round(discount, 2),
+            "vat_amount": round(vat, 2),
+            "total_amount": round(total, 2),
+            "currency": currencies[0] if currencies else "KRW",
+            "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+            "includes_discount": True,
+            "includes_vat": True,
+            "confidence": "CONFIRMED",
+            "excluded_item_count": 0,
+            "source_api": "getDemandCostList",
+            "calculation_version": "1.1",
+            "details": {
+                "use_amount": round(use_amount, 2),
+                "current_month_amount_including_vat": round(current_including_vat, 2),
+                "total_demand_amount": round(total_demand, 2),
+                "invoice_count": len(rows),
+                "write_date": write_dates[-1] if write_dates else None,
+                "is_paid_up": all(bool(row.get("isPaidUp")) for row in rows),
+            },
+        }
+
+    def build_estimate_fact(
+        self,
+        cost_type: str,
+        period_start: date,
+        period_end: date,
+        coverage: Tuple[Optional[date], Optional[date]],
+        rows: List[Dict[str, Any]],
+        calculated_at: Optional[str],
+    ) -> Dict[str, Any]:
+        verified = self._verified_cost_rows(rows)
+        total = sum(self.to_float(row.get("expected_amount")) for row in verified)
+        total_all = sum(self.to_float(row.get("expected_amount")) for row in rows)
+        excluded = sum(row.get("calculation_status") != "OK" for row in rows)
+        has_data = bool(rows)
+        confidence = (
+            "UNAVAILABLE" if not has_data
+            else "PARTIAL" if excluded
+            else "VERIFIED_ESTIMATE"
+        )
+        return {
+            "cost_type": cost_type,
+            "status": "AVAILABLE" if has_data else "UNAVAILABLE",
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "coverage_start": coverage[0].isoformat() if coverage[0] else None,
+            "coverage_end": coverage[1].isoformat() if coverage[1] else None,
+            "calculated_at": calculated_at,
+            "subtotal_amount": round(total, 2),
+            "discount_amount": None,
+            "vat_amount": None,
+            "total_amount": round(total, 2),
+            "currency": "KRW",
+            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            "includes_discount": False,
+            "includes_vat": False,
+            "confidence": confidence,
+            "excluded_item_count": int(excluded),
+            "source_api": "getContractUsageListByDaily,getPriceList",
+            "calculation_version": "1.1",
+            "details": {
+                "all_calculated_amount": round(total_all, 2),
+                "row_count": len(rows),
+            },
+        }
+
+    def build_month_end_projection(
+        self,
+        billing_month: str,
+        target_month_closed: bool,
+        month_to_date_estimate: Dict[str, Any],
+        calculated_at: Optional[str],
+    ) -> Dict[str, Any]:
+        period_start, period_end = self.month_bounds(billing_month)
+        base = {
+            "cost_type": "MONTH_END_PROJECTION",
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "coverage_start": month_to_date_estimate.get("coverage_start"),
+            "coverage_end": month_to_date_estimate.get("coverage_end"),
+            "calculated_at": calculated_at,
+            "discount_amount": None,
+            "vat_amount": None,
+            "currency": "KRW",
+            "amount_basis": "DAILY_RUN_RATE_PROJECTION",
+            "includes_discount": False,
+            "includes_vat": False,
+            "excluded_item_count": month_to_date_estimate.get("excluded_item_count", 0),
+            "source_api": "getContractUsageListByDaily,getPriceList",
+            "calculation_version": "1.1",
+        }
+        if target_month_closed:
+            return {**base, "status": "NOT_APPLICABLE", "subtotal_amount": None,
+                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
+        coverage_start = self._parse_api_date(
+            month_to_date_estimate.get("coverage_start")
+        )
+        coverage_end = self._parse_api_date(
+            month_to_date_estimate.get("coverage_end")
+        )
+        if (
+            not coverage_start
+            or not coverage_end
+            or month_to_date_estimate.get("status") != "AVAILABLE"
+        ):
+            return {**base, "status": "UNAVAILABLE", "subtotal_amount": None,
+                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
+        observed_days = (coverage_end - coverage_start).days + 1
+        if observed_days <= 0:
+            return {**base, "status": "UNAVAILABLE", "subtotal_amount": None,
+                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
+        projected = (
+            self.to_float(month_to_date_estimate.get("total_amount"))
+            / observed_days
+            * period_end.day
+        )
+        confidence = (
+            "PARTIAL" if month_to_date_estimate.get("confidence") == "PARTIAL"
+            else "VERIFIED_ESTIMATE"
+        )
+        return {
+            **base,
+            "status": "AVAILABLE",
+            "subtotal_amount": round(projected, 2),
+            "total_amount": round(projected, 2),
+            "confidence": confidence,
+            "details": {"observed_days": observed_days, "month_days": period_end.day},
         }
 
     def summarize_confirmed_by_service(

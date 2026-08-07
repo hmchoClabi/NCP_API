@@ -580,13 +580,22 @@ class PortalRepository:
                 SELECT report.id, report.tenant_id, tenant.customer_name,
                        account.display_name AS account_name,
                        report.report_type, report.period_start, report.period_end,
-                       report.status, report.error_count, report.completed_at
+                       report.end_exclusive,
+                       report.status, report.error_count, report.created_at,
+                       report.completed_at,
+                       CASE
+                           WHEN report.started_at IS NULL THEN NULL
+                           ELSE GREATEST(EXTRACT(EPOCH FROM (
+                               COALESCE(report.completed_at, clock_timestamp())
+                               - report.started_at
+                           )), 0)::bigint
+                       END AS execution_seconds
                 FROM control.report_runs report
                 JOIN control.tenants tenant ON tenant.id = report.tenant_id
                 LEFT JOIN control.cloud_accounts account
                     ON account.id = report.cloud_account_id
                 WHERE report.tenant_id = ANY(%s::uuid[])
-                ORDER BY report.period_start DESC
+                ORDER BY report.created_at DESC, report.id DESC
                 LIMIT 100
                 """,
                 (tenant_ids,),
@@ -730,6 +739,8 @@ class PortalRepository:
                                AS period_start,
                            COALESCE(report.period_end, job.period_end)
                                AS period_end,
+                           COALESCE(report.end_exclusive, true)
+                               AS end_exclusive,
                            job.created_at AS requested_at,
                            job.started_at, job.completed_at,
                            COALESCE(report.error_count, 0) AS error_count,
@@ -749,6 +760,7 @@ class PortalRepository:
                            report.report_type, NULL, report.trigger_type,
                            report.status, report.status, report.id,
                            report.period_start, report.period_end,
+                           report.end_exclusive,
                            report.queued_at, report.started_at,
                            report.completed_at, report.error_count,
                            requester.display_name
@@ -1349,12 +1361,21 @@ class PortalRepository:
         cursor.execute(
             """
             SELECT report.id, report.report_type, report.period_start,
-                   report.period_end, report.status, report.error_count,
-                   report.completed_at, account.display_name AS account_name
+                   report.period_end, report.end_exclusive,
+                   report.status, report.error_count,
+                   report.created_at, report.completed_at,
+                   CASE
+                       WHEN report.started_at IS NULL THEN NULL
+                       ELSE GREATEST(EXTRACT(EPOCH FROM (
+                           COALESCE(report.completed_at, clock_timestamp())
+                           - report.started_at
+                       )), 0)::bigint
+                   END AS execution_seconds,
+                   account.display_name AS account_name
             FROM control.report_runs report
             LEFT JOIN control.cloud_accounts account ON account.id = report.cloud_account_id
             WHERE report.tenant_id = %s
-            ORDER BY report.period_start DESC LIMIT 50
+            ORDER BY report.created_at DESC, report.id DESC LIMIT 50
             """,
             (tenant_id,),
         )

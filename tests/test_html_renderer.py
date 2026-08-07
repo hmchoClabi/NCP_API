@@ -237,6 +237,22 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("4,321", html)
         self.assertIn("미확정 예상 비용", html)
 
+    def test_monthly_header_uses_inclusive_last_day(self):
+        report = self._sample_report()
+        report.period = {
+            "period_type": "month",
+            "start_dt": "2026-07-01 00:00:00",
+            "end_dt": "2026-08-01 00:00:00",
+            "end_exclusive": True,
+            "file_suffix": "20260701_20260731",
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("2026-07-01", html)
+        self.assertIn("2026-07-31", html)
+        self.assertNotIn("2026-08-01", html)
+
     def test_single_day_report_uses_full_day_axis_and_hourly_average(self):
         report = self._sample_report()
         report.period = {

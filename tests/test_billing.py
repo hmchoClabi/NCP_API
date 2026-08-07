@@ -1,5 +1,7 @@
 import unittest
 
+import requests
+
 from collectors.billingcollector import BillingCollector
 from normalizers.billingnormalizer import BillingNormalizer
 
@@ -390,12 +392,121 @@ class BillingNormalizerTests(unittest.TestCase):
         )
         self.assertEqual(result["comparison_summary"], [])
 
+    def test_cost_facts_keep_confirmed_and_estimated_periods_separate(self):
+        usage_row = {
+            "useDate": {
+                "useStartDate": "20260701",
+                "useEndDate": "20260731",
+            },
+            "contract": {"contractType": {"codeName": "Server"}},
+            "contractProduct": {
+                "priceNo": "price-1",
+                "productRatingType": {"codeName": "CPU", "code": "CPU"},
+            },
+            "usage": {
+                "userUsageQuantity": 10,
+                "userUnit": {"code": "HOUR", "codeName": "hour"},
+            },
+        }
+        result = self.normalizer.normalize(
+            {
+                "confirmed_demand_cost": [{
+                    "demandCostList": [{
+                        "thisMonthDemandAmount": 100,
+                        "thisMonthVatAmount": 10,
+                        "thisMonthAmountIncludingVat": 110,
+                        "totalDemandAmount": 310,
+                        "payCurrency": {"code": "KRW"},
+                    }]
+                }],
+                "product_demand_cost": [],
+                "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "month_to_date_usage": [
+                    {"contractUsageListByDaily": [usage_row]}
+                ],
+                "price_list": [{
+                    "priceList": [{
+                        "priceNo": "price-1",
+                        "price": 10,
+                        "priceUnitType": {"code": "USAGE_HH"},
+                    }]
+                }],
+            },
+            billing_month="202607",
+            report_period={
+                "start_dt": "2026-07-01 00:00:00",
+                "end_dt": "2026-07-31 23:59:59",
+                "confirmed_demand_month": "202607",
+                "target_month_closed": True,
+            },
+            calculated_at="2026-08-07T12:00:00+09:00",
+        )
+
+        self.assertEqual(result["invoice_summary"]["total_amount"], 110.0)
+        self.assertEqual(
+            result["invoice_summary"]["details"]["total_demand_amount"],
+            310.0,
+        )
+        self.assertEqual(result["invoice_summary"]["period_start"], "2026-07-01")
+        self.assertEqual(result["invoice_summary"]["period_end"], "2026-07-31")
+        self.assertEqual(result["period_estimate"]["total_amount"], 100.0)
+        self.assertEqual(result["period_estimate"]["coverage_end"], "2026-07-31")
+        self.assertEqual(
+            [fact["cost_type"] for fact in result["cost_facts"]],
+            ["CONFIRMED", "PERIOD_ESTIMATE", "MONTH_TO_DATE_ESTIMATE"],
+        )
+
     def test_rate_with_zero_base_is_not_reported_as_zero_when_value_exists(self):
         self.assertIsNone(self.normalizer.safe_rate(10, 0))
         self.assertEqual(self.normalizer.safe_rate(0, 0), 0.0)
 
+    def test_month_end_projection_uses_actual_coverage_days(self):
+        projection = self.normalizer.build_month_end_projection(
+            "202608",
+            False,
+            {
+                "status": "AVAILABLE",
+                "coverage_start": "2026-08-03",
+                "coverage_end": "2026-08-07",
+                "total_amount": 50,
+                "confidence": "VERIFIED_ESTIMATE",
+                "excluded_item_count": 0,
+            },
+            "2026-08-07T12:00:00+09:00",
+        )
+
+        self.assertEqual(projection["details"]["observed_days"], 5)
+        self.assertEqual(projection["total_amount"], 310.0)
+
 
 class BillingCollectorTests(unittest.TestCase):
+    def test_discount_return_code_2300_is_warning_not_report_error(self):
+        platform = BillingPlatformStub()
+
+        def unavailable_discount(*args, **kwargs):
+            response = requests.Response()
+            response.status_code = 500
+            response._content = (
+                b'{"responseError":{"returnCode":"2300",'
+                b'"returnMessage":"not available","requestId":"request-1"}}'
+            )
+            raise requests.HTTPError("500 Server Error", response=response)
+
+        platform.get_product_demand_cost_by_discount_list = unavailable_discount
+        collector = BillingCollector(FakeFactory(platform))
+
+        raw = collector.collect_raw(
+            use_start_date="20260701",
+            use_end_date="20260731",
+            demand_month="202607",
+        )
+
+        self.assertEqual(raw["product_demand_cost_by_discount"], [])
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(len(collector.last_warnings), 1)
+        self.assertEqual(collector.last_warnings[0]["error_code"], "2300")
+        self.assertEqual(raw["_meta"]["collection_warnings"][0]["severity"], "WARNING")
+
     def test_collect_paged_validates_and_stops_at_total_rows(self):
         collector = BillingCollector(FakeFactory(object()))
         calls = []

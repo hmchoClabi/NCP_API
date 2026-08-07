@@ -221,6 +221,19 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertTrue(period["is_full_month"])
         self.assertTrue(period["is_closed_month"])
 
+    def test_current_month_billing_query_is_clamped_to_today(self):
+        runner = self._runner_without_factory_init()
+        runner._today_kst = lambda: date(2026, 8, 7)
+        period = runner.get_period(target_month="2026-08")
+
+        context = runner._billing_period_context(period)
+
+        self.assertEqual(context["usage_query_end_date"], "20260807")
+        self.assertEqual(context["month_to_date_start"], "20260801")
+        self.assertEqual(context["month_to_date_end"], "20260807")
+        self.assertEqual(context["confirmed_demand_month"], "202607")
+        self.assertFalse(context["target_month_closed"])
+
     def test_datetime_range_uses_exclusive_end_and_time_file_suffix(self):
         runner = self._runner_without_factory_init()
 
@@ -365,7 +378,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 json.loads(json_path.read_text(encoding="utf-8"))[
                     "schema_version"
                 ],
-                "1.0",
+                "1.1",
             )
 
     def test_period_scoped_empty_summary_files_replace_stale_content(self):

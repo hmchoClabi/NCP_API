@@ -1,7 +1,7 @@
 import json
 import math
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -40,6 +40,23 @@ class HtmlReportRenderer:
         )
         billing = report.billing or {}
         billing_summary = billing.get("summary", {})
+        invoice_summary = self._mapping(billing.get("invoice_summary"))
+        period_estimate = self._mapping(billing.get("period_estimate"))
+        month_to_date_estimate = self._mapping(
+            billing.get("month_to_date_estimate")
+        )
+        month_end_projection = self._mapping(
+            billing.get("month_end_projection")
+        )
+        cost_facts = [
+            fact for fact in (
+                invoice_summary,
+                period_estimate,
+                month_to_date_estimate,
+                month_end_projection,
+            )
+            if fact and fact.get("status") != "NOT_APPLICABLE"
+        ]
         confirmed_service_summary = self._records(
             billing.get("service_summary")
         )
@@ -53,8 +70,10 @@ class HtmlReportRenderer:
                 }
                 for row in self._records(billing.get("expected_by_service"))
             ]
-            billing_card_title = "예상 비용"
-            billing_card_amount = billing_summary.get("expected_total_amount")
+            billing_card_title = "기간 예상 비용"
+            billing_card_amount = period_estimate.get(
+                "total_amount", billing_summary.get("expected_total_amount")
+            )
             billing_section_title = "서비스별 예상 비용"
             billing_section_description = (
                 "선택한 기간의 사용량과 단가로 계산한 미확정 예상 비용입니다. "
@@ -63,7 +82,9 @@ class HtmlReportRenderer:
         else:
             service_summary = confirmed_service_summary
             billing_card_title = "확정 청구 금액"
-            billing_card_amount = billing_summary.get("confirmed_total_amount")
+            billing_card_amount = invoice_summary.get(
+                "total_amount", billing_summary.get("confirmed_total_amount")
+            )
             billing_section_title = "서비스별 청구 금액"
             billing_section_description = (
                 "NCP 서비스 단위로 집계한 확정 청구 금액입니다."
@@ -89,9 +110,9 @@ class HtmlReportRenderer:
       <div>
         <p class="eyebrow">NAVER CLOUD PLATFORM</p>
         <h1>{self._text(report_title)}</h1>
-        <p class="subtitle">{self._text(period.get("start_dt", "-"))}
+        <p class="subtitle">{self._text(self._display_period_start(period))}
           <span aria-hidden="true">→</span>
-          {self._text(period.get("end_dt", "-"))}</p>
+          {self._text(self._display_period_end(period))}</p>
       </div>
       <div class="report-meta">
         <span>보고서 ID</span>
@@ -149,6 +170,12 @@ class HtmlReportRenderer:
     )}
     {self._metric_chart_section(report.server_metrics, report.period)}
     {self._section(
+        "과금 데이터 기준",
+        "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
+        self._billing_fact_cards(cost_facts),
+        len(cost_facts),
+    )}
+    {self._section(
         billing_section_title,
         billing_section_description,
         self._table(
@@ -202,6 +229,13 @@ class HtmlReportRenderer:
             ),
         ),
         len(usage_summary),
+    )}
+    {self._section(
+        "수집 경고",
+        "보고서 생성을 중단하지 않는 제한 사항입니다.",
+        self._error_table(report.collection_warnings),
+        len(report.collection_warnings),
+        warning=bool(report.collection_warnings),
     )}
     {self._section(
         "수집 오류",
@@ -1185,6 +1219,86 @@ class HtmlReportRenderer:
                 return value
         return "-"
 
+    @staticmethod
+    def _mapping(value: Any) -> Dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    def _display_period_start(self, period: Dict[str, Any]) -> str:
+        value = str(period.get("start_dt") or "-")
+        if period.get("period_type") != "datetime_range":
+            return value[:10]
+        return value
+
+    def _display_period_end(self, period: Dict[str, Any]) -> str:
+        value = str(period.get("end_dt") or "-")
+        if value == "-":
+            return value
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if period.get("end_exclusive"):
+                parsed -= timedelta(microseconds=1)
+            if period.get("period_type") != "datetime_range":
+                return parsed.strftime("%Y-%m-%d")
+            return parsed.isoformat(sep=" ", timespec="seconds")
+        except ValueError:
+            return value
+
+    def _billing_fact_cards(self, facts: List[Dict[str, Any]]) -> str:
+        labels = {
+            "CONFIRMED": "확정 청구 데이터",
+            "PERIOD_ESTIMATE": "보고 기간 추정 데이터",
+            "MONTH_TO_DATE_ESTIMATE": "월 누적 추정 데이터",
+            "MONTH_END_PROJECTION": "월말 추정 데이터",
+        }
+        basis_labels = {
+            "INVOICE_TOTAL": "NCP 발행 청구서 총액",
+            "CURRENT_MONTH_INVOICE_TOTAL": "NCP 해당 월 확정 금액 (VAT 포함)",
+            "PRE_DISCOUNT_LIST_PRICE": "사용량 × 단가 (할인·VAT 전)",
+            "DAILY_RUN_RATE_PROJECTION": "월 누적 일평균 추세 예측",
+        }
+        cards = []
+        for fact in facts:
+            status = str(fact.get("status") or "UNAVAILABLE")
+            amount = (
+                self._number(fact.get("total_amount"), 0) + "원"
+                if fact.get("total_amount") is not None else "조회 불가"
+            )
+            period_text = (
+                f"{fact.get('period_start') or '-'} ~ "
+                f"{fact.get('period_end') or '-'}"
+            )
+            coverage_text = (
+                f"{fact.get('coverage_start') or '-'} ~ "
+                f"{fact.get('coverage_end') or '-'}"
+            )
+            invoice_breakdown = ""
+            if fact.get("cost_type") == "CONFIRMED" and status == "AVAILABLE":
+                invoice_breakdown = (
+                    "<li><span>공급가액 / VAT</span><strong>"
+                    f"{self._number(fact.get('subtotal_amount'), 0)}원 / "
+                    f"{self._number(fact.get('vat_amount'), 0)}원"
+                    "</strong></li>"
+                )
+            included = (
+                f"할인 {'포함' if fact.get('includes_discount') else '미포함'}, "
+                f"VAT {'포함' if fact.get('includes_vat') else '미포함'}"
+            )
+            cards.append(
+                '<article class="billing-fact">'
+                f"<h3>{self._text(labels.get(str(fact.get('cost_type')), fact.get('cost_type')))}</h3>"
+                f'<strong class="billing-amount">{self._text(amount)}</strong>'
+                "<ul>"
+                f"<li><span>대상 기간</span><strong>{self._text(period_text)}</strong></li>"
+                f"<li><span>실제 수집 범위</span><strong>{self._text(coverage_text)}</strong></li>"
+                f"<li><span>계산 기준 시각</span><strong>{self._text(fact.get('calculated_at'))}</strong></li>"
+                f"<li><span>금액 기준</span><strong>{self._text(basis_labels.get(str(fact.get('amount_basis')), fact.get('amount_basis')))}</strong></li>"
+                f"<li><span>포함 범위</span><strong>{self._text(included)}</strong></li>"
+                f"<li><span>신뢰도</span><strong>{self._text(fact.get('confidence'))}</strong></li>"
+                f"{invoice_breakdown}"
+                "</ul></article>"
+            )
+        return '<div class="billing-facts">' + "".join(cards) + "</div>"
+
     def _records(self, value: Any) -> List[Dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -1323,6 +1437,23 @@ h2 { margin: 0; font-size: 1.22rem; }
   font-size: .78rem;
   font-weight: 800;
 }
+.billing-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.billing-fact {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.billing-fact h3 { margin: 0; font-size: 1rem; }
+.billing-amount { display: block; margin: 8px 0 14px; font-size: 1.45rem; }
+.billing-fact ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.billing-fact li { display: flex; justify-content: space-between; gap: 16px; font-size: .82rem; }
+.billing-fact li span { color: var(--muted); }
+.billing-fact li strong { text-align: right; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .84rem; }
 th {
@@ -1412,13 +1543,13 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
 @media (max-width: 900px) {
   .report-header { flex-direction: column; padding: 28px; }
   .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
-  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid, .billing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
 }
 @media print {
