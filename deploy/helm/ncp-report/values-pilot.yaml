@@ -54,6 +54,10 @@ artifacts:
 
 backups:
   enabled: true
+  # Keep the original claim rendered for recovery analysis, but direct new jobs
+  # to the replacement claim after its backing Block Storage was deleted.
+  createClaim: true
+  existingClaim: ncp-report-backups-v2
   # 03:00 KST. Kubernetes CronJob schedules are UTC unless timeZone is set.
   schedule: "0 18 * * *"
   retentionDays: 7

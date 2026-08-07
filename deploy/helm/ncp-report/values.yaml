@@ -106,6 +106,8 @@ artifacts:
 
 backups:
   enabled: true
+  createClaim: true
+  existingClaim: ""
   schedule: "0 18 * * *"
   retentionDays: 7
   storageSize: 20Gi

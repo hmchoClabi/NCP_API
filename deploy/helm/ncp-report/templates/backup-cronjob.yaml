@@ -32,13 +32,18 @@ spec:
               imagePullPolicy: IfNotPresent
               command: ["/bin/sh", "-ec"]
               args:
-                - >-
+                - |
                   umask 077;
                   stamp=$(date -u +%Y%m%dT%H%M%SZ);
-                  pg_dump --format=custom --no-owner --no-acl
-                  --file="/backup/ncp-report-${stamp}.dump";
-                  find /backup -type f -name 'ncp-report-*.dump'
-                  -mtime +{{ .Values.backups.retentionDays }} -delete
+                  finalfile="/backup/ncp-report-${stamp}.dump";
+                  tmpfile="${finalfile}.tmp";
+                  trap 'rm -f "$tmpfile"' EXIT;
+                  pg_dump --format=custom --no-owner --no-acl --file="$tmpfile";
+                  pg_restore --list "$tmpfile" >/dev/null;
+                  mv "$tmpfile" "$finalfile";
+                  trap - EXIT;
+                  echo "Verified PostgreSQL backup: $finalfile";
+                  find /backup -type f -name 'ncp-report-*.dump' -mtime +{{ .Values.backups.retentionDays }} -delete
               env:
                 - name: PGHOST
                   value: {{ include "ncp-report.databaseHost" . | quote }}
@@ -62,5 +67,5 @@ spec:
           volumes:
             - name: backups
               persistentVolumeClaim:
-                claimName: {{ include "ncp-report.fullname" . }}-backups
+                claimName: {{ default (printf "%s-backups" (include "ncp-report.fullname" .)) .Values.backups.existingClaim }}
 {{- end }}

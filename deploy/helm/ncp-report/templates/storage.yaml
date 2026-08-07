@@ -3,6 +3,8 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: {{ .Values.storageClass.name }}
+  annotations:
+    helm.sh/resource-policy: keep
 provisioner: {{ .Values.storageClass.provisioner }}
 reclaimPolicy: Retain
 allowVolumeExpansion: true
@@ -17,6 +19,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "ncp-report.fullname" . }}-artifacts
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     {{- include "ncp-report.labels" . | nindent 4 }}
 spec:
@@ -27,11 +31,13 @@ spec:
       storage: {{ .Values.artifacts.persistence.storageSize }}
 ---
 {{- end }}
-{{- if .Values.backups.enabled }}
+{{- if and .Values.backups.enabled .Values.backups.createClaim }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "ncp-report.fullname" . }}-backups
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     {{- include "ncp-report.labels" . | nindent 4 }}
 spec:

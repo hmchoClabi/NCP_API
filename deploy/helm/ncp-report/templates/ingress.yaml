@@ -7,6 +7,7 @@ metadata:
   labels:
     {{- include "ncp-report.labels" . | nindent 4 }}
   annotations:
+    helm.sh/resource-policy: keep
     alb.ingress.kubernetes.io/listen-ports: {{ ternary "[{\"HTTP\": 80}, {\"HTTPS\": 443}]" "[{\"HTTP\": 80}]" (ne .Values.ingress.certificateNo "") | quote }}
     alb.ingress.kubernetes.io/network-type: {{ .Values.ingress.networkType | quote }}
     alb.ingress.kubernetes.io/load-balancer-size: {{ .Values.ingress.loadBalancerSize | quote }}

@@ -33,8 +33,26 @@ def test_pilot_storage_is_retained_and_secrets_are_external():
     )
 
     assert "reclaimPolicy: Retain" in storage
+    assert storage.count("helm.sh/resource-policy: keep") == 3
     assert "kind: Secret" not in chart_files
     assert "REPLACE_WITH_RANDOM_VALUE" not in chart_files
+
+
+def test_database_backups_support_a_replacement_claim_and_are_verified():
+    backup = (CHART / "templates" / "backup-cronjob.yaml").read_text(
+        encoding="utf-8"
+    )
+    storage = (CHART / "templates" / "storage.yaml").read_text(
+        encoding="utf-8"
+    )
+    pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
+
+    assert ".Values.backups.existingClaim" in backup
+    assert ".Values.backups.createClaim" in storage
+    assert 'pg_restore --list "$tmpfile"' in backup
+    assert 'mv "$tmpfile" "$finalfile"' in backup
+    assert "'ncp-report-*.dump' -mtime +" in backup
+    assert "existingClaim: ncp-report-backups-v2" in pilot_values
 
 
 def test_runtime_and_migration_images_are_separate():
@@ -161,6 +179,7 @@ def test_pilot_ingress_uses_small_public_alb():
     assert 'certificateNo: "65260"' in pilot_values
     assert "cookieSecure: true" in pilot_values
     assert "alb.ingress.kubernetes.io/load-balancer-size" in ingress
+    assert "helm.sh/resource-policy: keep" in ingress
     assert "alb.ingress.kubernetes.io/idle-timeout" in ingress
     assert "alb.ingress.kubernetes.io/healthcheck-path" in ingress
     assert r'[{\"HTTP\": 80}, {\"HTTPS\": 443}]' in ingress
