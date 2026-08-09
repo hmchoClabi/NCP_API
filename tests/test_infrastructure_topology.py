@@ -1,6 +1,9 @@
 import unittest
 
-from app.infrastructure_topology import InfrastructureTopologyBuilder
+from app.infrastructure_topology import (
+    InfrastructureTopologyBuilder,
+    TopologyDisplayOptions,
+)
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
 
@@ -430,6 +433,216 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
         self.assertIn("10.0.0.0/16", visible_section)
         self.assertIn("KR-1", visible_section)
 
+    def test_compound_renderer_nests_vpc_subnet_and_server(self):
+        report = self._report_with_sensitive_topology()
+        topology = report.display_infrastructure_topology
+        renderer = HtmlReportRenderer()
+        options = TopologyDisplayOptions()
+        layout, width, height = renderer._topology_layout(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+
+        vpc_box = layout["boxes"]["VPC:vpc-sensitive-id"]
+        subnet_box = layout["boxes"]["SUBNET:subnet-sensitive-id"]
+        server_box = layout["boxes"]["SERVER:server-sensitive-id"]
+        self.assertTrue(self._box_contains(vpc_box, subnet_box))
+        self.assertTrue(self._box_contains(subnet_box, server_box))
+        self.assertGreater(width, 0)
+        self.assertGreater(height, 0)
+        self.assertEqual(
+            {boundary["node_id"] for boundary in layout["boundaries"]},
+            {"VPC:vpc-sensitive-id", "SUBNET:subnet-sensitive-id"},
+        )
+        self.assertEqual(len(layout["consumed_edges"]), 2)
+
+        svg = renderer._topology_svg(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+        self.assertIn("topology-boundary--vpc", svg)
+        self.assertIn("topology-boundary--subnet", svg)
+        self.assertEqual(svg.count('class="topology-node"'), 1)
+        self.assertNotIn('class="topology-edge"', svg)
+
+        section = self._topology_section(renderer.render(report))
+        self.assertIn("중첩된 경계 상자로 표현합니다", section)
+        self.assertIn("details.vpc_no", section)
+        self.assertIn("details.subnet_no", section)
+
+    def test_multi_subnet_resource_stays_at_vpc_level_with_edges(self):
+        topology = InfrastructureTopologyBuilder().build([
+            InfrastructureTopologyBuilderTests._resource(
+                "VPC", "vpc-1", "vpc"
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "SUBNET",
+                "subnet-1",
+                "subnet-a",
+                details={"vpc_no": "vpc-1"},
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "SUBNET",
+                "subnet-2",
+                "subnet-b",
+                details={"vpc_no": "vpc-1"},
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "LOAD_BALANCER",
+                "lb-1",
+                "frontend",
+                details={"subnet_nos": ["subnet-1", "subnet-2"]},
+            ),
+        ])
+        renderer = HtmlReportRenderer()
+        options = TopologyDisplayOptions()
+        layout, _, _ = renderer._topology_layout(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+
+        load_balancer_box = layout["boxes"]["LOAD_BALANCER:lb-1"]
+        self.assertTrue(
+            self._box_contains(layout["boxes"]["VPC:vpc-1"], load_balancer_box)
+        )
+        self.assertFalse(
+            self._box_contains(
+                layout["boxes"]["SUBNET:subnet-1"],
+                load_balancer_box,
+            )
+        )
+        self.assertFalse(
+            self._box_contains(
+                layout["boxes"]["SUBNET:subnet-2"],
+                load_balancer_box,
+            )
+        )
+        svg = renderer._topology_svg(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+        self.assertEqual(svg.count('class="topology-edge"'), 2)
+
+    def test_conflicting_vpc_membership_is_not_nested(self):
+        topology = InfrastructureTopologyBuilder().build([
+            InfrastructureTopologyBuilderTests._resource(
+                "VPC", "vpc-1", "vpc-a"
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "VPC", "vpc-2", "vpc-b"
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "SUBNET",
+                "subnet-1",
+                "subnet-a",
+                details={"vpc_no": "vpc-1"},
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "SUBNET",
+                "subnet-2",
+                "subnet-b",
+                details={"vpc_no": "vpc-2"},
+            ),
+            InfrastructureTopologyBuilderTests._resource(
+                "SERVER",
+                "server-1",
+                "ambiguous-server",
+                details={
+                    "explicit_relations": [
+                        {
+                            "type": "CONTAINS",
+                            "target_category": "SUBNET",
+                            "target_id": "subnet-1",
+                            "source_field": "test.subnetA",
+                        },
+                        {
+                            "type": "CONTAINS",
+                            "target_category": "SUBNET",
+                            "target_id": "subnet-2",
+                            "source_field": "test.subnetB",
+                        },
+                    ]
+                },
+            ),
+        ])
+        renderer = HtmlReportRenderer()
+        options = TopologyDisplayOptions()
+        layout, _, _ = renderer._topology_layout(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+
+        server_box = layout["boxes"]["SERVER:server-1"]
+        self.assertFalse(
+            self._box_contains(layout["boxes"]["VPC:vpc-1"], server_box)
+        )
+        self.assertFalse(
+            self._box_contains(layout["boxes"]["VPC:vpc-2"], server_box)
+        )
+        server_edges = {
+            renderer._topology_edge_key(edge)
+            for edge in topology["edges"]
+            if "SERVER:server-1" in renderer._topology_edge_key(edge)
+        }
+        self.assertTrue(server_edges)
+        self.assertTrue(server_edges.isdisjoint(layout["consumed_edges"]))
+
+    def test_group_by_vpc_false_preserves_linear_nodes_and_edges(self):
+        report = self._report_with_sensitive_topology()
+        topology = report.display_infrastructure_topology
+        renderer = HtmlReportRenderer()
+        options = TopologyDisplayOptions(group_by_vpc=False)
+        layout, _, _ = renderer._topology_layout(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+        svg = renderer._topology_svg(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+
+        self.assertEqual(layout["boundaries"], [])
+        self.assertEqual(layout["consumed_edges"], set())
+        self.assertNotIn("topology-boundary--vpc", svg)
+        self.assertEqual(svg.count('class="topology-node"'), 3)
+        self.assertEqual(svg.count('class="topology-edge"'), 2)
+
+    def test_edge_path_uses_actual_boundary_dimensions(self):
+        path, label_x, label_y = HtmlReportRenderer._topology_edge_path(
+            (0.0, 0.0, 800.0, 600.0),
+            (900.0, 100.0, 230.0, 196.0),
+        )
+
+        self.assertTrue(path.startswith("M 800.0 300.0"))
+        self.assertGreater(label_x, 800.0)
+        self.assertGreater(label_y, 0.0)
+
+    def test_compound_svg_is_deterministic_for_input_order(self):
+        report = self._report_with_sensitive_topology()
+        topology = report.display_infrastructure_topology
+        renderer = HtmlReportRenderer()
+        options = TopologyDisplayOptions()
+
+        expected = renderer._topology_svg(
+            topology["nodes"],
+            topology["edges"],
+            options,
+        )
+        reordered = renderer._topology_svg(
+            list(reversed(topology["nodes"])),
+            list(reversed(topology["edges"])),
+            options,
+        )
+
+        self.assertEqual(reordered, expected)
+
     def test_renderer_can_disable_the_diagram(self):
         report = self._report_with_sensitive_topology()
         report.customer = {
@@ -495,6 +708,17 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
             "</section>",
             1,
         )[0]
+
+    @staticmethod
+    def _box_contains(outer, inner):
+        outer_x, outer_y, outer_width, outer_height = outer
+        inner_x, inner_y, inner_width, inner_height = inner
+        return (
+            outer_x <= inner_x
+            and outer_y <= inner_y
+            and outer_x + outer_width >= inner_x + inner_width
+            and outer_y + outer_height >= inner_y + inner_height
+        )
 
 
 if __name__ == "__main__":

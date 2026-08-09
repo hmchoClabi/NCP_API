@@ -984,6 +984,11 @@ class HtmlReportRenderer:
                 "생성하지 않습니다."
             )
         )
+        if options.group_by_vpc:
+            topology_description += (
+                " 명시적으로 확인된 VPC·Subnet 포함 관계는 연결선 대신 "
+                "중첩된 경계 상자로 표현합니다."
+            )
         return self._section(
             "클라우드 구성도",
             topology_description,
@@ -1006,60 +1011,85 @@ class HtmlReportRenderer:
         if not nodes or not edges:
             return ""
         node_ids = {str(node.get("node_id")) for node in nodes}
-        visible_edges = [
+        visible_edges = sorted((
             edge for edge in edges
             if (
                 str(edge.get("source_node_id")) in node_ids
                 and str(edge.get("target_node_id")) in node_ids
             )
-        ]
+        ), key=self._topology_edge_key)
         if not visible_edges:
             return ""
 
-        positions, width, height = self._topology_layout(nodes, options)
-        node_width = self.TOPOLOGY_NODE_WIDTH
-        node_height = self.TOPOLOGY_NODE_HEIGHT
+        layout, width, height = self._topology_layout(
+            nodes,
+            visible_edges,
+            options,
+        )
+        boxes = layout["boxes"]
+        consumed_edges = layout["consumed_edges"]
+        boundary_node_ids = {
+            boundary["node_id"] for boundary in layout["boundaries"]
+        }
+
+        boundary_shape_markup = []
+        boundary_label_markup = []
+        for boundary in layout["boundaries"]:
+            node = boundary["node"]
+            x, y, boundary_width, boundary_height = boundary["box"]
+            category = (
+                "vpc"
+                if str(node.get("category") or "") == "VPC"
+                else "subnet"
+            )
+            supporting = node.get("kind") != "representative"
+            css_class = (
+                f" topology-boundary--{category}"
+                + (" topology-boundary--supporting" if supporting else "")
+            )
+            lines = self._topology_node_lines(node, options)
+            title = (
+                f"source={node.get('source') or '-'} · "
+                f"confidence={node.get('confidence') or '-'} · "
+                f"resolution={node.get('resolution') or '-'}"
+            )
+            texts = [
+                f'<text x="{x + 16:.1f}" y="{y + 25:.1f}" '
+                'class="topology-boundary-title">'
+                f"{self._text(node.get('category_label') or node.get('category'))}"
+                "</text>"
+            ]
+            for index, line in enumerate(lines[:8]):
+                texts.append(
+                    f'<text x="{x + 16:.1f}" y="{y + 47 + index * 17:.1f}" '
+                    f'class="topology-boundary-detail">{self._text(line)}</text>'
+                )
+            boundary_shape_markup.append(
+                f'<g class="topology-boundary{css_class}">'
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{boundary_width:.1f}" '
+                f'height="{boundary_height:.1f}" rx="16"><title>'
+                f"{self._text(title)}</title></rect>"
+                + "</g>"
+            )
+            boundary_label_markup.append(
+                '<g class="topology-boundary-label">'
+                + "".join(texts)
+                + "</g>"
+            )
+
         edge_markup = []
         for edge in visible_edges:
-            source = positions.get(str(edge.get("source_node_id")))
-            target = positions.get(str(edge.get("target_node_id")))
+            if self._topology_edge_key(edge) in consumed_edges:
+                continue
+            source = boxes.get(str(edge.get("source_node_id")))
+            target = boxes.get(str(edge.get("target_node_id")))
             if source is None or target is None:
                 continue
-            sx, sy = source
-            tx, ty = target
-            if sx < tx:
-                start_x, start_y = sx + node_width, sy + node_height / 2
-                end_x, end_y = tx, ty + node_height / 2
-                offset = max(34, (end_x - start_x) / 2)
-                path = (
-                    f"M {start_x:.1f} {start_y:.1f} "
-                    f"C {start_x + offset:.1f} {start_y:.1f}, "
-                    f"{end_x - offset:.1f} {end_y:.1f}, "
-                    f"{end_x:.1f} {end_y:.1f}"
-                )
-            elif sx > tx:
-                start_x, start_y = sx, sy + node_height / 2
-                end_x, end_y = tx + node_width, ty + node_height / 2
-                offset = max(34, (start_x - end_x) / 2)
-                path = (
-                    f"M {start_x:.1f} {start_y:.1f} "
-                    f"C {start_x - offset:.1f} {start_y:.1f}, "
-                    f"{end_x + offset:.1f} {end_y:.1f}, "
-                    f"{end_x:.1f} {end_y:.1f}"
-                )
-            else:
-                start_x, start_y = sx + node_width / 2, sy + node_height
-                end_x, end_y = tx + node_width / 2, ty
-                bend = 36 if end_y >= start_y else -36
-                path = (
-                    f"M {start_x:.1f} {start_y:.1f} "
-                    f"C {start_x + bend:.1f} {start_y + bend:.1f}, "
-                    f"{end_x + bend:.1f} {end_y - bend:.1f}, "
-                    f"{end_x:.1f} {end_y:.1f}"
-                )
+            path, label_x, label_y = self._topology_edge_path(
+                source,
+                target,
+            )
             label = self._topology_relation_label(edge.get("relationship"))
-            label_x = (start_x + end_x) / 2
-            label_y = (start_y + end_y) / 2 - 5
             title = (
                 f"{label} · source={edge.get('source') or '-'} · "
                 f"confidence={edge.get('confidence') or 'VERIFIED'}"
@@ -1074,12 +1104,12 @@ class HtmlReportRenderer:
             )
 
         node_markup = []
-        for node in nodes:
+        for node in sorted(nodes, key=self._topology_node_sort_key):
             node_id = str(node.get("node_id"))
-            position = positions.get(node_id)
-            if position is None:
+            box = boxes.get(node_id)
+            if box is None or node_id in boundary_node_ids:
                 continue
-            x, y = position
+            x, y, node_width, node_height = box
             supporting = node.get("kind") != "representative"
             css_class = " topology-node--supporting" if supporting else ""
             lines = self._topology_node_lines(node, options)
@@ -1110,11 +1140,14 @@ class HtmlReportRenderer:
 
         return (
             f'<svg class="topology-svg" viewBox="0 0 {width} {height}" '
+            f'width="{width}" height="{height}" '
             'role="img" aria-label="명시적으로 확인된 클라우드 자원 구성도">'
             '<defs><marker id="topology-arrow" markerWidth="8" markerHeight="8" '
             'refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
             '<path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>'
+            + "".join(boundary_shape_markup)
             + "".join(edge_markup)
+            + "".join(boundary_label_markup)
             + "".join(node_markup)
             + "</svg>"
         )
@@ -1122,20 +1155,19 @@ class HtmlReportRenderer:
     def _topology_layout(
         self,
         nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
         options: TopologyDisplayOptions,
-    ) -> tuple[Dict[str, tuple[float, float]], int, int]:
-        layers = defaultdict(list)
+    ) -> tuple[Dict[str, Any], int, int]:
         if options.group_by_vpc:
-            for node in nodes:
-                category = str(node.get("category") or "")
-                layers[self.TOPOLOGY_LAYER_ORDER.get(category, 2)].append(node)
-        else:
-            categories = []
-            for node in nodes:
-                category = str(node.get("category") or "")
-                if category not in categories:
-                    categories.append(category)
-                layers[categories.index(category)].append(node)
+            return self._topology_compound_layout(nodes, edges, options)
+
+        layers = defaultdict(list)
+        categories = []
+        for node in nodes:
+            category = str(node.get("category") or "")
+            if category not in categories:
+                categories.append(category)
+            layers[categories.index(category)].append(node)
 
         ordered_layers = sorted(layers)
         node_width = self.TOPOLOGY_NODE_WIDTH
@@ -1143,20 +1175,18 @@ class HtmlReportRenderer:
         horizontal_gap = 82
         vertical_gap = 32
         margin = 30
-        positions: Dict[str, tuple[float, float]] = {}
+        boxes: Dict[str, tuple[float, float, float, float]] = {}
         for column, layer in enumerate(ordered_layers):
             layer_nodes = sorted(
                 layers[layer],
-                key=lambda node: (
-                    str(node.get("category") or ""),
-                    str(node.get("name") or "").casefold(),
-                    str(node.get("resource_id") or ""),
-                ),
+                key=self._topology_node_sort_key,
             )
             for row, node in enumerate(layer_nodes):
-                positions[str(node.get("node_id"))] = (
+                boxes[str(node.get("node_id"))] = (
                     margin + column * (node_width + horizontal_gap),
                     margin + row * (node_height + vertical_gap),
+                    node_width,
+                    node_height,
                 )
         max_rows = max((len(value) for value in layers.values()), default=1)
         width = (
@@ -1169,7 +1199,431 @@ class HtmlReportRenderer:
             + max_rows * node_height
             + max(0, max_rows - 1) * vertical_gap
         )
-        return positions, max(width, 320), max(height, 220)
+        return {
+            "boxes": boxes,
+            "boundaries": [],
+            "consumed_edges": set(),
+        }, max(width, 320), max(height, 220)
+
+    def _topology_compound_layout(
+        self,
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        options: TopologyDisplayOptions,
+    ) -> tuple[Dict[str, Any], int, int]:
+        """Nest only relationships proven by explicit CONTAINS edges."""
+        node_by_id = {
+            str(node.get("node_id")): node
+            for node in nodes
+            if node.get("node_id") is not None
+        }
+        vpc_ids = {
+            node_id for node_id, node in node_by_id.items()
+            if str(node.get("category") or "") == "VPC"
+        }
+        subnet_ids = {
+            node_id for node_id, node in node_by_id.items()
+            if str(node.get("category") or "") == "SUBNET"
+        }
+        vpc_parents: Dict[str, set[str]] = defaultdict(set)
+        subnet_parents: Dict[str, set[str]] = defaultdict(set)
+        contains_edges: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for edge in edges:
+            if str(edge.get("relationship") or "").upper() != "CONTAINS":
+                continue
+            source_id = str(edge.get("source_node_id") or "")
+            target_id = str(edge.get("target_node_id") or "")
+            source = node_by_id.get(source_id)
+            if source is None or target_id not in node_by_id:
+                continue
+            source_category = str(source.get("category") or "")
+            if source_category == "VPC":
+                vpc_parents[target_id].add(source_id)
+            elif source_category == "SUBNET":
+                subnet_parents[target_id].add(source_id)
+            contains_edges[(source_id, target_id)] = edge
+
+        subnet_to_vpc = {
+            subnet_id: next(iter(parents))
+            for subnet_id, parents in vpc_parents.items()
+            if subnet_id in subnet_ids and len(parents) == 1
+        }
+        subnet_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        direct_vpc_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        assigned_ids: set[str] = set()
+        consumed_edges: set[tuple[str, str, str]] = set()
+
+        for subnet_id, vpc_id in subnet_to_vpc.items():
+            edge = contains_edges.get((vpc_id, subnet_id))
+            if edge is not None:
+                consumed_edges.add(self._topology_edge_key(edge))
+
+        candidates = sorted(
+            (
+                node for node_id, node in node_by_id.items()
+                if node_id not in vpc_ids and node_id not in subnet_ids
+            ),
+            key=self._topology_node_sort_key,
+        )
+        for node in candidates:
+            node_id = str(node.get("node_id"))
+            subnet_parent_ids = subnet_parents.get(node_id, set())
+            vpc_parent_ids = vpc_parents.get(node_id, set())
+            if len(subnet_parent_ids) == 1:
+                subnet_id = next(iter(subnet_parent_ids))
+                subnet_vpc_id = subnet_to_vpc.get(subnet_id)
+                has_conflict = bool(
+                    vpc_parent_ids
+                    and (
+                        subnet_vpc_id is None
+                        or vpc_parent_ids != {subnet_vpc_id}
+                    )
+                )
+                if not has_conflict:
+                    subnet_children[subnet_id].append(node)
+                    assigned_ids.add(node_id)
+                    edge = contains_edges.get((subnet_id, node_id))
+                    if edge is not None:
+                        consumed_edges.add(self._topology_edge_key(edge))
+                    if subnet_vpc_id is not None:
+                        edge = contains_edges.get((subnet_vpc_id, node_id))
+                        if edge is not None:
+                            consumed_edges.add(self._topology_edge_key(edge))
+                    continue
+
+            if len(subnet_parent_ids) > 1:
+                parent_vpcs = {
+                    subnet_to_vpc.get(subnet_id)
+                    for subnet_id in subnet_parent_ids
+                }
+                if None not in parent_vpcs and len(parent_vpcs) == 1:
+                    vpc_id = next(iter(parent_vpcs))
+                    if not vpc_parent_ids or vpc_parent_ids == {vpc_id}:
+                        direct_vpc_children[vpc_id].append(node)
+                        assigned_ids.add(node_id)
+                        edge = contains_edges.get((vpc_id, node_id))
+                        if edge is not None:
+                            consumed_edges.add(self._topology_edge_key(edge))
+                        continue
+
+            if not subnet_parent_ids and len(vpc_parent_ids) == 1:
+                vpc_id = next(iter(vpc_parent_ids))
+                if vpc_id in vpc_ids:
+                    direct_vpc_children[vpc_id].append(node)
+                    assigned_ids.add(node_id)
+                    edge = contains_edges.get((vpc_id, node_id))
+                    if edge is not None:
+                        consumed_edges.add(self._topology_edge_key(edge))
+
+        node_width = self.TOPOLOGY_NODE_WIDTH
+        node_height = self.TOPOLOGY_NODE_HEIGHT
+        inner_gap = 22
+        boundary_padding = 22
+        outer_gap = 34
+        margin = 30
+
+        def grid_layout(
+            items: List[Dict[str, Any]],
+            *,
+            max_columns: int,
+        ) -> tuple[int, int, Dict[str, tuple[float, float, float, float]]]:
+            if not items:
+                return 0, 0, {}
+            columns = min(max_columns, max(1, math.ceil(math.sqrt(len(items)))))
+            rows = math.ceil(len(items) / columns)
+            grid_width = columns * node_width + (columns - 1) * inner_gap
+            grid_height = rows * node_height + (rows - 1) * inner_gap
+            local_boxes = {}
+            ordered_items = sorted(items, key=self._topology_node_sort_key)
+            for index, item in enumerate(ordered_items):
+                local_boxes[str(item.get("node_id"))] = (
+                    (index % columns) * (node_width + inner_gap),
+                    (index // columns) * (node_height + inner_gap),
+                    node_width,
+                    node_height,
+                )
+            return grid_width, grid_height, local_boxes
+
+        def subnet_group(subnet_id: str) -> Dict[str, Any]:
+            subnet = node_by_id[subnet_id]
+            header_height = self._topology_boundary_header_height(
+                subnet,
+                options,
+            )
+            grid_width, grid_height, child_boxes = grid_layout(
+                subnet_children.get(subnet_id, []),
+                max_columns=2,
+            )
+            width = max(280, grid_width + boundary_padding * 2)
+            height = header_height + boundary_padding
+            if child_boxes:
+                height += grid_height + boundary_padding
+            translated = {
+                node_id: (
+                    box[0] + boundary_padding,
+                    box[1] + header_height + boundary_padding,
+                    box[2],
+                    box[3],
+                )
+                for node_id, box in child_boxes.items()
+            }
+            return {
+                "node": subnet,
+                "width": width,
+                "height": height,
+                "child_boxes": translated,
+            }
+
+        subnet_groups = {
+            subnet_id: subnet_group(subnet_id)
+            for subnet_id in subnet_ids
+        }
+
+        def vpc_group(vpc_id: str) -> Dict[str, Any]:
+            vpc = node_by_id[vpc_id]
+            header_height = self._topology_boundary_header_height(vpc, options)
+            child_subnet_ids = sorted(
+                (
+                    subnet_id for subnet_id, parent_id in subnet_to_vpc.items()
+                    if parent_id == vpc_id
+                ),
+                key=lambda node_id: self._topology_node_sort_key(
+                    node_by_id[node_id]
+                ),
+            )
+            subnet_placements = {}
+            content_width = 0
+            content_height = 0
+            rows = [
+                child_subnet_ids[index:index + 2]
+                for index in range(0, len(child_subnet_ids), 2)
+            ]
+            current_y = header_height + boundary_padding
+            for row in rows:
+                current_x = boundary_padding
+                row_height = max(subnet_groups[node_id]["height"] for node_id in row)
+                for subnet_id in row:
+                    group = subnet_groups[subnet_id]
+                    subnet_placements[subnet_id] = (current_x, current_y)
+                    current_x += group["width"] + inner_gap
+                row_width = current_x - inner_gap + boundary_padding
+                content_width = max(content_width, row_width)
+                current_y += row_height + inner_gap
+                content_height = current_y
+
+            direct_items = direct_vpc_children.get(vpc_id, [])
+            direct_width, direct_height, direct_boxes = grid_layout(
+                direct_items,
+                max_columns=3,
+            )
+            direct_offset_y = current_y
+            if direct_boxes:
+                if rows:
+                    direct_offset_y += 14
+                direct_offset_y += 24
+                content_width = max(
+                    content_width,
+                    direct_width + boundary_padding * 2,
+                )
+                content_height = direct_offset_y + direct_height + boundary_padding
+            elif rows:
+                content_height = current_y - inner_gap + boundary_padding
+            else:
+                content_height = header_height + boundary_padding * 2
+
+            width = max(330, content_width)
+            boxes = {
+                node_id: (
+                    box[0] + boundary_padding,
+                    box[1] + direct_offset_y,
+                    box[2],
+                    box[3],
+                )
+                for node_id, box in direct_boxes.items()
+            }
+            return {
+                "node": vpc,
+                "width": width,
+                "height": content_height,
+                "subnet_placements": subnet_placements,
+                "child_boxes": boxes,
+            }
+
+        vpc_groups = {vpc_id: vpc_group(vpc_id) for vpc_id in vpc_ids}
+        boxes: Dict[str, tuple[float, float, float, float]] = {}
+        boundaries: List[Dict[str, Any]] = []
+        cursor_y = margin
+        max_width = 0
+
+        def place_subnet(subnet_id: str, x: float, y: float) -> None:
+            group = subnet_groups[subnet_id]
+            box = (x, y, group["width"], group["height"])
+            boxes[subnet_id] = box
+            boundaries.append({
+                "node_id": subnet_id,
+                "node": group["node"],
+                "box": box,
+                "level": 1,
+            })
+            for child_id, child_box in group["child_boxes"].items():
+                boxes[child_id] = (
+                    child_box[0] + x,
+                    child_box[1] + y,
+                    child_box[2],
+                    child_box[3],
+                )
+
+        for vpc_id in sorted(
+            vpc_ids,
+            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
+        ):
+            group = vpc_groups[vpc_id]
+            x = margin
+            y = cursor_y
+            vpc_box = (x, y, group["width"], group["height"])
+            boxes[vpc_id] = vpc_box
+            boundaries.append({
+                "node_id": vpc_id,
+                "node": group["node"],
+                "box": vpc_box,
+                "level": 0,
+            })
+            for subnet_id, position in group["subnet_placements"].items():
+                place_subnet(subnet_id, x + position[0], y + position[1])
+            for child_id, child_box in group["child_boxes"].items():
+                boxes[child_id] = (
+                    child_box[0] + x,
+                    child_box[1] + y,
+                    child_box[2],
+                    child_box[3],
+                )
+            cursor_y += group["height"] + outer_gap
+            max_width = max(max_width, group["width"])
+
+        orphan_subnet_ids = sorted(
+            subnet_ids - set(subnet_to_vpc),
+            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
+        )
+        for subnet_id in orphan_subnet_ids:
+            group = subnet_groups[subnet_id]
+            place_subnet(subnet_id, margin, cursor_y)
+            cursor_y += group["height"] + outer_gap
+            max_width = max(max_width, group["width"])
+
+        external_nodes = [
+            node for node_id, node in node_by_id.items()
+            if (
+                node_id not in vpc_ids
+                and node_id not in subnet_ids
+                and node_id not in assigned_ids
+            )
+        ]
+        if external_nodes:
+            layers = defaultdict(list)
+            for node in external_nodes:
+                category = str(node.get("category") or "")
+                layers[self.TOPOLOGY_LAYER_ORDER.get(category, 2)].append(node)
+            for column, layer in enumerate(sorted(layers)):
+                layer_nodes = sorted(
+                    layers[layer],
+                    key=self._topology_node_sort_key,
+                )
+                for row, node in enumerate(layer_nodes):
+                    boxes[str(node.get("node_id"))] = (
+                        margin + column * (node_width + 82),
+                        cursor_y + row * (node_height + 32),
+                        node_width,
+                        node_height,
+                    )
+            external_width = (
+                len(layers) * node_width + max(0, len(layers) - 1) * 82
+            )
+            external_rows = max((len(value) for value in layers.values()), default=1)
+            external_height = (
+                external_rows * node_height + max(0, external_rows - 1) * 32
+            )
+            max_width = max(max_width, external_width)
+            cursor_y += external_height + outer_gap
+
+        boundaries.sort(key=lambda boundary: boundary["level"])
+        width = max(320, int(math.ceil(max_width + margin * 2)))
+        height = max(220, int(math.ceil(cursor_y - outer_gap + margin)))
+        return {
+            "boxes": boxes,
+            "boundaries": boundaries,
+            "consumed_edges": consumed_edges,
+        }, width, height
+
+    def _topology_boundary_header_height(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> int:
+        line_count = min(8, len(self._topology_node_lines(node, options)))
+        return max(62, 47 + line_count * 17)
+
+    @staticmethod
+    def _topology_node_sort_key(node: Mapping[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(node.get("category") or ""),
+            str(node.get("name") or "").casefold(),
+            str(node.get("resource_id") or node.get("node_id") or ""),
+        )
+
+    @staticmethod
+    def _topology_edge_key(edge: Mapping[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(edge.get("source_node_id") or ""),
+            str(edge.get("target_node_id") or ""),
+            str(edge.get("relationship") or "").upper(),
+        )
+
+    @staticmethod
+    def _topology_edge_path(
+        source: tuple[float, float, float, float],
+        target: tuple[float, float, float, float],
+    ) -> tuple[str, float, float]:
+        sx, sy, sw, sh = source
+        tx, ty, tw, th = target
+        source_center_x = sx + sw / 2
+        source_center_y = sy + sh / 2
+        target_center_x = tx + tw / 2
+        target_center_y = ty + th / 2
+        delta_x = target_center_x - source_center_x
+        delta_y = target_center_y - source_center_y
+        horizontal = abs(delta_x) / max(sw + tw, 1) >= abs(delta_y) / max(sh + th, 1)
+
+        if horizontal:
+            if delta_x >= 0:
+                start_x, start_y = sx + sw, source_center_y
+                end_x, end_y = tx, target_center_y
+            else:
+                start_x, start_y = sx, source_center_y
+                end_x, end_y = tx + tw, target_center_y
+            bend = max(34, abs(end_x - start_x) / 2)
+            direction = 1 if end_x >= start_x else -1
+            path = (
+                f"M {start_x:.1f} {start_y:.1f} "
+                f"C {start_x + direction * bend:.1f} {start_y:.1f}, "
+                f"{end_x - direction * bend:.1f} {end_y:.1f}, "
+                f"{end_x:.1f} {end_y:.1f}"
+            )
+        else:
+            if delta_y >= 0:
+                start_x, start_y = source_center_x, sy + sh
+                end_x, end_y = target_center_x, ty
+            else:
+                start_x, start_y = source_center_x, sy
+                end_x, end_y = target_center_x, ty + th
+            bend = max(34, abs(end_y - start_y) / 2)
+            direction = 1 if end_y >= start_y else -1
+            path = (
+                f"M {start_x:.1f} {start_y:.1f} "
+                f"C {start_x:.1f} {start_y + direction * bend:.1f}, "
+                f"{end_x:.1f} {end_y - direction * bend:.1f}, "
+                f"{end_x:.1f} {end_y:.1f}"
+            )
+        return path, (start_x + end_x) / 2, (start_y + end_y) / 2 - 5
 
     def _topology_node_lines(
         self,
@@ -2788,7 +3242,37 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-.topology-svg { display: block; width: 100%; min-width: 720px; height: auto; }
+.topology-svg {
+  display: block;
+  width: auto;
+  min-width: 100%;
+  max-width: none;
+  height: auto;
+}
+.topology-boundary > rect {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.topology-boundary--vpc > rect {
+  fill: #eff6ff;
+  stroke: #2563eb;
+}
+.topology-boundary--subnet > rect {
+  fill: #f8fafc;
+  stroke: #0f766e;
+  stroke-dasharray: 7 4;
+}
+.topology-boundary--supporting > rect {
+  fill: #fff7ed;
+  stroke: #f59e0b;
+  stroke-dasharray: 5 4;
+}
+.topology-boundary-title {
+  fill: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+.topology-boundary-detail { fill: #475569; font-size: 11px; }
 .topology-node rect {
   fill: #ffffff;
   stroke: #94a3b8;
@@ -3012,7 +3496,7 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
   .topology-canvas { overflow: visible; }
-  .topology-svg { min-width: 0; }
+  .topology-svg { width: 100%; min-width: 0; max-width: 100%; }
   .report-section { padding: 18px; }
   table { font-size: 8pt; }
   tr { break-inside: avoid; }
