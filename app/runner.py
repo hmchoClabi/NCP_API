@@ -17,7 +17,7 @@ from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
 from utils.common_rest import safe_exception_message
 from utils.data_utils import get_unix_time_stamp
-from utils.event_sort import sort_event_records
+from utils.event_sort import event_timestamp_millis, sort_event_records
 
 import json
 import calendar
@@ -392,6 +392,119 @@ class ReportRunner:
             return False
         return period_start <= observed_at < period_end
 
+    def _filter_current_infrastructure_for_period(
+        self,
+        resources: List[Dict[str, Any]],
+        period: Dict[str, Any],
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """Infer historical presence from creation time for current resources.
+
+        This fallback can safely exclude resources created after the requested
+        report period. It intentionally retains resources with an unknown
+        creation time because dropping them would hide potentially valid
+        historical infrastructure.
+        """
+        _, period_end = self._period_bounds_kst(period)
+        period_end_ms = int(period_end.timestamp() * 1000)
+        filtered: List[Dict[str, Any]] = []
+        stats = {
+            "input_count": 0,
+            "included_count": 0,
+            "excluded_after_period_count": 0,
+            "unknown_create_time_count": 0,
+        }
+
+        for resource in self._dict_records(resources):
+            stats["input_count"] += 1
+            create_value = resource.get("create_time")
+            create_time = event_timestamp_millis(create_value)
+            if create_time is not None and create_time >= period_end_ms:
+                stats["excluded_after_period_count"] += 1
+                continue
+
+            normalized = dict(resource)
+            details = normalized.get("details")
+            details = dict(details) if isinstance(details, dict) else {}
+            if create_time is None:
+                stats["unknown_create_time_count"] += 1
+                details["historical_presence_confidence"] = "UNKNOWN"
+            else:
+                details["historical_presence_confidence"] = (
+                    "INFERRED_FROM_CREATE_TIME"
+                )
+                details["historical_presence_basis"] = (
+                    "RESOURCE_MANAGER_OR_SERVICE_API_CREATE_TIME"
+                )
+            normalized["details"] = details
+            filtered.append(normalized)
+            stats["included_count"] += 1
+
+        return filtered, stats
+
+    def _filter_current_servers_for_period(
+        self,
+        servers: List[Dict[str, Any]],
+        infrastructure: List[Dict[str, Any]],
+        period: Dict[str, Any],
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """Apply the same creation-time inference to the server detail list."""
+        _, period_end = self._period_bounds_kst(period)
+        period_end_ms = int(period_end.timestamp() * 1000)
+        infrastructure_servers = {
+            str(resource.get("resource_id")): resource
+            for resource in self._dict_records(infrastructure)
+            if (
+                str(resource.get("category") or "").upper() == "SERVER"
+                and resource.get("resource_id") is not None
+            )
+        }
+        filtered: List[Dict[str, Any]] = []
+        stats = {
+            "input_count": 0,
+            "included_count": 0,
+            "excluded_after_period_count": 0,
+            "unknown_create_time_count": 0,
+        }
+
+        for server in self._dict_records(servers):
+            stats["input_count"] += 1
+            server_id = str(server.get("server_id") or "")
+            infrastructure_server = infrastructure_servers.get(server_id, {})
+            create_value = infrastructure_server.get("create_time")
+            if create_value in (None, ""):
+                create_value = server.get("create_date")
+            if create_value in (None, ""):
+                raw_server = server.get("raw_server")
+                if isinstance(raw_server, dict):
+                    create_value = raw_server.get("createDate")
+
+            create_time = event_timestamp_millis(create_value)
+            if create_time is not None and create_time >= period_end_ms:
+                stats["excluded_after_period_count"] += 1
+                continue
+
+            normalized = dict(server)
+            if create_value is not None:
+                normalized["create_date"] = create_value
+            infrastructure_details = infrastructure_server.get("details")
+            if isinstance(infrastructure_details, dict):
+                create_time_source = infrastructure_details.get(
+                    "create_time_source"
+                )
+                if create_time_source:
+                    normalized["create_time_source"] = create_time_source
+            if create_time is None:
+                stats["unknown_create_time_count"] += 1
+                normalized["historical_presence_confidence"] = "UNKNOWN"
+            else:
+                normalized["historical_presence_confidence"] = (
+                    "INFERRED_FROM_CREATE_TIME"
+                )
+            filtered.append(normalized)
+            stats["included_count"] += 1
+
+        return filtered, stats
+
     def _load_period_infrastructure_snapshot(
         self,
         period: Dict[str, Any],
@@ -639,6 +752,11 @@ class ReportRunner:
             period,
             observation_check_at,
         )
+        _, report_period_end = self._period_bounds_kst(period)
+        observation_after_period = (
+            self._parse_kst_datetime(observation_check_at)
+            >= report_period_end
+        )
         period_snapshot = None
         snapshot_lookup_warning = None
         if needs_resource_snapshot and not live_snapshot_in_period:
@@ -650,8 +768,18 @@ class ReportRunner:
                 customer_snapshot,
                 observation_check_at,
             )
+        current_state_period_fallback = bool(
+            needs_resource_snapshot
+            and not live_snapshot_in_period
+            and observation_after_period
+            and period_snapshot is None
+        )
         needs_server_collection = (
-            live_snapshot_in_period
+            period_snapshot is None
+            and (
+                live_snapshot_in_period
+                or current_state_period_fallback
+            )
             and (
                 "SERVER" in collection_resource_categories
                 or (
@@ -827,8 +955,17 @@ class ReportRunner:
                 "severity": "warning",
                 "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
                 "message": (
-                    "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
-                    "현재 자원 목록과 구성도를 대신 사용하지 않았습니다."
+                    (
+                        "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
+                        "목록은 현재 자원의 생성 시각으로 보완하고 구성도는 "
+                        "과거 상태를 임의로 대체하지 않습니다."
+                    )
+                    if current_state_period_fallback
+                    else (
+                        "보고 기간이 아직 시작되지 않았거나 기간 안에 "
+                        "수집된 인프라 스냅샷이 없어 현재 상태로 "
+                        "대체하지 않았습니다."
+                    )
                 ),
             })
 
@@ -844,16 +981,27 @@ class ReportRunner:
                 {},
             )
 
-        if needs_infrastructure_collection and live_snapshot_in_period:
+        if (
+            needs_infrastructure_collection
+            and period_snapshot is None
+            and (
+                live_snapshot_in_period
+                or current_state_period_fallback
+            )
+        ):
             infrastructure_started_at = self._now_kst_iso()
             (
                 infrastructure_collected_data,
                 infrastructure_errors,
-                infrastructure_warnings,
+                collected_infrastructure_warnings,
             ) = self.collect_infrastructure(
                 servers=server_data,
                 server_raw_data=server_raw_data,
                 categories=collection_resource_categories,
+            )
+            infrastructure_warnings = self._merge_error_lists(
+                infrastructure_warnings,
+                collected_infrastructure_warnings,
             )
             infrastructure_completed_at = self._now_kst_iso()
             live_snapshot_window = self._snapshot_eligibility_window(
@@ -863,11 +1011,119 @@ class ReportRunner:
             parsed_live_completed_at = self._parse_kst_datetime(
                 infrastructure_completed_at
             )
+            historical_filter_stats: Dict[str, Any] = {}
+            if current_state_period_fallback:
+                current_infrastructure = infrastructure_collected_data
+                (
+                    infrastructure_collected_data,
+                    infrastructure_filter_stats,
+                ) = self._filter_current_infrastructure_for_period(
+                    current_infrastructure,
+                    period,
+                )
+                server_data, server_filter_stats = (
+                    self._filter_current_servers_for_period(
+                        server_data,
+                        current_infrastructure,
+                        period,
+                    )
+                )
+                historical_filter_stats = {
+                    "infrastructure": infrastructure_filter_stats,
+                    "servers": server_filter_stats,
+                }
+                infrastructure_warnings.append({
+                    "collector": "InfrastructureCollector",
+                    "stage": "historical_presence_inference",
+                    "target_type": "infrastructure",
+                    "severity": "warning",
+                    "code": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+                    "message": (
+                        "저장된 기간 스냅샷이 없어 현재 자원 중 보고 종료 "
+                        "이전에 생성된 자원만 목록과 모니터링 대상으로 "
+                        "사용했습니다. 삭제되었거나 변경된 과거 자원은 "
+                        "복원되지 않습니다."
+                    ),
+                })
+                unknown_resource_keys = {
+                    (
+                        str(resource.get("category") or "").upper(),
+                        str(
+                            resource.get("resource_id")
+                            or resource.get("resource_name")
+                            or f"row-{index}"
+                        ),
+                    )
+                    for index, resource in enumerate(
+                        infrastructure_collected_data
+                    )
+                    if (
+                        isinstance(resource.get("details"), dict)
+                        and resource["details"].get(
+                            "historical_presence_confidence"
+                        ) == "UNKNOWN"
+                    )
+                }
+                unknown_resource_keys.update(
+                    (
+                        "SERVER",
+                        str(
+                            server.get("server_id")
+                            or server.get("server_name")
+                            or f"row-{index}"
+                        ),
+                    )
+                    for index, server in enumerate(server_data)
+                    if server.get("historical_presence_confidence")
+                    == "UNKNOWN"
+                )
+                unknown_create_time_count = len(unknown_resource_keys)
+                historical_filter_stats["unknown_create_time_count"] = (
+                    unknown_create_time_count
+                )
+                if unknown_create_time_count:
+                    infrastructure_warnings.append({
+                        "collector": "InfrastructureCollector",
+                        "stage": "historical_presence_inference",
+                        "target_type": "infrastructure",
+                        "severity": "warning",
+                        "code": "RESOURCE_CREATE_TIME_UNAVAILABLE",
+                        "unknown_create_time_count": (
+                            unknown_create_time_count
+                        ),
+                        "message": (
+                            "생성 시각을 확인할 수 없는 현재 자원은 누락을 "
+                            "방지하기 위해 포함했으며 과거 존재 여부는 "
+                            "확정할 수 없습니다."
+                        ),
+                    })
+
+            observation_metadata = (
+                {
+                    "reference_at": infrastructure_completed_at,
+                    "eligible_start": None,
+                    "eligible_end": None,
+                    "snapshot_age_seconds": None,
+                }
+                if current_state_period_fallback
+                else self._snapshot_window_metadata(
+                    live_snapshot_window,
+                    parsed_live_completed_at,
+                )
+            )
             collection_metadata["infrastructure"] = {
                 "started_at": infrastructure_started_at,
                 "completed_at": infrastructure_completed_at,
-                "source": "LIVE_API_COLLECTION",
-                "time_basis": "REPORT_PERIOD",
+                "source": (
+                    "CURRENT_API_COLLECTION"
+                    if current_state_period_fallback
+                    else "LIVE_API_COLLECTION"
+                ),
+                "time_basis": (
+                    "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+                    if current_state_period_fallback
+                    else "REPORT_PERIOD"
+                ),
                 "resource_categories": sorted(
                     selected_resource_categories
                 ),
@@ -886,7 +1142,8 @@ class ReportRunner:
                 "inventory_completeness": (
                     "PARTIAL"
                     if (
-                        server_errors
+                        current_state_period_fallback
+                        or server_errors
                         or infrastructure_errors
                         or infrastructure_warnings
                     )
@@ -897,16 +1154,17 @@ class ReportRunner:
                     + len(infrastructure_errors)
                     + len(infrastructure_warnings)
                 ),
-                **self._snapshot_window_metadata(
-                    live_snapshot_window,
-                    parsed_live_completed_at,
-                ),
+                "historical_filter": historical_filter_stats,
+                **observation_metadata,
             }
 
             completed_at = collection_metadata["infrastructure"].get(
                 "completed_at"
             )
-            if not self._period_contains_timestamp(period, completed_at):
+            if (
+                live_snapshot_in_period
+                and not self._period_contains_timestamp(period, completed_at)
+            ):
                 boundary_snapshot, boundary_lookup_warning = (
                     self._load_period_infrastructure_snapshot(
                         period,

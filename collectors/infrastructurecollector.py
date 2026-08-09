@@ -507,15 +507,34 @@ class InfrastructureCollector:
                     ),
                 )
 
-        if selected_categories & self.RESOURCE_MANAGER_ONLY_CATEGORIES:
-            resource_manager_items = self._collect_resource_manager()
+        # Resource Manager is queried once for every non-empty inventory run.
+        # Direct service APIs remain the inventory source; Resource Manager is
+        # used to enrich their creation timestamps and only supplies inventory
+        # for categories that do not have a direct collector.
+        resource_manager_items = self._collect_resource_manager()
+        resources = self.normalizer.enrich_resource_manager_creation_times(
+            resources,
+            resource_manager_items,
+        )
+
+        resource_manager_categories = (
+            selected_categories & self.RESOURCE_MANAGER_ONLY_CATEGORIES
+        )
+        if resource_manager_categories:
             self._extend_normalized(
                 resources,
                 target_type="resource_manager",
                 api="get_resource_list",
-                normalize=lambda: self.normalizer.normalize_resource_manager(
-                    resource_manager_items
-                ),
+                normalize=lambda: [
+                    resource
+                    for resource in (
+                        self.normalizer.normalize_resource_manager(
+                            resource_manager_items
+                        )
+                    )
+                    if resource.get("category")
+                    in resource_manager_categories
+                ],
             )
 
         result = self.normalizer.finalize(resources)

@@ -1,9 +1,10 @@
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from app.customer import CustomerProfile
 from app.report_options import ReportOptions
@@ -115,6 +116,90 @@ class CurrentInfrastructureCollector:
                 "resource_id": "current-vpc",
                 "resource_name": "current-vpc",
                 "details": {"vpc_no": "current-vpc"},
+            },
+        ]
+
+
+class HistoricalFallbackServerCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_raw_data = {}
+
+    def collect(self):
+        return [
+            {
+                "server_id": "old-server",
+                "server_name": "old-server",
+                "status": "RUN",
+            },
+            {
+                "server_id": "boundary-server",
+                "server_name": "boundary-server",
+                "status": "RUN",
+            },
+            {
+                "server_id": "unknown-server",
+                "server_name": "unknown-server",
+                "status": "RUN",
+            },
+        ]
+
+
+class HistoricalFallbackInfrastructureCollector:
+    def __init__(self, api_factory):
+        self.last_errors = []
+        self.last_warnings = []
+
+    def collect(self, servers, server_raw_data, categories=None):
+        del servers, server_raw_data, categories
+        kst = ZoneInfo("Asia/Seoul")
+        before_end = int(
+            datetime(2026, 8, 8, 23, 59, 59, tzinfo=kst).timestamp()
+            * 1000
+        )
+        at_end = int(
+            datetime(2026, 8, 9, 0, 0, 0, tzinfo=kst).timestamp()
+            * 1000
+        )
+        after_end = int(
+            datetime(2026, 8, 9, 0, 0, 1, tzinfo=kst).timestamp()
+            * 1000
+        )
+        return [
+            {
+                "category": "SERVER",
+                "resource_id": "old-server",
+                "resource_name": "old-server",
+                "create_time": before_end,
+                "details": {"create_time_source": "RESOURCE_MANAGER"},
+            },
+            {
+                "category": "SERVER",
+                "resource_id": "boundary-server",
+                "resource_name": "boundary-server",
+                "create_time": at_end,
+                "details": {"create_time_source": "RESOURCE_MANAGER"},
+            },
+            {
+                "category": "SERVER",
+                "resource_id": "unknown-server",
+                "resource_name": "unknown-server",
+                "create_time": None,
+                "details": {},
+            },
+            {
+                "category": "BLOCK_STORAGE",
+                "resource_id": "old-storage",
+                "resource_name": "old-storage",
+                "create_time": before_end,
+                "details": {"create_time_source": "RESOURCE_MANAGER"},
+            },
+            {
+                "category": "BLOCK_STORAGE",
+                "resource_id": "new-storage",
+                "resource_name": "new-storage",
+                "create_time": after_end,
+                "details": {"create_time_source": "RESOURCE_MANAGER"},
             },
         ]
 
@@ -570,6 +655,169 @@ class RunnerPipelineTests(unittest.TestCase):
             == "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE"
             for warning in report.collection_warnings
         ))
+
+    def test_past_period_without_snapshot_uses_creation_time_fallback(self):
+        repository = SnapshotRepository(None)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = self._runner_without_factory_init(temp_dir)
+            runner.customer = CustomerProfile(
+                customer_id="customer-1",
+                customer_name="Customer 1",
+                cloud_account_id="account-1",
+                report_options={
+                    "sections": [
+                        "infrastructure_inventory",
+                        "infrastructure_diagram",
+                        "monitoring",
+                    ],
+                    "resource_categories": ["SERVER", "BLOCK_STORAGE"],
+                    "monitoring_categories": ["SERVER"],
+                    "diagram": {"enabled": True},
+                },
+            )
+            runner.report_repository = repository
+            runner._today_kst = lambda: date(2026, 8, 9)
+
+            with (
+                patch(
+                    "app.runner.ServerCollector",
+                    HistoricalFallbackServerCollector,
+                ),
+                patch(
+                    "app.runner.InfrastructureCollector",
+                    HistoricalFallbackInfrastructureCollector,
+                ),
+                patch.object(
+                    runner,
+                    "_now_kst_iso",
+                    return_value="2026-08-09T12:00:00+09:00",
+                ),
+                patch.object(
+                    runner,
+                    "collect_insight_metrics",
+                    return_value=([{"server_id": "old-server"}], []),
+                ) as metric_collector,
+            ):
+                report = runner.run(target_day="2026-08-08")
+                html_text = (
+                    Path(temp_dir) / "ncp_report_20260808_20260808.html"
+                ).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            [server["server_id"] for server in report.servers],
+            ["old-server", "unknown-server"],
+        )
+        self.assertEqual(
+            [resource["resource_id"] for resource in report.infrastructure],
+            ["old-server", "unknown-server", "old-storage"],
+        )
+        metric_servers = metric_collector.call_args.kwargs["server_data"]
+        self.assertEqual(
+            [server["server_id"] for server in metric_servers],
+            ["old-server", "unknown-server"],
+        )
+        metadata = report.collection_metadata["infrastructure"]
+        self.assertEqual(metadata["source"], "CURRENT_API_COLLECTION")
+        self.assertEqual(
+            metadata["time_basis"],
+            "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+        )
+        self.assertEqual(metadata["inventory_completeness"], "PARTIAL")
+        self.assertEqual(
+            metadata["historical_filter"]["infrastructure"][
+                "excluded_after_period_count"
+            ],
+            2,
+        )
+        self.assertEqual(
+            metadata["historical_filter"]["unknown_create_time_count"],
+            1,
+        )
+        self.assertTrue(any(
+            warning.get("code")
+            == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+            for warning in report.collection_warnings
+        ))
+        self.assertTrue(any(
+            warning.get("code") == "RESOURCE_CREATE_TIME_UNAVAILABLE"
+            for warning in report.collection_warnings
+        ))
+        self.assertEqual(
+            report.infrastructure_topology["summary"]["confidence"],
+            "UNAVAILABLE",
+        )
+        self.assertEqual(report.infrastructure_topology["nodes"], [])
+        self.assertIn("old-server", html_text)
+        self.assertIn("old-storage", html_text)
+        self.assertIn("인프라 시간 기준 안내", html_text)
+        self.assertIn("보고서 생성 시점의 현재 값", html_text)
+        self.assertIn("생성 시각 기반 추정", html_text)
+        self.assertIn("생성 시각 미확인", html_text)
+        self.assertNotIn("boundary-server", html_text)
+        self.assertNotIn("new-storage", html_text)
+        public_payload = report.to_dict()
+        public_old_server = next(
+            server
+            for server in public_payload["servers"]
+            if server["server_id"] == "old-server"
+        )
+        self.assertEqual(
+            public_old_server["historical_presence_confidence"],
+            "INFERRED_FROM_CREATE_TIME",
+        )
+        public_old_resource = next(
+            resource
+            for resource in public_payload["infrastructure"]
+            if resource["resource_id"] == "old-server"
+        )
+        self.assertEqual(
+            public_old_resource["details"][
+                "historical_presence_confidence"
+            ],
+            "INFERRED_FROM_CREATE_TIME",
+        )
+
+    def test_future_period_does_not_use_current_state_fallback(self):
+        repository = SnapshotRepository(None)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = self._runner_without_factory_init(temp_dir)
+            runner.customer = CustomerProfile(
+                customer_id="customer-1",
+                customer_name="Customer 1",
+                cloud_account_id="account-1",
+                report_options={
+                    "sections": ["infrastructure_inventory"],
+                    "resource_categories": ["SERVER", "BLOCK_STORAGE"],
+                    "monitoring_categories": [],
+                    "diagram": {"enabled": False},
+                },
+            )
+            runner.report_repository = repository
+            runner._today_kst = lambda: date(2026, 8, 9)
+
+            with (
+                patch("app.runner.ServerCollector") as server_collector,
+                patch(
+                    "app.runner.InfrastructureCollector"
+                ) as infrastructure_collector,
+                patch.object(
+                    runner,
+                    "_now_kst_iso",
+                    return_value="2026-08-09T12:00:00+09:00",
+                ),
+            ):
+                report = runner.run(target_day="2026-08-10")
+
+        server_collector.assert_not_called()
+        infrastructure_collector.assert_not_called()
+        self.assertEqual(report.servers, [])
+        self.assertEqual(report.infrastructure, [])
+        self.assertEqual(
+            report.collection_metadata["infrastructure"]["source"],
+            "UNAVAILABLE",
+        )
 
     def test_topology_does_not_substitute_current_state_for_past_period(self):
         runner = self._runner_without_factory_init()

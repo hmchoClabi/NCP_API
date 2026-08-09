@@ -529,6 +529,121 @@ class InfrastructureCollectorTests(unittest.TestCase):
             "nrn:PUB:Server:KR:123:Server/456",
         )
 
+    def test_resource_manager_creation_time_enriches_service_inventory(self):
+        normalizer = InfrastructureNormalizer()
+        resources = normalizer.normalize_servers(
+            [
+                {
+                    "server_id": "456",
+                    "server_name": "app-server",
+                    "create_time": "2025-01-01T00:00:00+09:00",
+                }
+            ],
+            [],
+        )
+
+        enriched = normalizer.enrich_resource_manager_creation_times(
+            resources,
+            [
+                {
+                    "nrn": "nrn:PUB:Server:KR:123:Server/456",
+                    "productName": "VPCServer",
+                    "resourceType": "ServerInstance",
+                    "resourceId": "456",
+                    "createTime": 1_767_225_600_000,
+                    "eventTime": 1_767_312_000_000,
+                }
+            ],
+        )
+
+        self.assertEqual(enriched[0]["create_time"], 1_767_225_600_000)
+        self.assertEqual(
+            enriched[0]["details"]["inventory_source"],
+            "SERVICE_API",
+        )
+        self.assertEqual(
+            enriched[0]["details"]["create_time_source"],
+            "RESOURCE_MANAGER",
+        )
+        self.assertEqual(
+            enriched[0]["details"]["source_nrn"],
+            "nrn:PUB:Server:KR:123:Server/456",
+        )
+        self.assertEqual(
+            enriched[0]["details"]["resource_manager_match_basis"],
+            "RESOURCE_ID",
+        )
+        self.assertEqual(
+            enriched[0]["details"]["resource_manager_event_time"],
+            1_767_312_000_000,
+        )
+
+    def test_resource_manager_creation_time_requires_unambiguous_id(self):
+        normalizer = InfrastructureNormalizer()
+        resources = normalizer.normalize_servers(
+            [
+                {
+                    "server_id": "456",
+                    "server_name": "app-server",
+                    "create_time": "service-api-time",
+                }
+            ],
+            [],
+        )
+        duplicate_evidence = [
+            {
+                "nrn": f"nrn:PUB:Server:KR:123:Server/456:{index}",
+                "productName": "VPCServer",
+                "resourceType": "ServerInstance",
+                "resourceId": "456",
+                "createTime": index,
+            }
+            for index in (1, 2)
+        ]
+
+        enriched = normalizer.enrich_resource_manager_creation_times(
+            resources,
+            duplicate_evidence,
+        )
+
+        self.assertEqual(enriched[0]["create_time"], "service-api-time")
+        self.assertNotIn(
+            "create_time_source",
+            enriched[0]["details"],
+        )
+
+    def test_resource_manager_creation_time_can_match_canonical_nrn(self):
+        nrn = "nrn:PUB:Server:KR:123:Server/456"
+        enriched = (
+            InfrastructureNormalizer()
+            .enrich_resource_manager_creation_times(
+                [
+                    {
+                        "category": "SERVER",
+                        "resource_id": "service-api-alias",
+                        "resource_name": "app-server",
+                        "create_time": "service-api-time",
+                        "details": {"source_nrn": nrn},
+                    }
+                ],
+                [
+                    {
+                        "nrn": nrn,
+                        "productName": "VPCServer",
+                        "resourceType": "ServerInstance",
+                        "resourceId": "456",
+                        "createTime": 1_767_225_600_000,
+                    }
+                ],
+            )
+        )
+
+        self.assertEqual(enriched[0]["create_time"], 1_767_225_600_000)
+        self.assertEqual(
+            enriched[0]["details"]["resource_manager_match_basis"],
+            "NRN",
+        )
+
     def test_resource_manager_platform_aliases_match_direct_inventory(self):
         resources = InfrastructureNormalizer().normalize_resource_manager(
             [
@@ -921,7 +1036,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             [(resource["category"], resource["resource_id"]) for resource in resources],
             [("VPC", "vpc-1")],
         )
-        self.assertEqual(factory.requests, ["vpc"])
+        self.assertEqual(factory.requests, ["vpc", "resource_manager"])
         vpc.get_vpc_list.assert_called_once_with()
 
         resource_manager_factory = build_factory()
@@ -948,6 +1063,95 @@ class InfrastructureCollectorTests(unittest.TestCase):
             [],
         )
         self.assertEqual(empty_factory.requests, [])
+
+    def test_resource_manager_enriches_but_does_not_replace_server_inventory(
+        self,
+    ):
+        resource_manager = Mock()
+        resource_manager.get_resource_list.return_value = {
+            "items": [
+                {
+                    "nrn": "nrn:PUB:Server:KR:123:Server/server-1",
+                    "platformType": "VPC",
+                    "productName": "VPCServer",
+                    "resourceType": "ServerInstance",
+                    "resourceId": "server-1",
+                    "resourceName": "app-server",
+                    "createTime": 1_767_225_600_000,
+                },
+                {
+                    "nrn": "nrn:PUB:Server:KR:123:Server/rm-only",
+                    "platformType": "VPC",
+                    "productName": "VPCServer",
+                    "resourceType": "ServerInstance",
+                    "resourceId": "rm-only",
+                    "resourceName": "must-not-replace-service-inventory",
+                    "createTime": 1_767_225_600_000,
+                },
+            ],
+            "hasMore": False,
+        }
+        factory = build_factory(resource_manager=resource_manager)
+        collector = InfrastructureCollector(factory)
+
+        resources = collector.collect(
+            [
+                {
+                    "server_id": "server-1",
+                    "server_name": "app-server",
+                    "create_time": "service-api-time",
+                }
+            ],
+            {"nics": [], "storages": []},
+            categories=("SERVER",),
+        )
+
+        self.assertEqual(
+            [resource["resource_id"] for resource in resources],
+            ["server-1"],
+        )
+        self.assertEqual(resources[0]["create_time"], 1_767_225_600_000)
+        self.assertEqual(
+            resources[0]["details"]["create_time_source"],
+            "RESOURCE_MANAGER",
+        )
+        self.assertEqual(factory.requests, ["resource_manager"])
+        resource_manager.get_resource_list.assert_called_once()
+
+    def test_resource_manager_permission_failure_keeps_service_creation_time(
+        self,
+    ):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{"error":{"errorCode":"2300"}}'
+        response.headers["Content-Type"] = "application/json"
+        resource_manager = Mock()
+        resource_manager.get_resource_list.side_effect = requests.HTTPError(
+            "forbidden",
+            response=response,
+        )
+        collector = InfrastructureCollector(
+            build_factory(resource_manager=resource_manager)
+        )
+
+        resources = collector.collect(
+            [
+                {
+                    "server_id": "server-1",
+                    "server_name": "app-server",
+                    "create_time": "service-api-time",
+                }
+            ],
+            {"nics": [], "storages": []},
+            categories=("SERVER",),
+        )
+
+        self.assertEqual(len(resources), 1)
+        self.assertEqual(resources[0]["create_time"], "service-api-time")
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(len(collector.last_warnings), 1)
+        self.assertEqual(collector.last_warnings[0]["status_code"], 403)
+        self.assertEqual(collector.last_warnings[0]["error_code"], "2300")
 
     def test_collects_allowlisted_inventory_and_never_persists_secrets(self):
         factory = build_factory(

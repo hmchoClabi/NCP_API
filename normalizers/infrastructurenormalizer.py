@@ -1477,10 +1477,103 @@ class InfrastructureNormalizer:
                         "source_product": product_name,
                         "source_resource_type": resource_type,
                         "source_nrn": item.get("nrn"),
+                        "create_time_source": (
+                            "RESOURCE_MANAGER"
+                            if item.get("createTime") not in (None, "")
+                            else None
+                        ),
+                        "resource_manager_event_time": item.get(
+                            "eventTime"
+                        ),
                     },
                 )
             )
         return result
+
+    def enrich_resource_manager_creation_times(
+        self,
+        resources: Iterable[Mapping[str, Any]],
+        items: Iterable[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Merge authoritative Resource Manager creation-time evidence.
+
+        Service APIs remain the inventory source. A resource is enriched only
+        when its canonical NRN matches exactly or when its category and
+        resource ID identify exactly one Resource Manager record. This avoids
+        name-based guesses and cross-service numeric-ID collisions.
+        """
+
+        normalized_resources = self._dict_items(resources)
+        resource_manager_items = self._dict_items(items)
+        by_nrn: Dict[str, List[Dict[str, Any]]] = {}
+        by_category_and_id: Dict[
+            tuple[str, str],
+            List[Dict[str, Any]],
+        ] = {}
+
+        for item in resource_manager_items:
+            nrn = self._string(item.get("nrn"))
+            if nrn:
+                by_nrn.setdefault(nrn, []).append(item)
+
+            category = self._resource_manager_category(item)
+            resource_id = self._string(item.get("resourceId"))
+            if category and resource_id:
+                by_category_and_id.setdefault(
+                    (category, resource_id),
+                    [],
+                ).append(item)
+
+        for resource in normalized_resources:
+            category = self.CATEGORY_ALIASES.get(
+                str(resource.get("category") or "").strip().upper()
+            )
+            if category not in self.CATEGORY_LABELS:
+                continue
+
+            details = self._mapping(resource.get("details"))
+            source_nrn = self._string(details.get("source_nrn"))
+            resource_id = self._string(resource.get("resource_id"))
+
+            candidates: List[Dict[str, Any]] = []
+            match_basis = None
+            if source_nrn:
+                candidates = by_nrn.get(source_nrn, [])
+                if candidates:
+                    match_basis = "NRN"
+            if not candidates and resource_id and resource_id in by_nrn:
+                candidates = by_nrn[resource_id]
+                match_basis = "NRN"
+            if not candidates and resource_id:
+                candidates = by_category_and_id.get(
+                    (category, resource_id),
+                    [],
+                )
+                if candidates:
+                    match_basis = "RESOURCE_ID"
+
+            if len(candidates) != 1:
+                continue
+
+            evidence = candidates[0]
+            create_time = evidence.get("createTime")
+            if create_time not in (None, ""):
+                resource["create_time"] = create_time
+                details["create_time_source"] = "RESOURCE_MANAGER"
+
+            evidence_nrn = self._string(evidence.get("nrn"))
+            if evidence_nrn:
+                details["source_nrn"] = evidence_nrn
+            evidence_id = self._string(evidence.get("resourceId"))
+            if evidence_id:
+                details["resource_manager_resource_id"] = evidence_id
+            event_time = evidence.get("eventTime")
+            if event_time not in (None, ""):
+                details["resource_manager_event_time"] = event_time
+            details["resource_manager_match_basis"] = match_basis
+            resource["details"] = self._sanitize_details(details)
+
+        return normalized_resources
 
     def finalize(
         self,

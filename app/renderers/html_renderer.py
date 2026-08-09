@@ -216,6 +216,19 @@ class HtmlReportRenderer:
         organization_billing_enabled = report_options.section_enabled(
             "organization_billing"
         )
+        collection_metadata = self._mapping(report.collection_metadata)
+        infrastructure_metadata = self._mapping(
+            collection_metadata.get("infrastructure")
+        )
+        historical_notice_html = ""
+        if (
+            (inventory_enabled or monitoring_enabled)
+            and infrastructure_metadata.get("time_basis")
+            == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+        ):
+            historical_notice_html = self._historical_inventory_notice(
+                infrastructure_metadata
+            )
 
         summary_html = ""
         if report_options.section_enabled("executive_summary"):
@@ -268,22 +281,47 @@ class HtmlReportRenderer:
         )
         server_detail_html = ""
         if inventory_enabled and report_options.resource_enabled("SERVER"):
+            server_rows = [
+                {
+                    **server,
+                    "historical_presence_text": (
+                        self._historical_confidence_text(
+                            server.get("historical_presence_confidence")
+                        )
+                    ),
+                }
+                for server in self._records(report.servers)
+            ]
+            server_columns = [
+                ("server_name", "서버명"),
+                ("status", "상태"),
+                ("private_ip", "Private IP"),
+                ("public_ip", "Public IP"),
+                ("cpu_count", "vCPU", "number0"),
+                ("memory_gb", "메모리(GB)", "number3"),
+                ("zone_code", "Zone"),
+            ]
+            if any(
+                server.get("historical_presence_confidence")
+                for server in server_rows
+            ):
+                server_columns.append(
+                    ("historical_presence_text", "기간 존재 판단")
+                )
             server_detail_html = self._section(
                 "서버 상세",
-                "보고서 기준 시점에 저장된 서버 구성입니다.",
-                self._table(
-                    self._records(report.servers),
-                    (
-                        ("server_name", "서버명"),
-                        ("status", "상태"),
-                        ("private_ip", "Private IP"),
-                        ("public_ip", "Public IP"),
-                        ("cpu_count", "vCPU", "number0"),
-                        ("memory_gb", "메모리(GB)", "number3"),
-                        ("zone_code", "Zone"),
-                    ),
+                (
+                    "생성 시각으로 선별한 현재 서버 구성입니다. 상태와 "
+                    "IP는 보고서 생성 시점의 값입니다."
+                    if infrastructure_metadata.get("time_basis")
+                    == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+                    else "보고서 기준 시점에 저장된 서버 구성입니다."
                 ),
-                len(report.servers),
+                self._table(
+                    server_rows,
+                    tuple(server_columns),
+                ),
+                len(server_rows),
             )
 
         monitoring_html = ""
@@ -434,6 +472,7 @@ class HtmlReportRenderer:
     </header>
 
     {summary_html}
+    {historical_notice_html}
     {inventory_html}
     {topology_html}
     {server_detail_html}
@@ -456,6 +495,50 @@ class HtmlReportRenderer:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(self.render(report), encoding="utf-8")
         return path
+
+    def _historical_inventory_notice(
+        self,
+        infrastructure_metadata: Mapping[str, Any],
+    ) -> str:
+        historical_filter = self._mapping(
+            infrastructure_metadata.get("historical_filter")
+        )
+        infrastructure_filter = self._mapping(
+            historical_filter.get("infrastructure")
+        )
+        excluded_count = infrastructure_filter.get(
+            "excluded_after_period_count",
+            0,
+        )
+        unknown_count = historical_filter.get(
+            "unknown_create_time_count",
+            infrastructure_filter.get("unknown_create_time_count", 0),
+        )
+        collected_at = self._infrastructure_create_time(
+            infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+        )
+
+        return f"""
+    <section class="report-section warning historical-basis-notice" role="note">
+      <div class="section-heading">
+        <div>
+          <h2>인프라 시간 기준 안내</h2>
+          <p>보고 기간 안에 저장된 인프라 스냅샷이 없어 현재 자원 목록을 생성 시각으로 선별했습니다.</p>
+        </div>
+        <span class="count">PARTIAL</span>
+      </div>
+      <div class="historical-basis-grid">
+        <div><span>목록 포함 기준</span><strong>보고 종료 전에 생성된 현재 자원</strong></div>
+        <div><span>상태·IP·연결 정보</span><strong>보고서 생성 시점의 현재 값</strong></div>
+        <div><span>시계열 그래프</span><strong>선별된 현재 자원의 보고 기간 메트릭</strong></div>
+        <div><span>과거 구성도</span><strong>기간 스냅샷이 없으면 표시하지 않음</strong></div>
+        <div><span>현재 목록 수집 시각</span><strong>{self._text(collected_at)}</strong></div>
+        <div><span>기간 종료 후 생성 제외</span><strong>{self._text(excluded_count)}개</strong></div>
+        <div><span>생성 시각 미확인</span><strong>{self._text(unknown_count)}개</strong></div>
+      </div>
+      <p class="historical-basis-caveat">보고 종료 후 삭제된 자원이나 변경 전 상태·IP·연결 관계는 복원되지 않으므로 정확한 과거 구성으로 해석해서는 안 됩니다.</p>
+    </section>"""
 
     def _summary_card(
         self,
@@ -507,6 +590,9 @@ class HtmlReportRenderer:
             if category not in allowed:
                 continue
             counts[category] += 1
+            details = resource.get("details")
+            if not isinstance(details, dict):
+                details = {}
             region_zone = " / ".join(
                 str(value)
                 for value in (
@@ -519,10 +605,15 @@ class HtmlReportRenderer:
                 **resource,
                 "location": region_zone or "-",
                 "details_text": self._infrastructure_details_text(
-                    resource.get("details")
+                    details
                 ),
                 "create_time_text": self._infrastructure_create_time(
                     resource.get("create_time")
+                ),
+                "historical_presence_text": (
+                    self._historical_confidence_text(
+                        details.get("historical_presence_confidence")
+                    )
                 ),
             })
 
@@ -539,19 +630,26 @@ class HtmlReportRenderer:
       </article>"""
             for category, label in summary_categories
         )
-        table = self._table(
-            prepared,
-            (
-                ("category_label", "구분"),
-                ("resource_name", "리소스명"),
-                ("service_name", "서비스"),
-                ("resource_type", "유형"),
-                ("status", "상태"),
-                ("location", "리전 / Zone"),
-                ("details_text", "주요 구성"),
-                ("create_time_text", "생성 시각 (KST)"),
-            ),
-        )
+        columns = [
+            ("category_label", "구분"),
+            ("resource_name", "리소스명"),
+            ("service_name", "서비스"),
+            ("resource_type", "유형"),
+            ("status", "상태"),
+            ("location", "리전 / Zone"),
+            ("details_text", "주요 구성"),
+            ("create_time_text", "생성 시각 (KST)"),
+        ]
+        if any(
+            self._mapping(resource.get("details")).get(
+                "historical_presence_confidence"
+            )
+            for resource in prepared
+        ):
+            columns.append(
+                ("historical_presence_text", "기간 존재 판단")
+            )
+        table = self._table(prepared, tuple(columns))
         summary = (
             f'<div class="infra-summary-grid">{summary_cards}</div>'
             if summary_cards else ""
@@ -604,6 +702,13 @@ class HtmlReportRenderer:
             if len(parts) == 5:
                 break
         return " · ".join(parts) or "-"
+
+    @staticmethod
+    def _historical_confidence_text(value: Any) -> str:
+        return {
+            "INFERRED_FROM_CREATE_TIME": "생성 시각 기반 추정",
+            "UNKNOWN": "생성 시각 미확인",
+        }.get(str(value or "").upper(), "-")
 
     def _infrastructure_create_time(self, value: Any) -> str:
         timestamp = self._timestamp_millis(value)
@@ -2616,6 +2721,32 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
   border-radius: 16px;
 }
 .report-section.warning { border-color: #fed7aa; }
+.historical-basis-notice { background: #fff7ed; }
+.historical-basis-notice .count {
+  color: #9a3412;
+  background: #ffedd5;
+}
+.historical-basis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.historical-basis-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+}
+.historical-basis-grid span { color: #9a3412; font-size: .76rem; }
+.historical-basis-grid strong { color: #431407; font-size: .86rem; }
+.historical-basis-caveat {
+  margin: 14px 0 0;
+  color: #7c2d12;
+  font-size: .82rem;
+  font-weight: 700;
+}
 .section-heading {
   display: flex;
   align-items: flex-start;
@@ -2747,7 +2878,7 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts, .infra-summary-grid, .topology-unmapped-grid { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts, .infra-summary-grid, .topology-unmapped-grid, .historical-basis-grid { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
 }
 @media print {

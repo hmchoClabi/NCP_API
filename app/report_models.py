@@ -429,6 +429,8 @@ class ReportResult:
             "region_code",
             "zone_code",
             "create_date",
+            "create_time_source",
+            "historical_presence_confidence",
         ]
         if bool(options.diagram_option("show_resource_id", True)):
             allowed_fields.append("server_id")
@@ -503,6 +505,9 @@ class ReportResult:
             "attached_server_name",
             "high_availability",
             "multi_zone",
+            "create_time_source",
+            "historical_presence_confidence",
+            "historical_presence_basis",
         )
         result = []
         for resource in self.display_infrastructure:
