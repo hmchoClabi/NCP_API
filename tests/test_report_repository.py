@@ -1,6 +1,9 @@
 import inspect
+import sys
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from database.config import DatabaseSettings
 from database.report_repository import PostgresReportRepository
@@ -16,6 +19,12 @@ class RecordingCursor:
 
     def fetchone(self):
         return ("report-run-id",)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
 
 
 class ReportRepositoryTests(unittest.TestCase):
@@ -227,6 +236,65 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertIn("LIVE_API_COLLECTION", source)
         self.assertNotIn("jsonb_array_length", source)
         self.assertNotIn("generated_at", source)
+
+    def test_historical_snapshot_query_executes_with_json_path_literal(self):
+        cursor = RecordingCursor()
+        observed_at = datetime.fromisoformat("2026-08-08T23:00:00+09:00")
+        cursor.fetchone = lambda: (
+            {
+                "infrastructure": [],
+                "collection_metadata": {
+                    "infrastructure": {
+                        "completed_at": observed_at.isoformat(),
+                    }
+                },
+            },
+            "report-run-id",
+            observed_at,
+        )
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return cursor
+
+        repository = PostgresReportRepository(
+            DatabaseSettings(tenant_id="tenant-id")
+        )
+        fake_psycopg = SimpleNamespace(
+            connect=lambda **_kwargs: Connection()
+        )
+
+        with patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            snapshot = repository.load_period_infrastructure_snapshot(
+                {
+                    "start_dt": "2026-08-08T00:00:00+09:00",
+                    "end_dt": "2026-08-09T00:00:00+09:00",
+                    "end_exclusive": True,
+                },
+                {
+                    "cloud_account_id": "account-id",
+                    "api_type": "public",
+                },
+                "2026-08-09T12:00:00+09:00",
+            )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(
+            snapshot["_snapshot_reference"]["report_run_id"],
+            "report-run-id",
+        )
+        query, parameters = cursor.calls[1]
+        self.assertIn(
+            "'{collection_metadata,infrastructure,source}'",
+            query,
+        )
+        self.assertEqual(parameters[:2], ("tenant-id", "account-id"))
 
     def test_snapshot_window_preserves_fractional_period_boundaries(self):
         window = self.repository._snapshot_eligibility_window(

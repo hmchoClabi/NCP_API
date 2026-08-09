@@ -110,6 +110,7 @@ def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
         "vpc": f"{ncloud}/vpc/v2",
         "loadbalancer": f"{ncloud}/vloadbalancer/v2",
         "vnas": f"{ncloud}/vnas/v2",
+        "nas_classic": f"{ncloud}/server/v2",
         "clouddb": ncloud,
         "cdn": f"{ncloud}/cdn/v2",
         "certificatemanager": base["certificatemanager"],

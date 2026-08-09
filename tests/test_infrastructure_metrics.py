@@ -707,6 +707,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
                 "category": "NAS",
                 "resource_id": "nas-1",
                 "resource_name": "shared-volume",
+                "platform": "VPC",
             },
             {
                 "category": "OBJECT_STORAGE",
@@ -897,7 +898,11 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
         groups = collector.collect(
             [
-                {"category": "NAS", "resource_id": "nas-1"},
+                {
+                    "category": "NAS",
+                    "resource_id": "nas-1",
+                    "platform": "VPC",
+                },
                 {
                     "category": "OBJECT_STORAGE",
                     "resource_id": "bucket-1",
@@ -912,6 +917,75 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         self.assertEqual(
             {call["prod_key"] for call in api.search_calls},
             {"nas"},
+        )
+
+    def test_nas_products_only_query_resources_from_matching_platform(self):
+        api = ExpandedDiscoveryAPI()
+        api.schemas = [
+            {"prodName": "System/NAS", "cwKey": "nas-classic"},
+            {"prodName": "System/NAS(VPC)", "cwKey": "nas-vpc"},
+        ]
+        api.metrics = {
+            "nas-classic": api._metric_items(
+                ("volume_used_size", "volume_used_ratio"),
+                {"instanceNo": "classic-nas-1"},
+            ),
+            "nas-vpc": api._metric_items(
+                ("volume_used_size", "volume_used_ratio"),
+                {"instanceNo": "vpc-nas-1"},
+            ),
+        }
+        collector = self._collector(api)
+
+        groups = collector.collect(
+            [
+                {
+                    "category": "NAS",
+                    "resource_id": "classic-nas-1",
+                    "resource_name": "classic-volume",
+                    "platform": "CLASSIC",
+                },
+                {
+                    "category": "NAS",
+                    "resource_id": "vpc-nas-1",
+                    "resource_name": "vpc-volume",
+                    "platform": "VPC",
+                },
+            ],
+            1,
+            2,
+            selected_categories=["NAS"],
+        )
+
+        selected_ids_by_product = {
+            call["prod_key"]: call["dimensions_selected_list"][0][
+                "values"
+            ]
+            for call in api.search_calls
+        }
+        self.assertEqual(
+            selected_ids_by_product,
+            {
+                "nas-classic": ["classic-nas-1"],
+                "nas-vpc": ["vpc-nas-1"],
+            },
+        )
+        resource_ids_by_product = {
+            group["product_name"]: {
+                series["resource_id"] for series in group["series"]
+            }
+            for group in groups
+        }
+        self.assertEqual(
+            resource_ids_by_product,
+            {
+                "System/NAS": {"classic-nas-1"},
+                "System/NAS(VPC)": {"vpc-nas-1"},
+            },
+        )
+        self.assertEqual(
+            collector.api_factory.calls,
+            ["cloud_insight"],
         )
 
     def test_query_windowing_and_series_limit_are_bounded(self):
@@ -1331,14 +1405,193 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         self.assertEqual(groups[0]["metric"], "mssql_user_connection")
         self.assertEqual(groups[0]["unit"], "count")
 
-    def test_target_group_schema_is_not_treated_as_load_balancer_instance(self):
-        collector = InfrastructureMetricCollector(FakeFactory())
+    def test_target_group_metrics_use_target_group_numbers_without_lb_mixup(self):
+        api = DiscoveryAPI()
+        api.schemas = [
+            {
+                "prodName": "System/Load Balancer(VPC)",
+                "cwKey": "lb",
+            },
+            {
+                "prodName": "System/Load Balancer Target Group(VPC)",
+                "cwKey": "target-group",
+            },
+        ]
+        api.metrics = {
+            "lb": api._lb_metrics(),
+            "target-group": [
+                {
+                    "metric": "available_host_count",
+                    "unit": "num",
+                    "options": api._options("MIN"),
+                    "dimensions": {"targetGroupNo": "tg-1"},
+                },
+                {
+                    "metric": "unavailable_host_count",
+                    "unit": "num",
+                    "options": api._options("MAX"),
+                    "dimensions": {"targetGroupNo": "tg-1"},
+                },
+                {
+                    "metric": "connections_per_second",
+                    "unit": "num/sec",
+                    "options": api._options("AVG"),
+                    "dimensions": {"targetGroupNo": "tg-1"},
+                },
+                {
+                    "metric": "available_host_count",
+                    "unit": "num",
+                    "options": api._options("MIN"),
+                    "dimensions": {"targetGroupNo": "unmanaged-tg"},
+                },
+            ],
+        }
+        collector = self._collector(api)
 
-        self.assertIsNone(
+        groups = collector.collect(
+            [
+                {
+                    "category": "LOAD_BALANCER",
+                    "resource_id": "lb-1",
+                    "resource_name": "main-lb",
+                },
+                {
+                    "category": "TARGET_GROUP",
+                    "resource_id": "tg-1",
+                    "resource_name": "web-targets",
+                    "resource_type": "TargetGroup",
+                    "details": {"target_group_no": "tg-1"},
+                },
+            ],
+            1,
+            2,
+            selected_categories=["LOAD_BALANCER"],
+        )
+
+        self.assertEqual(
             collector._product_category(
                 "System/Load Balancer Target Group(VPC)"
+            ),
+            "TARGET_GROUP",
+        )
+        target_group_searches = [
+            call
+            for call in api.search_calls
+            if call["prod_key"] == "target-group"
+        ]
+        self.assertEqual(len(target_group_searches), 1)
+        self.assertEqual(
+            target_group_searches[0]["dimensions_selected_list"],
+            [{"name": "targetGroupNo", "values": ["tg-1"]}],
+        )
+        load_balancer_searches = [
+            call for call in api.search_calls if call["prod_key"] == "lb"
+        ]
+        self.assertEqual(len(load_balancer_searches), 1)
+        self.assertEqual(
+            load_balancer_searches[0]["dimensions_selected_list"],
+            [{"name": "instanceId", "values": ["lb-1"]}],
+        )
+
+        target_group_payloads = [
+            payload
+            for call in api.query_calls
+            for payload in call["payloads"]
+            if payload["prodKey"] == "target-group"
+        ]
+        self.assertEqual(
+            {
+                payload["metric"]: payload["aggregation"]
+                for payload in target_group_payloads
+            },
+            {
+                "available_host_count": "MIN",
+                "unavailable_host_count": "MAX",
+            },
+        )
+        self.assertTrue(
+            all(
+                payload["dimensions"] == {"targetGroupNo": "tg-1"}
+                for payload in target_group_payloads
             )
         )
+        self.assertTrue(
+            all(
+                "targetGroupNo" not in payload["dimensions"]
+                for call in api.query_calls
+                for payload in call["payloads"]
+                if payload["prodKey"] == "lb"
+            )
+        )
+
+        target_group_groups = [
+            group
+            for group in groups
+            if group.get("metric_scope") == "TARGET_GROUP"
+        ]
+        self.assertEqual(len(target_group_groups), 2)
+        self.assertEqual(
+            {group["category"] for group in target_group_groups},
+            {"LOAD_BALANCER"},
+        )
+        self.assertEqual(
+            {group["resource_type"] for group in target_group_groups},
+            {"TargetGroup"},
+        )
+        self.assertEqual(
+            {
+                group["metric"]: group["aggregation"]
+                for group in target_group_groups
+            },
+            {
+                "available_host_count": "MIN",
+                "unavailable_host_count": "MAX",
+            },
+        )
+        self.assertTrue(
+            all(group["unit"] == "count" for group in target_group_groups)
+        )
+        self.assertTrue(
+            all(
+                group["series"] == [{
+                    "resource_id": "tg-1",
+                    "resource_name": "web-targets",
+                    "dimensions": {"targetGroupNo": "tg-1"},
+                    "points": [[1, 1.0], [2, 2.5]],
+                }]
+                for group in target_group_groups
+            )
+        )
+
+    def test_target_group_resources_are_not_monitored_without_lb_selection(self):
+        api = DiscoveryAPI()
+        api.schemas = [{
+            "prodName": "System/Load Balancer Target Group(VPC)",
+            "cwKey": "target-group",
+        }]
+        api.metrics = {
+            "target-group": [{
+                "metric": "available_host_count",
+                "options": api._options("MIN"),
+                "dimensions": {"targetGroupNo": "tg-1"},
+            }]
+        }
+        collector = self._collector(api)
+
+        groups = collector.collect(
+            [{
+                "category": "TARGET_GROUP",
+                "resource_id": "tg-1",
+                "resource_name": "web-targets",
+            }],
+            1,
+            2,
+            selected_categories=["NAS"],
+        )
+
+        self.assertEqual(groups, [])
+        self.assertEqual(api.search_calls, [])
+        self.assertEqual(api.query_calls, [])
 
     def test_server_error_remains_error_classification(self):
         collector = InfrastructureMetricCollector(FakeFactory())

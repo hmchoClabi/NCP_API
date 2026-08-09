@@ -5,6 +5,7 @@ __all__ = [
     "ContainerAPI",
     "KubernetesAPI",
     "VnasAPI",
+    "ClassicNasAPI",
     "GlobaldnsAPI",
     "ResourceManagerAPI",
     "CloudLogAnalyticsAPI",
@@ -40,6 +41,9 @@ def __getattr__(name):
     if name == "VnasAPI":
         from .vnasAPI import VnasAPI
         return VnasAPI
+    if name == "ClassicNasAPI":
+        from .classicnasAPI import ClassicNasAPI
+        return ClassicNasAPI
     if name == "GlobaldnsAPI":
         from .globaldnsAPI import GlobaldnsAPI
         return GlobaldnsAPI

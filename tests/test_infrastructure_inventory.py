@@ -173,6 +173,28 @@ class InventoryNasAPI(EmptyNasAPI):
         )
 
 
+class InventoryClassicNasAPI(EmptyNasAPI):
+    def get_nas_volume_instance_list(self, **kwargs):
+        return wrapped(
+            "getNasVolumeInstanceListResponse",
+            "nasVolumeInstanceList",
+            [
+                {
+                    "nasVolumeInstanceNo": "classic-nas-1",
+                    "volumeName": "classic-shared-data",
+                    "nasVolumeInstanceStatusName": "created",
+                    "region": {"regionNo": "1", "regionCode": "KR"},
+                    "zone": {"zoneNo": "3", "zoneCode": "KR-2"},
+                    "volumeTotalSize": 100 * 1024 ** 3,
+                    "volumeAllotmentProtocolType": {"code": "NFS"},
+                    "nasVolumeServerInstanceList": [
+                        {"serverInstanceNo": "classic-server-1"}
+                    ],
+                }
+            ],
+        )
+
+
 class EmptyKubernetesAPI:
     def get_nks_cluster_list(self):
         return {"clusters": []}
@@ -370,6 +392,7 @@ def build_factory(**overrides):
     apis = {
         "loadbalancer": EmptyLoadBalancerAPI(),
         "vnas": EmptyNasAPI(),
+        "nas_classic": EmptyNasAPI(),
         "cloud_db": EmptyCloudDbAPI(),
         "kubernetes": EmptyKubernetesAPI(),
         "cdn": EmptyCdnAPI(),
@@ -439,6 +462,80 @@ class InfrastructureAPIContractTests(unittest.TestCase):
 
 
 class InfrastructureCollectorTests(unittest.TestCase):
+    def test_collects_vpc_and_classic_nas_as_separate_platforms(self):
+        collector = InfrastructureCollector(
+            build_factory(
+                vnas=InventoryNasAPI(),
+                nas_classic=InventoryClassicNasAPI(),
+            )
+        )
+
+        resources = collector.collect([], {}, categories=("NAS",))
+        by_id = {resource["resource_id"]: resource for resource in resources}
+
+        self.assertEqual(set(by_id), {"nas-1", "classic-nas-1"})
+        self.assertEqual(by_id["nas-1"]["platform"], "VPC")
+        classic = by_id["classic-nas-1"]
+        self.assertEqual(classic["platform"], "CLASSIC")
+        self.assertEqual(classic["region_code"], "KR")
+        self.assertEqual(classic["zone_code"], "KR-2")
+        self.assertEqual(
+            classic["details"]["server_instance_nos"],
+            ["classic-server-1"],
+        )
+        self.assertEqual(
+            classic["details"]["explicit_relations"],
+            [
+                {
+                    "type": "ATTACHED_TO",
+                    "target_category": "SERVER",
+                    "target_id": "classic-server-1",
+                    "source_field": "nasVolumeServerInstanceList",
+                }
+            ],
+        )
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(collector.last_warnings, [])
+
+    def test_nas_platform_permission_failure_does_not_block_other_platform(self):
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{"error":{"errorCode":"2300"}}'
+        response.headers["Content-Type"] = "application/json"
+
+        for failing_key, expected_id, expected_platform in (
+            ("vnas", "classic-nas-1", "CLASSIC"),
+            ("nas_classic", "nas-1", "VPC"),
+        ):
+            with self.subTest(failing_key=failing_key):
+                failing_api = Mock()
+                failing_api.get_nas_volume_instance_list.side_effect = (
+                    requests.HTTPError("forbidden", response=response)
+                )
+                nas_apis = {
+                    "vnas": InventoryNasAPI(),
+                    "nas_classic": InventoryClassicNasAPI(),
+                }
+                nas_apis[failing_key] = failing_api
+                factory = build_factory(**nas_apis)
+                collector = InfrastructureCollector(factory)
+
+                resources = collector.collect([], {}, categories=("NAS",))
+
+                self.assertEqual(len(resources), 1)
+                self.assertEqual(resources[0]["resource_id"], expected_id)
+                self.assertEqual(resources[0]["platform"], expected_platform)
+                self.assertEqual(collector.last_errors, [])
+                self.assertEqual(len(collector.last_warnings), 1)
+                self.assertEqual(
+                    collector.last_warnings[0]["status_code"],
+                    403,
+                )
+                self.assertEqual(
+                    collector.last_warnings[0]["error_code"],
+                    "2300",
+                )
+
     def test_normalizer_canonicalizes_supported_category_aliases(self):
         resources = InfrastructureNormalizer().finalize(
             [
@@ -682,6 +779,108 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "serverless-1": "SERVERLESS",
             },
         )
+
+    def test_target_group_health_is_counted_without_response_payload(self):
+        normalizer = InfrastructureNormalizer()
+        resources = normalizer.normalize_load_balancers(
+            [{
+                "loadBalancerInstanceNo": "lb-1",
+                "loadBalancerName": "public-alb",
+                "vpcNo": "vpc-1",
+            }],
+            [{
+                "targetGroupNo": "tg-1",
+                "targetGroupName": "web-targets",
+                "loadBalancerInstanceNo": "lb-1",
+                "vpcNo": "vpc-1",
+                "targetType": {"code": "VSVR"},
+                "targetGroupProtocolType": {"code": "HTTP"},
+                "targetGroupPort": 8080,
+            }],
+            {
+                "tg-1": [
+                    {
+                        "targetNo": "server-1",
+                        "healthCheckStatus": {"code": "UP"},
+                        "healthCheckResponse": "sensitive-response",
+                    },
+                    {
+                        "targetNo": "server-2",
+                        "healthCheckStatus": {"code": "DOWN"},
+                    },
+                    {
+                        "targetNo": "server-3",
+                        "healthCheckStatus": {"code": "UNUSED"},
+                    },
+                    {
+                        "targetNo": "server-4",
+                        "healthCheckStatus": {"code": "NEW_STATUS"},
+                    },
+                ]
+            },
+        )
+
+        load_balancer = next(
+            resource
+            for resource in resources
+            if resource["category"] == "LOAD_BALANCER"
+        )
+        target_group = next(
+            resource
+            for resource in resources
+            if resource["category"] == "TARGET_GROUP"
+        )
+        details = target_group["details"]
+
+        self.assertEqual(target_group["status"], "UNREADY")
+        self.assertEqual(details["registered_target_count"], 4)
+        self.assertEqual(details["ready_target_count"], 1)
+        self.assertEqual(details["unready_target_count"], 1)
+        self.assertEqual(details["unused_target_count"], 1)
+        self.assertEqual(details["unknown_target_count"], 1)
+        self.assertTrue(details["health_snapshot_available"])
+        self.assertEqual(load_balancer["details"]["ready_target_count"], 1)
+        self.assertNotIn("healthCheckResponse", str(resources))
+        self.assertNotIn("sensitive-response", str(resources))
+
+    def test_target_group_empty_and_failed_health_snapshots_are_distinct(self):
+        normalizer = InfrastructureNormalizer()
+        groups = [{
+            "targetGroupNo": "tg-1",
+            "targetGroupName": "web-targets",
+            "loadBalancerInstanceNo": "lb-1",
+            "targetType": {"code": "VSVR"},
+            "targetNoList": ["server-1"],
+        }]
+        load_balancers = [{"loadBalancerInstanceNo": "lb-1"}]
+
+        empty = normalizer.normalize_load_balancers(
+            load_balancers,
+            groups,
+            {"tg-1": []},
+        )
+        failed = normalizer.normalize_load_balancers(
+            load_balancers,
+            groups,
+            {},
+        )
+        empty_group = next(
+            item for item in empty if item["category"] == "TARGET_GROUP"
+        )
+        failed_group = next(
+            item for item in failed if item["category"] == "TARGET_GROUP"
+        )
+
+        self.assertEqual(empty_group["status"], "EMPTY")
+        self.assertTrue(
+            empty_group["details"]["health_snapshot_available"]
+        )
+        self.assertEqual(empty_group["details"]["registered_target_count"], 0)
+        self.assertEqual(failed_group["status"], "UNKNOWN")
+        self.assertFalse(
+            failed_group["details"]["health_snapshot_available"]
+        )
+        self.assertEqual(failed_group["details"]["registered_target_count"], 1)
 
     def test_resource_manager_uses_official_parent_resource_codes(self):
         items = [

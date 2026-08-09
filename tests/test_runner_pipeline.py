@@ -375,6 +375,52 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertEqual(metrics, [{"server_id": "one"}])
         self.assertEqual(errors[0]["stage"], "query")
 
+    def test_load_balancer_monitoring_keeps_target_group_resources(self):
+        runner = self._runner_without_factory_init()
+
+        class CapturingInfrastructureMetricCollector:
+            received = []
+
+            def __init__(self, api_factory):
+                self.last_errors = []
+                self.last_warnings = []
+
+            def collect(
+                self,
+                infrastructure,
+                start_time,
+                end_time,
+                selected_categories=None,
+            ):
+                del start_time, end_time, selected_categories
+                self.__class__.received = list(infrastructure)
+                return []
+
+        resources = [
+            {"category": "LOAD_BALANCER", "resource_id": "lb-1"},
+            {"category": "TARGET_GROUP", "resource_id": "tg-1"},
+            {"category": "NAS", "resource_id": "nas-1"},
+        ]
+
+        with patch(
+            "app.runner.InfrastructureMetricCollector",
+            CapturingInfrastructureMetricCollector,
+        ):
+            runner.collect_infrastructure_metrics(
+                resources,
+                1,
+                2,
+                categories={"LOAD_BALANCER"},
+            )
+
+        self.assertEqual(
+            [
+                item["category"]
+                for item in CapturingInfrastructureMetricCollector.received
+            ],
+            ["LOAD_BALANCER", "TARGET_GROUP"],
+        )
+
     def test_optional_infrastructure_collectors_are_failure_isolated(self):
         runner = self._runner_without_factory_init()
 
@@ -628,6 +674,7 @@ class RunnerPipelineTests(unittest.TestCase):
                         "2026-08-07T11:59:58.000000+09:00",
                         "2026-08-07T11:59:59.000000+09:00",
                         "2026-08-07T12:00:00.500000+09:00",
+                        "2026-08-07T12:00:00.750000+09:00",
                     ],
                 ),
             ):
@@ -745,15 +792,27 @@ class RunnerPipelineTests(unittest.TestCase):
         ))
         self.assertEqual(
             report.infrastructure_topology["summary"]["confidence"],
-            "UNAVAILABLE",
+            "PARTIAL",
         )
-        self.assertEqual(report.infrastructure_topology["nodes"], [])
+        self.assertEqual(
+            {
+                node.get("resource_id")
+                for node in report.infrastructure_topology["nodes"]
+            },
+            {"old-server", "unknown-server", "old-storage"},
+        )
+        self.assertTrue(any(
+            warning.get("code") == "CURRENT_STATE_TOPOLOGY_FALLBACK"
+            for warning in report.infrastructure_topology["warnings"]
+        ))
         self.assertIn("old-server", html_text)
         self.assertIn("old-storage", html_text)
         self.assertIn("인프라 시간 기준 안내", html_text)
         self.assertIn("보고서 생성 시점의 현재 값", html_text)
         self.assertIn("생성 시각 기반 추정", html_text)
         self.assertIn("생성 시각 미확인", html_text)
+        self.assertIn("현재 관계 기반 추정", html_text)
+        self.assertIn("보고 기간 당시의 정확한 구성은 아닙니다", html_text)
         self.assertNotIn("boundary-server", html_text)
         self.assertNotIn("new-storage", html_text)
         public_payload = report.to_dict()

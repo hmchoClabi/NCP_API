@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from app.apifactory import APIFactory
+from ncp_api.classicnasAPI import ClassicNasAPI
 from ncp_api.claAPI import CloudLogAnalyticsAPI
 from ncp_api.cloudactivitytracerAPI import CloudActivityTracerAPI
 from ncp_api.cloudinsightAPI import CloudInsightAPI
@@ -345,6 +346,35 @@ class NCPAPIContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             vnas.get_nas_volume_instance_list(page_no=1)
 
+    def test_classic_nas_uses_server_v2_list_contract(self):
+        client = RecordingClient()
+        api = ClassicNasAPI(client=client)
+
+        api.get_nas_volume_instance_list(
+            volume_allotment_protocol_type_code="NFS",
+            is_event_configuration=False,
+            is_snapshot_configuration=True,
+            nas_volume_instance_no_list=["nas-1", "nas-2"],
+            region_no="1",
+            zone_no="3",
+        )
+
+        method, path, kwargs = client.calls[-1]
+        self.assertEqual(method, "GET")
+        self.assertEqual(path, "/getNasVolumeInstanceList")
+        self.assertEqual(
+            kwargs["params"],
+            {
+                "volumeAllotmentProtocolTypeCode": "NFS",
+                "isEventConfiguration": False,
+                "isSnapshotConfiguration": True,
+                "nasVolumeInstanceNoList.1": "nas-1",
+                "nasVolumeInstanceNoList.2": "nas-2",
+                "regionNo": "1",
+                "zoneNo": "3",
+            },
+        )
+
     def test_platform_preserves_documented_member_parameter_shapes(self):
         client = RecordingClient()
         api = PlatformAPI(client=client)
@@ -383,6 +413,7 @@ class NCPAPIContractTests(unittest.TestCase):
 
     def test_security_monitoring_is_registered(self):
         self.assertIn("security_monitoring", APIFactory().available_apis())
+        self.assertIn("nas_classic", APIFactory().available_apis())
 
 
 if __name__ == "__main__":

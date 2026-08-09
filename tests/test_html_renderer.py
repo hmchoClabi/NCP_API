@@ -371,6 +371,69 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("40%", nas_chart)
         self.assertIn("45%", nas_chart)
 
+    def test_target_group_ready_snapshot_and_period_metrics_are_rendered(self):
+        report = self._sample_report()
+        report.collection_metadata = {
+            "infrastructure": {
+                "completed_at": "2026-07-01T00:05:00+09:00",
+            }
+        }
+        report.infrastructure = [
+            {
+                "category": "LOAD_BALANCER",
+                "resource_id": "lb-1",
+                "resource_name": "public-alb",
+            },
+            {
+                "category": "TARGET_GROUP",
+                "resource_id": "tg-1",
+                "resource_name": "web-targets",
+                "details": {
+                    "target_group_no": "tg-1",
+                    "load_balancer_instance_no": "lb-1",
+                    "protocol": "HTTP",
+                    "port": 8080,
+                    "registered_target_count": 4,
+                    "ready_target_count": 2,
+                    "unready_target_count": 1,
+                    "unused_target_count": 1,
+                    "unknown_target_count": 0,
+                    "health_snapshot_available": True,
+                },
+            },
+        ]
+        report.infrastructure_metrics = [{
+            "category": "LOAD_BALANCER",
+            "metric_scope": "TARGET_GROUP",
+            "resource_type": "TargetGroup",
+            "product_name": "System/Load Balancer Target Group(VPC)",
+            "metric": "available_host_count",
+            "metric_label": "Ready Target 수 (구간 최소)",
+            "unit": "count",
+            "interval": "Min5",
+            "aggregation": "MIN",
+            "series": [{
+                "resource_id": "tg-1",
+                "resource_name": "web-targets",
+                "dimensions": {"targetGroupNo": "tg-1"},
+                "points": [[1780272000000, 2]],
+            }],
+        }]
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("LB Target Group 상태", html)
+        self.assertIn("Ready (UP)", html)
+        self.assertIn("Unready (DOWN)", html)
+        self.assertIn("미평가 (UNUSED)", html)
+        self.assertIn("web-targets", html)
+        self.assertIn("2026-07-01 00:05 KST", html)
+        self.assertIn(
+            "LB Target Group · Ready Target 수 (구간 최소)",
+            html,
+        )
+        self.assertIn("MIN", html)
+
     def test_insight_event_detail_fields_are_rendered_and_escaped(self):
         report = self._sample_report()
         report.insight_events = [

@@ -17,6 +17,16 @@ class EndpointTests(unittest.TestCase):
 
         self.assertIn("/ncr/jpn-api/v2", endpoints["containerregistry"])
         self.assertIn("/vnks/jpn-v2", endpoints["kubernetes"])
+        self.assertEqual(
+            endpoints["nas_classic"],
+            "https://ncloud.apigw.ntruss.com/server/v2",
+        )
+
+        gov_endpoints = build_api_endpoints("gov", "KR")
+        self.assertEqual(
+            gov_endpoints["nas_classic"],
+            "https://ncloud.apigw.gov-ntruss.com/server/v2",
+        )
 
     def test_rejects_unknown_or_incompatible_region(self):
         for api_type, region in (

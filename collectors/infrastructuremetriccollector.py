@@ -31,6 +31,7 @@ class InfrastructureMetricCollector:
 
     MONITORED_CATEGORIES = (
         "LOAD_BALANCER",
+        "TARGET_GROUP",
         "CDB",
         "NKS",
         "NAS",
@@ -43,6 +44,7 @@ class InfrastructureMetricCollector:
     )
     OUTPUT_CATEGORIES = {
         "LOAD_BALANCER": "LOAD_BALANCER",
+        "TARGET_GROUP": "LOAD_BALANCER",
         "CDB": "CLOUD_DB",
         "NKS": "KUBERNETES",
         "NAS": "NAS",
@@ -57,6 +59,8 @@ class InfrastructureMetricCollector:
         "LB": "LOAD_BALANCER",
         "LOADBALANCER": "LOAD_BALANCER",
         "LOAD_BALANCER": "LOAD_BALANCER",
+        "TARGETGROUP": "TARGET_GROUP",
+        "TARGET_GROUP": "TARGET_GROUP",
         "DATABASE": "CDB",
         "CLOUD_DB": "CDB",
         "CLOUD_DATABASE": "CDB",
@@ -138,6 +142,21 @@ class InfrastructureMetricCollector:
             "label": "유출 트래픽",
             "unit": "bytes/sec",
             "aggregations": ("AVG", "MAX", "MIN", "SUM", "COUNT"),
+        },
+    }
+
+    TARGET_GROUP_METRICS = {
+        "available_host_count": {
+            "label": "Ready Target 수 (구간 최소)",
+            "unit": "count",
+            "force_unit": True,
+            "aggregations": ("MIN",),
+        },
+        "unavailable_host_count": {
+            "label": "Unready Target 수 (구간 최대)",
+            "unit": "count",
+            "force_unit": True,
+            "aggregations": ("MAX",),
         },
     }
 
@@ -390,6 +409,7 @@ class InfrastructureMetricCollector:
 
     PRIMARY_ID_DIMENSIONS = {
         "LOAD_BALANCER": "instanceId",
+        "TARGET_GROUP": "targetGroupNo",
         "CDB": "instanceNo",
         "NKS": "clusterUUID",
         "NAS": "instanceNo",
@@ -409,6 +429,7 @@ class InfrastructureMetricCollector:
                 "loadbalancerno",
             }
         ),
+        "TARGET_GROUP": frozenset({"targetgroupno"}),
         "CDB": frozenset(
             {"instanceno", "dbinstanceno", "clouddbinstanceno"}
         ),
@@ -425,6 +446,7 @@ class InfrastructureMetricCollector:
         "LOAD_BALANCER": frozenset(
             {"loadbalancerinstanceno", "loadbalancerid"}
         ),
+        "TARGET_GROUP": frozenset({"targetgroupno"}),
         "CDB": frozenset(
             {"serverinstanceno", "serverinstancenos"}
         ),
@@ -458,6 +480,7 @@ class InfrastructureMetricCollector:
         "loadbalancerid",
         "loadbalancerinstanceno",
         "loadbalancerno",
+        "targetgroupno",
         "dbinstanceno",
         "clouddbinstanceno",
         "serverinstanceno",
@@ -662,11 +685,14 @@ class InfrastructureMetricCollector:
             candidates: Iterable[Any] = (selected_categories,)
         else:
             candidates = selected_categories
-        return {
+        selected = {
             category
             for value in candidates
             if (category := self._normalize_category(value)) is not None
         }
+        if "LOAD_BALANCER" in selected:
+            selected.add("TARGET_GROUP")
+        return selected
 
     def _normalize_category(self, value: Any) -> Optional[str]:
         if value is None:
@@ -741,7 +767,7 @@ class InfrastructureMetricCollector:
     def _product_category(self, product_name: str) -> Optional[str]:
         normalized = self._normalize_product_name(product_name)
         if "targetgroup" in normalized:
-            return None
+            return "TARGET_GROUP"
         if "loadbalancer" in normalized:
             return "LOAD_BALANCER"
         if "clouddb" in normalized or normalized.startswith("cdb"):
@@ -881,6 +907,25 @@ class InfrastructureMetricCollector:
         product_name: str,
         resources: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
+        if category == "NAS":
+            normalized_product = self._normalize_product_name(product_name)
+            if normalized_product == "nasvpc":
+                required_platform = "VPC"
+            elif normalized_product == "nas":
+                required_platform = "CLASSIC"
+            else:
+                return []
+            return [
+                resource
+                for resource in resources
+                if re.sub(
+                    r"[^A-Z0-9]+",
+                    "",
+                    str(resource.get("platform") or "").upper(),
+                )
+                == required_platform
+            ]
+
         if category != "CDB":
             return resources
 
@@ -1121,6 +1166,14 @@ class InfrastructureMetricCollector:
                         break
             return selected
 
+        if category == "TARGET_GROUP":
+            return {
+                name
+                for name in names
+                if self._normalize_metric_name(name)
+                in self.TARGET_GROUP_METRICS
+            }
+
         if category == "CDB":
             variant = self._cdb_variant(product_name)
             catalog = self.CDB_CATALOG.get(variant, {})
@@ -1217,6 +1270,10 @@ class InfrastructureMetricCollector:
                 if token in config["aliases"]:
                     return dict(config)
             return None
+
+        if category == "TARGET_GROUP":
+            metric_config = self.TARGET_GROUP_METRICS.get(token)
+            return dict(metric_config) if metric_config is not None else None
 
         if category == "CDB":
             semantic = self._cdb_semantic(product_name, token)
@@ -1787,8 +1844,14 @@ class InfrastructureMetricCollector:
         groups: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
         for record in records:
             output_category = self.OUTPUT_CATEGORIES[record["category"]]
+            metric_scope = (
+                "TARGET_GROUP"
+                if record["category"] == "TARGET_GROUP"
+                else "RESOURCE"
+            )
             key = (
                 output_category,
+                metric_scope,
                 record["product_name"],
                 record["metric"],
                 record["metric_label"],
@@ -1800,6 +1863,14 @@ class InfrastructureMetricCollector:
                 key,
                 {
                     "category": output_category,
+                    **(
+                        {
+                            "metric_scope": "TARGET_GROUP",
+                            "resource_type": "TargetGroup",
+                        }
+                        if metric_scope == "TARGET_GROUP"
+                        else {}
+                    ),
                     "product_name": record["product_name"],
                     "metric": record["metric"],
                     "metric_label": record["metric_label"],

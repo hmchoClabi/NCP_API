@@ -201,6 +201,9 @@ class HtmlReportRenderer:
         )
         activity_events = self._flatten_grouped(report.activity_events)
         infrastructure = report.display_infrastructure
+        load_balancer_target_groups = (
+            report.display_load_balancer_target_groups
+        )
         topology_options, _ = self._topology_options(report)
         infrastructure_topology = report.display_infrastructure_topology
 
@@ -272,6 +275,19 @@ class HtmlReportRenderer:
             self._infrastructure_section(infrastructure)
             if inventory_enabled else ""
         )
+        target_group_html = ""
+        if inventory_enabled and (
+            load_balancer_target_groups
+            or any(
+                str(resource.get("category") or "").upper()
+                == "LOAD_BALANCER"
+                for resource in infrastructure
+            )
+        ):
+            target_group_html = self._load_balancer_target_group_section(
+                load_balancer_target_groups,
+                infrastructure_metadata,
+            )
         topology_html = (
             self._infrastructure_topology_section(
                 infrastructure_topology,
@@ -474,6 +490,7 @@ class HtmlReportRenderer:
     {summary_html}
     {historical_notice_html}
     {inventory_html}
+    {target_group_html}
     {topology_html}
     {server_detail_html}
     {monitoring_html}
@@ -532,7 +549,7 @@ class HtmlReportRenderer:
         <div><span>목록 포함 기준</span><strong>보고 종료 전에 생성된 현재 자원</strong></div>
         <div><span>상태·IP·연결 정보</span><strong>보고서 생성 시점의 현재 값</strong></div>
         <div><span>시계열 그래프</span><strong>선별된 현재 자원의 보고 기간 메트릭</strong></div>
-        <div><span>과거 구성도</span><strong>기간 스냅샷이 없으면 표시하지 않음</strong></div>
+        <div><span>구성도</span><strong>현재 관계 기반 추정 · 보고 기간 당시 구성 아님</strong></div>
         <div><span>현재 목록 수집 시각</span><strong>{self._text(collected_at)}</strong></div>
         <div><span>기간 종료 후 생성 제외</span><strong>{self._text(excluded_count)}개</strong></div>
         <div><span>생성 시각 미확인</span><strong>{self._text(unknown_count)}개</strong></div>
@@ -666,6 +683,96 @@ class HtmlReportRenderer:
             len(prepared),
         )
 
+    def _load_balancer_target_group_section(
+        self,
+        target_groups: List[Dict[str, Any]],
+        infrastructure_metadata: Mapping[str, Any],
+    ) -> str:
+        collected_at = self._infrastructure_create_time(
+            infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+        )
+        rows = []
+        for target_group in self._records(target_groups):
+            details = self._mapping(target_group.get("details"))
+            snapshot_available = details.get("health_snapshot_available")
+            rows.append({
+                "target_group_name": (
+                    target_group.get("resource_name") or "-"
+                ),
+                "target_group_no": (
+                    details.get("target_group_no")
+                    or target_group.get("resource_id")
+                ),
+                "load_balancer_no": details.get(
+                    "load_balancer_instance_no"
+                ),
+                "protocol_port": " / ".join(
+                    str(value)
+                    for value in (
+                        details.get("protocol"),
+                        details.get("port"),
+                    )
+                    if value is not None and str(value).strip()
+                ) or "-",
+                "registered": details.get("registered_target_count"),
+                "ready": (
+                    details.get("ready_target_count")
+                    if snapshot_available is True else None
+                ),
+                "unready": (
+                    details.get("unready_target_count")
+                    if snapshot_available is True else None
+                ),
+                "unused": (
+                    details.get("unused_target_count")
+                    if snapshot_available is True else None
+                ),
+                "unknown": (
+                    details.get("unknown_target_count")
+                    if snapshot_available is True else None
+                ),
+                "snapshot_status": (
+                    "수집됨"
+                    if snapshot_available is True
+                    else "수집 실패 또는 권한 없음"
+                ),
+                "collected_at": collected_at,
+            })
+
+        return self._section(
+            "LB Target Group 상태",
+            (
+                "getTargetList의 현재 헬스체크 결과입니다. UP만 Ready, "
+                "DOWN은 Unready, UNUSED는 헬스체크 미사용·미평가로 "
+                "구분합니다. 보고 기간 추이는 아래 Cloud Insight 그래프의 "
+                "Ready 최소값과 Unready 최대값으로 표시합니다."
+            ),
+            self._table(
+                rows,
+                (
+                    ("target_group_name", "Target Group"),
+                    ("target_group_no", "Target Group No."),
+                    ("load_balancer_no", "LB No."),
+                    ("protocol_port", "프로토콜 / 포트"),
+                    ("registered", "등록", "number0"),
+                    ("ready", "Ready (UP)", "number0"),
+                    ("unready", "Unready (DOWN)", "number0"),
+                    ("unused", "미평가 (UNUSED)", "number0"),
+                    ("unknown", "알 수 없음", "number0"),
+                    ("snapshot_status", "상태 수집"),
+                    ("collected_at", "관측 시각"),
+                ),
+            ),
+            len(rows),
+            warning=any(
+                self._mapping(group.get("details")).get(
+                    "health_snapshot_available"
+                ) is not True
+                for group in self._records(target_groups)
+            ),
+        )
+
     def _infrastructure_details_text(self, value: Any) -> str:
         if not isinstance(value, dict):
             return "-"
@@ -769,6 +876,7 @@ class HtmlReportRenderer:
             if str(node.get("node_id")) in unmapped_ids
         ]
         confidence = str(summary.get("confidence") or "UNMAPPED")
+        time_basis = str(summary.get("time_basis") or "REPORT_PERIOD")
         svg = self._topology_svg(mapped_nodes, edges, options)
         if not svg:
             if confidence == "UNAVAILABLE":
@@ -863,14 +971,22 @@ class HtmlReportRenderer:
             + "<h3 class=\"topology-subheading\">관계 근거</h3>"
             + evidence
         )
-        return self._section(
-            "클라우드 구성도",
-            (
+        topology_description = (
+            "보고서 생성 시점의 현재 자원 중 보고 종료 전에 생성된 것으로 "
+            "확인되는 자원을 사용했습니다. 상태·IP·연결 관계는 현재 값이며 "
+            "보고 기간 당시의 정확한 구성은 아닙니다. 관계는 API 또는 "
+            "Resource Manager 응답의 명시적 리소스 ID만 연결합니다."
+            if time_basis == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+            else (
                 "보고 기간 안에서 가장 늦게 실제 수집된 스냅샷을 기준으로, "
                 "API 또는 Resource Manager 응답이 리소스 ID로 명시한 관계만 "
                 "연결합니다. 이름·도메인·IP·CIDR 일치에 의한 추정 연결은 "
                 "생성하지 않습니다."
-            ),
+            )
+        )
+        return self._section(
+            "클라우드 구성도",
+            topology_description,
             content,
             int(summary.get("representative_node_count") or 0),
             warning=bool(
@@ -1242,7 +1358,13 @@ class HtmlReportRenderer:
                 or group.get("metric")
                 or "Metric"
             )
-            title = f"{monitored_categories[category]} · {metric_label}"
+            resource_label = (
+                "LB Target Group"
+                if str(group.get("metric_scope") or "").upper()
+                == "TARGET_GROUP"
+                else monitored_categories[category]
+            )
+            title = f"{resource_label} · {metric_label}"
             product_name = str(group.get("product_name") or "Cloud Insight")
             description = (
                 f"{product_name} · {self._metric_interval_label(interval)} "

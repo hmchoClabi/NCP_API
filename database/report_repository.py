@@ -152,7 +152,7 @@ class PostgresReportRepository:
                           snapshot.normalized_data -> 'infrastructure'
                       ) = 'array'
                       AND snapshot.normalized_data #>>
-                          '{collection_metadata,infrastructure,source}'
+                          '{{collection_metadata,infrastructure,source}}'
                           = 'LIVE_API_COLLECTION'
                       AND ({observed_expression}) >= %s
                       AND ({observed_expression}) < %s

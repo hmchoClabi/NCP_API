@@ -84,6 +84,109 @@ class ReportResultSnapshotTests(unittest.TestCase):
             "PERIOD_SNAPSHOT_UNAVAILABLE",
         )
 
+    def test_legacy_placeholder_rebuilds_labelled_current_state_topology(self):
+        collected_at = "2026-08-09T22:19:17+09:00"
+        report = ReportResult(
+            period={
+                "file_suffix": "20260808",
+                "start_dt": "2026-08-08T00:00:00+09:00",
+                "end_dt": "2026-08-09T00:00:00+09:00",
+                "end_exclusive": True,
+            },
+            report_options={
+                "sections": ["infrastructure_diagram"],
+                "resource_categories": ["VPC", "SUBNET"],
+                "diagram": {"enabled": True},
+            },
+            infrastructure=[
+                {
+                    "category": "VPC",
+                    "resource_id": "vpc-1",
+                    "resource_name": "main-vpc",
+                    "details": {"vpc_no": "vpc-1"},
+                },
+                {
+                    "category": "SUBNET",
+                    "resource_id": "subnet-1",
+                    "resource_name": "app-subnet",
+                    "details": {"vpc_no": "vpc-1"},
+                },
+            ],
+            collection_metadata={
+                "infrastructure": {
+                    "source": "CURRENT_API_COLLECTION",
+                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+                    "completed_at": collected_at,
+                    "reference_at": collected_at,
+                    "inventory_completeness": "PARTIAL",
+                    "collection_issue_count": 1,
+                }
+            },
+            infrastructure_topology={
+                "nodes": [],
+                "edges": [],
+                "warnings": [],
+                "summary": {
+                    "collected_at": collected_at,
+                    "confidence": "UNAVAILABLE",
+                    "time_basis": "REPORT_PERIOD",
+                    "snapshot_source": "CURRENT_API_COLLECTION",
+                },
+            },
+            generated_at="2026-08-09T22:19:40+09:00",
+        )
+
+        topology = report.display_infrastructure_topology
+
+        self.assertEqual(topology["summary"]["confidence"], "PARTIAL")
+        self.assertEqual(
+            topology["summary"]["time_basis"],
+            "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+        )
+        self.assertEqual(len(topology["nodes"]), 2)
+        self.assertEqual(len(topology["edges"]), 1)
+        self.assertEqual(
+            topology["warnings"][0]["code"],
+            "CURRENT_STATE_TOPOLOGY_FALLBACK",
+        )
+
+    def test_current_state_topology_with_mismatched_timestamp_is_rejected(self):
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-08T00:00:00+09:00",
+                "end_dt": "2026-08-09T00:00:00+09:00",
+                "end_exclusive": True,
+            },
+            report_options={
+                "sections": ["infrastructure_diagram"],
+                "resource_categories": ["VPC"],
+                "diagram": {"enabled": True},
+            },
+            collection_metadata={
+                "infrastructure": {
+                    "source": "CURRENT_API_COLLECTION",
+                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+                    "completed_at": "2026-08-09T22:19:17+09:00",
+                }
+            },
+            infrastructure_topology={
+                "nodes": [{"node_id": "VPC:vpc-1"}],
+                "edges": [],
+                "summary": {
+                    "collected_at": "2026-08-09T22:20:17+09:00",
+                    "confidence": "PARTIAL",
+                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+                    "snapshot_source": "CURRENT_API_COLLECTION",
+                },
+            },
+            generated_at="2026-08-09T22:20:30+09:00",
+        )
+
+        topology = report.display_infrastructure_topology
+
+        self.assertEqual(topology["nodes"], [])
+        self.assertEqual(topology["summary"]["confidence"], "UNAVAILABLE")
+
     def test_public_and_persistence_inventory_are_separated(self):
         report = ReportResult(
             period={"file_suffix": "separated"},
@@ -112,6 +215,44 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 for item in persistence_snapshot["infrastructure"]
             ],
             ["SERVER", "CLOUD_DB"],
+        )
+
+    def test_target_groups_are_supporting_persistence_not_inventory_rows(self):
+        report = ReportResult(
+            period={"file_suffix": "target-groups"},
+            report_options={
+                "sections": ["infrastructure_inventory"],
+                "resource_categories": ["LOAD_BALANCER"],
+                "monitoring_categories": ["LOAD_BALANCER"],
+                "diagram": {"enabled": False},
+            },
+            infrastructure=[
+                {"category": "LOAD_BALANCER", "resource_id": "lb-1"},
+                {
+                    "category": "TARGET_GROUP",
+                    "resource_id": "tg-1",
+                    "details": {"ready_target_count": 2},
+                },
+            ],
+        )
+
+        public_snapshot = report.to_dict()
+        persistence_snapshot = report.to_persistence_dict()
+
+        self.assertEqual(
+            [item["category"] for item in public_snapshot["infrastructure"]],
+            ["LOAD_BALANCER"],
+        )
+        self.assertEqual(
+            [
+                item["category"]
+                for item in persistence_snapshot["infrastructure"]
+            ],
+            ["LOAD_BALANCER", "TARGET_GROUP"],
+        )
+        self.assertEqual(
+            report.display_load_balancer_target_groups[0]["resource_id"],
+            "tg-1",
         )
 
     def test_public_json_redacts_hidden_topology_and_internal_customer_fields(self):

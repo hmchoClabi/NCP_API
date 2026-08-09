@@ -21,8 +21,14 @@ class ReportResult:
     DISPLAY_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = frozenset(
         REPRESENTATIVE_CATEGORIES
     )
+    PERSISTED_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = (
+        DISPLAY_INFRASTRUCTURE_CATEGORIES | {"TARGET_GROUP"}
+    )
     MONITORED_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = (
         frozenset(MONITORING_CATEGORY_OPTIONS) - {"SERVER"}
+    )
+    CURRENT_STATE_TOPOLOGY_TIME_BASIS: ClassVar[str] = (
+        "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
     )
 
     period: Dict[str, Any]
@@ -142,6 +148,24 @@ class ReportResult:
         ]
 
     @property
+    def display_load_balancer_target_groups(self) -> List[Dict[str, Any]]:
+        """Return supporting Target Group health snapshots for the report."""
+        options = self.selected_report_options
+        if (
+            not options.section_enabled("infrastructure_inventory")
+            or not options.resource_enabled("LOAD_BALANCER")
+        ):
+            return []
+        return [
+            item for item in self.infrastructure
+            if (
+                isinstance(item, dict)
+                and str(item.get("category") or "").upper()
+                == "TARGET_GROUP"
+            )
+        ]
+
+    @property
     def display_infrastructure_topology(self) -> Dict[str, Any]:
         """Build a topology from collected IDs without heuristic matching."""
         options = self.selected_report_options
@@ -150,6 +174,17 @@ class ReportResult:
             or not bool(options.diagram_option("enabled", True))
         ):
             return {}
+        metadata = (
+            self.collection_metadata
+            if isinstance(self.collection_metadata, dict)
+            else {}
+        )
+        infrastructure_metadata = metadata.get("infrastructure")
+        if not isinstance(infrastructure_metadata, dict):
+            infrastructure_metadata = {}
+        metadata_time_basis = str(
+            infrastructure_metadata.get("time_basis") or "REPORT_PERIOD"
+        ).strip().upper()
         if (
             isinstance(self.infrastructure_topology, dict)
             and isinstance(self.infrastructure_topology.get("nodes"), list)
@@ -157,11 +192,46 @@ class ReportResult:
             and isinstance(self.infrastructure_topology.get("summary"), dict)
         ):
             topology_summary = self.infrastructure_topology["summary"]
+            topology_confidence = str(
+                topology_summary.get("confidence") or ""
+            ).strip().upper()
+            topology_time_basis = str(
+                topology_summary.get("time_basis") or metadata_time_basis
+            ).strip().upper()
+            if (
+                topology_confidence == "UNAVAILABLE"
+                and metadata_time_basis
+                == self.CURRENT_STATE_TOPOLOGY_TIME_BASIS
+            ):
+                topology_time_basis = metadata_time_basis
             reference_at = (
                 topology_summary.get("reference_at")
                 or self._infrastructure_reference_at()
             )
-            if (
+            if topology_time_basis == self.CURRENT_STATE_TOPOLOGY_TIME_BASIS:
+                if not self._current_state_topology_is_valid(
+                    topology_summary,
+                    infrastructure_metadata,
+                ):
+                    return self._period_snapshot_unavailable_topology(
+                        collected_at=topology_summary.get("collected_at"),
+                        source=str(
+                            topology_summary.get("snapshot_source")
+                            or infrastructure_metadata.get("source")
+                            or "UNAVAILABLE"
+                        ),
+                        max_nodes=options.diagram_option("max_nodes"),
+                        reference_at=reference_at,
+                    )
+                if (
+                    str(topology_summary.get("confidence") or "").upper()
+                    != "UNAVAILABLE"
+                    and self.infrastructure_topology.get("nodes")
+                ):
+                    return self.infrastructure_topology
+                # Rebuild reports that persisted an unavailable placeholder
+                # before current-state fallback diagrams were supported.
+            elif (
                 self._has_period_bounds()
                 and str(
                     topology_summary.get("confidence") or ""
@@ -180,16 +250,9 @@ class ReportResult:
                     max_nodes=options.diagram_option("max_nodes"),
                     reference_at=reference_at,
                 )
-            return self.infrastructure_topology
+            else:
+                return self.infrastructure_topology
 
-        metadata = (
-            self.collection_metadata
-            if isinstance(self.collection_metadata, dict)
-            else {}
-        )
-        infrastructure_metadata = metadata.get("infrastructure")
-        if not isinstance(infrastructure_metadata, dict):
-            infrastructure_metadata = {}
         collected_at = (
             infrastructure_metadata.get("completed_at")
             or infrastructure_metadata.get("started_at")
@@ -198,7 +261,27 @@ class ReportResult:
             infrastructure_metadata.get("reference_at")
             or self.generated_at
         )
-        if (
+        current_state_fallback = (
+            metadata_time_basis == self.CURRENT_STATE_TOPOLOGY_TIME_BASIS
+        )
+        if current_state_fallback:
+            if not self._current_state_topology_is_valid(
+                {
+                    "time_basis": metadata_time_basis,
+                    "snapshot_source": infrastructure_metadata.get("source"),
+                    "collected_at": collected_at,
+                },
+                infrastructure_metadata,
+            ):
+                return self._period_snapshot_unavailable_topology(
+                    collected_at=collected_at,
+                    source=str(
+                        infrastructure_metadata.get("source") or "UNAVAILABLE"
+                    ),
+                    max_nodes=options.diagram_option("max_nodes"),
+                    reference_at=reference_at,
+                )
+        elif (
             self._has_period_bounds()
             and not self._observed_inside_reference_window(
                 collected_at,
@@ -228,14 +311,103 @@ class ReportResult:
                 infrastructure_metadata.get("collection_issue_count") or 0
             ),
         )
-        topology.setdefault("summary", {}).update(
-            self._snapshot_window_metadata(reference_at, collected_at)
-        )
-        topology["summary"]["time_basis"] = "REPORT_PERIOD"
+        summary = topology.setdefault("summary", {})
+        if current_state_fallback:
+            summary.update({
+                "time_basis": self.CURRENT_STATE_TOPOLOGY_TIME_BASIS,
+                "snapshot_source": "CURRENT_API_COLLECTION",
+                "period_start": self.period.get("start_dt"),
+                "period_end": self.period.get("end_dt"),
+                "reference_at": infrastructure_metadata.get("reference_at"),
+                "eligible_start": None,
+                "eligible_end": None,
+                "snapshot_age_seconds": None,
+                "confidence": "PARTIAL",
+            })
+            topology.setdefault("warnings", []).insert(
+                0,
+                self._current_state_topology_warning(),
+            )
+        else:
+            summary.update(
+                self._snapshot_window_metadata(reference_at, collected_at)
+            )
+            summary["time_basis"] = "REPORT_PERIOD"
+            summary["snapshot_source"] = str(
+                infrastructure_metadata.get("source") or "UNAVAILABLE"
+            )
         return topology
 
     def _has_period_bounds(self) -> bool:
         return bool(self.period.get("start_dt") and self.period.get("end_dt"))
+
+    def _current_state_topology_is_valid(
+        self,
+        topology_summary: Mapping[str, Any],
+        infrastructure_metadata: Mapping[str, Any],
+    ) -> bool:
+        """Validate the explicitly labelled current-state topology fallback."""
+        metadata_time_basis = str(
+            infrastructure_metadata.get("time_basis") or ""
+        ).strip().upper()
+        if metadata_time_basis != self.CURRENT_STATE_TOPOLOGY_TIME_BASIS:
+            return False
+
+        summary_time_basis = str(
+            topology_summary.get("time_basis") or metadata_time_basis
+        ).strip().upper()
+        summary_confidence = str(
+            topology_summary.get("confidence") or ""
+        ).strip().upper()
+        if (
+            summary_time_basis != self.CURRENT_STATE_TOPOLOGY_TIME_BASIS
+            and summary_confidence != "UNAVAILABLE"
+        ):
+            return False
+
+        metadata_source = str(
+            infrastructure_metadata.get("source") or ""
+        ).strip().upper()
+        summary_source = str(
+            topology_summary.get("snapshot_source") or metadata_source
+        ).strip().upper()
+        if (
+            metadata_source != "CURRENT_API_COLLECTION"
+            or summary_source != "CURRENT_API_COLLECTION"
+        ):
+            return False
+
+        observed_at = topology_summary.get("collected_at")
+        metadata_observed_at = (
+            infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+        )
+        if not observed_at or not metadata_observed_at:
+            return False
+        try:
+            observed = self._parse_kst_datetime(observed_at)
+            metadata_observed = self._parse_kst_datetime(
+                metadata_observed_at
+            )
+            generated = self._parse_kst_datetime(self.generated_at)
+        except (TypeError, ValueError):
+            return False
+        return observed == metadata_observed and observed <= generated
+
+    @staticmethod
+    def _current_state_topology_warning() -> Dict[str, str]:
+        return {
+            "code": "CURRENT_STATE_TOPOLOGY_FALLBACK",
+            "message": (
+                "보고 기간 안에 저장된 인프라 스냅샷이 없어, 보고 종료 "
+                "전에 생성된 것으로 확인되는 현재 자원의 연결 관계를 "
+                "표시합니다. 삭제되었거나 변경된 과거 구성은 복원되지 "
+                "않으므로 보고 기간 당시의 정확한 구성으로 해석해서는 "
+                "안 됩니다."
+            ),
+            "source": "current_api_collection",
+            "confidence": "PARTIAL",
+        }
 
     def _infrastructure_reference_at(self) -> Any:
         metadata = (
@@ -409,7 +581,7 @@ class ReportResult:
             if (
                 isinstance(item, dict)
                 and str(item.get("category") or "").upper()
-                in self.DISPLAY_INFRASTRUCTURE_CATEGORIES
+                in self.PERSISTED_INFRASTRUCTURE_CATEGORIES
             )
         ]
 

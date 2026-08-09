@@ -378,20 +378,42 @@ class InfrastructureCollector:
             )
 
         if self._category_enabled(selected_categories, "NAS"):
-            nas_volumes = self._collect_paged_service(
+            vpc_nas_volumes = self._collect_paged_service(
                 api_key="vnas",
                 method_name="get_nas_volume_instance_list",
                 response_key="getNasVolumeInstanceListResponse",
                 list_key="nasVolumeInstanceList",
                 identity_fields=("nasVolumeInstanceNo",),
-                target_type="nas",
+                target_type="nas_vpc",
+                optional=True,
                 request_kwargs=self._region_kwargs(),
             )
             self._extend_normalized(
                 resources,
-                target_type="nas",
+                target_type="nas_vpc",
                 api="get_nas_volume_instance_list",
-                normalize=lambda: self.normalizer.normalize_nas(nas_volumes),
+                normalize=lambda: self.normalizer.normalize_nas(
+                    vpc_nas_volumes,
+                    platform="VPC",
+                ),
+            )
+
+            classic_nas_volumes = self._collect_wrapped_service(
+                api_key="nas_classic",
+                method_name="get_nas_volume_instance_list",
+                response_key="getNasVolumeInstanceListResponse",
+                list_key="nasVolumeInstanceList",
+                target_type="nas_classic",
+                optional=True,
+            )
+            self._extend_normalized(
+                resources,
+                target_type="nas_classic",
+                api="get_nas_volume_instance_list",
+                normalize=lambda: self.normalizer.normalize_nas(
+                    classic_nas_volumes,
+                    platform="CLASSIC",
+                ),
             )
 
         cdb_specs = (
@@ -542,7 +564,13 @@ class InfrastructureCollector:
             result = [
                 resource
                 for resource in result
-                if resource.get("category") in selected_categories
+                if (
+                    resource.get("category") in selected_categories
+                    or (
+                        resource.get("category") == "TARGET_GROUP"
+                        and "LOAD_BALANCER" in selected_categories
+                    )
+                )
             ]
         logger.info(
             "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 "
@@ -602,6 +630,7 @@ class InfrastructureCollector:
         response_key: str,
         list_key: str,
         target_type: str,
+        optional: bool = False,
         request_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         try:
@@ -621,6 +650,7 @@ class InfrastructureCollector:
                 api=method_name,
                 target_type=target_type,
                 exc=exc,
+                optional=optional,
             )
             return []
 

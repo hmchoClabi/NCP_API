@@ -26,6 +26,7 @@ class InfrastructureNormalizer:
         "SERVER": "서버",
         "BLOCK_STORAGE": "블록 스토리지",
         "LOAD_BALANCER": "로드밸런서",
+        "TARGET_GROUP": "LB Target Group",
         "NAS": "NAS",
         "CLOUD_DB": "Cloud DB",
         "KUBERNETES": "Kubernetes",
@@ -107,6 +108,7 @@ class InfrastructureNormalizer:
         "LOAD_BALANCER": frozenset(
             {"LOADBALANCER", "VPCLOADBALANCER", "VLOADBALANCER"}
         ),
+        "TARGET_GROUP": frozenset(),
         "NAS": frozenset({"NAS", "VPCNAS", "VNAS"}),
         "CLOUD_DB": frozenset(
             {
@@ -181,6 +183,7 @@ class InfrastructureNormalizer:
         "LOAD_BALANCER": frozenset(
             {"INSTANCE", "LOADBALANCER", "LOADBALANCERINSTANCE"}
         ),
+        "TARGET_GROUP": frozenset(),
         "NAS": frozenset(
             {"NAS", "NASVOLUME", "NASVOLUMEINSTANCE", "VOLUME"}
         ),
@@ -544,8 +547,9 @@ class InfrastructureNormalizer:
             Mapping[str, Iterable[Mapping[str, Any]]]
         ] = None,
     ) -> List[Dict[str, Any]]:
+        normalized_groups = self._dict_items(target_groups)
         group_map: Dict[str, List[Dict[str, Any]]] = {}
-        for group in self._dict_items(target_groups):
+        for group in normalized_groups:
             load_balancer_no = self._string(
                 group.get("loadBalancerInstanceNo")
             )
@@ -554,6 +558,15 @@ class InfrastructureNormalizer:
         normalized_targets_by_group = (
             targets_by_group if isinstance(targets_by_group, Mapping) else {}
         )
+
+        group_health = {
+            str(group.get("targetGroupNo")): self._target_group_health(
+                group,
+                normalized_targets_by_group,
+            )
+            for group in normalized_groups
+            if self._string(group.get("targetGroupNo"))
+        }
 
         result = []
         for load_balancer in self._dict_items(load_balancers):
@@ -592,6 +605,15 @@ class InfrastructureNormalizer:
                     *listed_target_server_instance_nos,
                 ]
             )
+            health_summaries = [
+                group_health[str(group.get("targetGroupNo"))]
+                for group in associated_groups
+                if str(group.get("targetGroupNo")) in group_health
+            ]
+            health_snapshot_available = all(
+                summary["health_snapshot_available"]
+                for summary in health_summaries
+            ) if health_summaries else True
             subnet_nos = self._unique_values(
                 load_balancer.get("subnetNoList") or []
             )
@@ -670,6 +692,34 @@ class InfrastructureNormalizer:
                             load_balancer.get("loadBalancerIpList") or []
                         ),
                         "target_group_nos": target_group_nos,
+                        "target_group_count": len(target_group_nos),
+                        "target_health_snapshot_available": (
+                            health_snapshot_available
+                        ),
+                        "registered_target_count": sum(
+                            summary["registered_target_count"]
+                            for summary in health_summaries
+                        ),
+                        "ready_target_count": sum(
+                            summary["ready_target_count"]
+                            for summary in health_summaries
+                            if summary["health_snapshot_available"]
+                        ),
+                        "unready_target_count": sum(
+                            summary["unready_target_count"]
+                            for summary in health_summaries
+                            if summary["health_snapshot_available"]
+                        ),
+                        "unused_target_count": sum(
+                            summary["unused_target_count"]
+                            for summary in health_summaries
+                            if summary["health_snapshot_available"]
+                        ),
+                        "unknown_target_count": sum(
+                            summary["unknown_target_count"]
+                            for summary in health_summaries
+                            if summary["health_snapshot_available"]
+                        ),
                         "target_server_instance_nos": (
                             target_server_instance_nos
                         ),
@@ -687,14 +737,173 @@ class InfrastructureNormalizer:
                     },
                 )
             )
+
+        for group in normalized_groups:
+            group_no = self._string(group.get("targetGroupNo"))
+            if not group_no:
+                continue
+            health = group_health[group_no]
+            target_type = self._code_value(group.get("targetType"))
+            target_server_instance_nos = self._unique_values([
+                *(
+                    self._as_list(group.get("targetNoList"))
+                    if str(target_type or "").upper() == "VSVR"
+                    else []
+                ),
+                *(
+                    health["target_nos"]
+                    if str(target_type or "").upper() == "VSVR"
+                    else []
+                ),
+            ])
+            relation_specs = [
+                (
+                    "BELONGS_TO",
+                    "LOAD_BALANCER",
+                    group.get("loadBalancerInstanceNo"),
+                    "loadBalancerInstanceNo",
+                ),
+                (
+                    "BELONGS_TO",
+                    "VPC",
+                    group.get("vpcNo"),
+                    "vpcNo",
+                ),
+            ]
+            relation_specs.extend(
+                (
+                    "ROUTES_TO",
+                    "SERVER",
+                    server_instance_no,
+                    "targetList[].targetNo",
+                )
+                for server_instance_no in target_server_instance_nos
+            )
+            status = "UNKNOWN"
+            if health["health_snapshot_available"]:
+                if health["unready_target_count"]:
+                    status = "UNREADY"
+                elif (
+                    health["unused_target_count"]
+                    or health["unknown_target_count"]
+                ):
+                    status = "PARTIAL"
+                elif health["registered_target_count"]:
+                    status = "READY"
+                else:
+                    status = "EMPTY"
+            result.append(
+                self._resource(
+                    category="TARGET_GROUP",
+                    service_name="Load Balancer",
+                    resource_type="TargetGroup",
+                    resource_id=group_no,
+                    resource_name=group.get("targetGroupName"),
+                    status=status,
+                    region_code=group.get("regionCode"),
+                    zone_code=None,
+                    platform="VPC",
+                    create_time=group.get("createDate"),
+                    details={
+                        "target_group_no": group_no,
+                        "load_balancer_instance_no": group.get(
+                            "loadBalancerInstanceNo"
+                        ),
+                        "vpc_no": group.get("vpcNo"),
+                        "protocol": self._code_name(
+                            group.get("targetGroupProtocolType")
+                        ),
+                        "port": group.get("targetGroupPort"),
+                        "target_type": target_type,
+                        "health_check_protocol": self._code_name(
+                            group.get("healthCheckProtocolType")
+                        ),
+                        "health_check_port": group.get("healthCheckPort"),
+                        "registered_target_count": (
+                            health["registered_target_count"]
+                        ),
+                        "ready_target_count": health["ready_target_count"],
+                        "unready_target_count": (
+                            health["unready_target_count"]
+                        ),
+                        "unused_target_count": health["unused_target_count"],
+                        "unknown_target_count": (
+                            health["unknown_target_count"]
+                        ),
+                        "health_snapshot_available": (
+                            health["health_snapshot_available"]
+                        ),
+                        "target_server_instance_nos": (
+                            target_server_instance_nos
+                        ),
+                        "explicit_relations": self._explicit_relations(
+                            *relation_specs
+                        ),
+                    },
+                )
+            )
         return result
+
+    def _target_group_health(
+        self,
+        group: Mapping[str, Any],
+        targets_by_group: Mapping[str, Iterable[Mapping[str, Any]]],
+    ) -> Dict[str, Any]:
+        group_no = self._string(group.get("targetGroupNo")) or ""
+        snapshot_available = group_no in targets_by_group
+        targets = self._dict_items(targets_by_group.get(group_no, []))
+        counts = {"UP": 0, "DOWN": 0, "UNUSED": 0, "UNKNOWN": 0}
+        target_nos = self._as_list(group.get("targetNoList"))
+        if snapshot_available:
+            for target in targets:
+                target_nos.append(target.get("targetNo"))
+                status = self._token(
+                    self._code_value(target.get("healthCheckStatus"))
+                )
+                counts[status if status in counts else "UNKNOWN"] += 1
+        return {
+            "health_snapshot_available": snapshot_available,
+            "registered_target_count": (
+                len(targets)
+                if snapshot_available
+                else len(self._unique_values(target_nos))
+            ),
+            "ready_target_count": counts["UP"],
+            "unready_target_count": counts["DOWN"],
+            "unused_target_count": counts["UNUSED"],
+            "unknown_target_count": counts["UNKNOWN"],
+            "target_nos": self._unique_values(target_nos),
+        }
 
     def normalize_nas(
         self,
         volumes: Iterable[Mapping[str, Any]],
+        platform: str = "VPC",
     ) -> List[Dict[str, Any]]:
+        normalized_platform = self._token(platform)
+        if normalized_platform not in {"VPC", "CLASSIC"}:
+            raise ValueError(f"Unsupported NAS platform: {platform!r}")
+
         result = []
         for volume in self._dict_items(volumes):
+            region = self._mapping(volume.get("region"))
+            zone = self._mapping(volume.get("zone"))
+            server_instance_nos = self._unique_values([
+                *self._as_list(
+                    volume.get("nasVolumeServerInstanceNoList")
+                ),
+                *(
+                    server.get("serverInstanceNo")
+                    for server in self._dict_items(
+                        volume.get("nasVolumeServerInstanceList")
+                    )
+                ),
+            ])
+            server_relation_source = (
+                "nasVolumeServerInstanceNoList"
+                if "nasVolumeServerInstanceNoList" in volume
+                else "nasVolumeServerInstanceList"
+            )
             result.append(
                 self._resource(
                     category="NAS",
@@ -706,11 +915,16 @@ class InfrastructureNormalizer:
                     or self._code_name(
                         volume.get("nasVolumeInstanceStatus")
                     ),
-                    region_code=volume.get("regionCode"),
-                    zone_code=volume.get("zoneCode"),
-                    platform="VPC",
+                    region_code=volume.get("regionCode")
+                    or region.get("regionCode"),
+                    zone_code=volume.get("zoneCode")
+                    or zone.get("zoneCode"),
+                    platform=normalized_platform,
                     create_time=volume.get("createDate"),
                     details={
+                        "nas_volume_instance_no": volume.get(
+                            "nasVolumeInstanceNo"
+                        ),
                         "size_gb": self._bytes_to_gb(
                             volume.get("volumeTotalSize")
                         ),
@@ -726,6 +940,7 @@ class InfrastructureNormalizer:
                         "encrypted": volume.get("isEncryptedVolume"),
                         "vpc_no": volume.get("vpcNo"),
                         "subnet_no": volume.get("subnetNo"),
+                        "server_instance_nos": server_instance_nos,
                         "explicit_relations": self._explicit_relations(
                             (
                                 "BELONGS_TO",
@@ -738,6 +953,15 @@ class InfrastructureNormalizer:
                                 "SUBNET",
                                 volume.get("subnetNo"),
                                 "subnetNo",
+                            ),
+                            *(
+                                (
+                                    "ATTACHED_TO",
+                                    "SERVER",
+                                    server_instance_no,
+                                    server_relation_source,
+                                )
+                                for server_instance_no in server_instance_nos
                             ),
                         ),
                     },

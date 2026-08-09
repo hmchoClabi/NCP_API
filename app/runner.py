@@ -591,6 +591,13 @@ class ReportRunner:
             or infrastructure_metadata.get("started_at")
         )
         source = str(infrastructure_metadata.get("source") or "UNAVAILABLE")
+        time_basis = str(
+            infrastructure_metadata.get("time_basis") or "REPORT_PERIOD"
+        ).strip().upper()
+        current_state_fallback = (
+            time_basis == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+            and source == "CURRENT_API_COLLECTION"
+        )
         reference_at = (
             infrastructure_metadata.get("reference_at")
             or self._now_kst_iso()
@@ -604,9 +611,9 @@ class ReportRunner:
             window,
             parsed_observed_at,
         )
-        if (
-            not observed_at
-            or not self._snapshot_observed_in_window(
+        if not observed_at or (
+            not current_state_fallback
+            and not self._snapshot_observed_in_window(
                 period,
                 observed_at,
                 reference_at,
@@ -666,16 +673,43 @@ class ReportRunner:
             ),
         )
         summary = topology.setdefault("summary", {})
+        topology_window_metadata = (
+            {
+                "reference_at": (
+                    infrastructure_metadata.get("reference_at")
+                    or observed_at
+                ),
+                "eligible_start": None,
+                "eligible_end": None,
+                "snapshot_age_seconds": None,
+            }
+            if current_state_fallback
+            else window_metadata
+        )
         summary.update({
-            "time_basis": "REPORT_PERIOD",
+            "time_basis": time_basis,
             "snapshot_source": source,
             "period_start": period.get("start_dt"),
             "period_end": period.get("end_dt"),
             "source_report_run_id": infrastructure_metadata.get(
                 "source_report_run_id"
             ),
-            **window_metadata,
+            **topology_window_metadata,
         })
+        if current_state_fallback:
+            summary["confidence"] = "PARTIAL"
+            topology.setdefault("warnings", []).insert(0, {
+                "code": "CURRENT_STATE_TOPOLOGY_FALLBACK",
+                "message": (
+                    "보고 기간 안에 저장된 인프라 스냅샷이 없어, 보고 종료 "
+                    "전에 생성된 것으로 확인되는 현재 자원의 연결 관계를 "
+                    "표시합니다. 삭제되었거나 변경된 과거 구성은 복원되지 "
+                    "않으므로 보고 기간 당시의 정확한 구성으로 해석해서는 "
+                    "안 됩니다."
+                ),
+                "source": "current_api_collection",
+                "confidence": "PARTIAL",
+            })
         return topology
 
     def run(
@@ -1419,10 +1453,15 @@ class ReportRunner:
         infrastructure_metric_errors: List[Dict[str, Any]] = []
         infrastructure_metric_warnings: List[Dict[str, Any]] = []
         if monitored_infrastructure_categories:
+            monitoring_resource_categories = set(
+                monitored_infrastructure_categories
+            )
+            if "LOAD_BALANCER" in monitoring_resource_categories:
+                monitoring_resource_categories.add("TARGET_GROUP")
             monitoring_infrastructure = [
                 item for item in infrastructure_collected_data
                 if str(item.get("category") or "").upper()
-                in monitored_infrastructure_categories
+                in monitoring_resource_categories
             ]
             (
                 infrastructure_metric_data,
@@ -1670,6 +1709,7 @@ class ReportRunner:
             infrastructure_topology=infrastructure_topology,
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,
+            generated_at=self._now_kst_iso(),
         )
         report_json_path = self.save_json_file(
             data=report.to_dict(),
@@ -1817,11 +1857,14 @@ class ReportRunner:
             normalized_categories = {
                 str(category).upper() for category in (categories or set())
             }
+            normalized_resource_categories = set(normalized_categories)
+            if "LOAD_BALANCER" in normalized_resource_categories:
+                normalized_resource_categories.add("TARGET_GROUP")
             metric_infrastructure = (
                 [
                     item for item in infrastructure
                     if str(item.get("category") or "").upper()
-                    in normalized_categories
+                    in normalized_resource_categories
                 ]
                 if normalized_categories
                 else infrastructure
