@@ -7,7 +7,6 @@ import requests
 from app.apifactory import APIFactory
 from collectors.infrastructurecollector import InfrastructureCollector
 from config.endpoints import build_api_endpoints
-from ncp_api.cdnAPI import CdnAPI
 from ncp_api.clouddbAPI import CloudDbAPI
 from normalizers.infrastructurenormalizer import InfrastructureNormalizer
 
@@ -173,28 +172,6 @@ class InventoryNasAPI(EmptyNasAPI):
         )
 
 
-class InventoryClassicNasAPI(EmptyNasAPI):
-    def get_nas_volume_instance_list(self, **kwargs):
-        return wrapped(
-            "getNasVolumeInstanceListResponse",
-            "nasVolumeInstanceList",
-            [
-                {
-                    "nasVolumeInstanceNo": "classic-nas-1",
-                    "volumeName": "classic-shared-data",
-                    "nasVolumeInstanceStatusName": "created",
-                    "region": {"regionNo": "1", "regionCode": "KR"},
-                    "zone": {"zoneNo": "3", "zoneCode": "KR-2"},
-                    "volumeTotalSize": 100 * 1024 ** 3,
-                    "volumeAllotmentProtocolType": {"code": "NFS"},
-                    "nasVolumeServerInstanceList": [
-                        {"serverInstanceNo": "classic-server-1"}
-                    ],
-                }
-            ],
-        )
-
-
 class EmptyKubernetesAPI:
     def get_nks_cluster_list(self):
         return {"clusters": []}
@@ -218,45 +195,6 @@ class InventoryKubernetesAPI:
                 }
             ]
         }
-
-
-class EmptyCdnAPI:
-    def get_global_cdn_instance_list(self, **kwargs):
-        return wrapped(
-            "getGlobalCdnInstanceListResponse",
-            "globalCdnInstanceList",
-            [],
-        )
-
-    def get_cdn_plus_instance_list(self, **kwargs):
-        return wrapped(
-            "getCdnPlusInstanceListResponse",
-            "cdnPlusInstanceList",
-            [],
-        )
-
-
-class InventoryCdnAPI(EmptyCdnAPI):
-    def get_global_cdn_instance_list(self, **kwargs):
-        return wrapped(
-            "getGlobalCdnInstanceListResponse",
-            "globalCdnInstanceList",
-            [
-                {
-                    "cdnInstanceNo": "cdn-1",
-                    "serviceName": "static-assets",
-                    "cdnInstanceStatusName": "running",
-                    "globalCdnServiceDomainList": [
-                        {"defaultDomainName": "hidden.example.invalid"}
-                    ],
-                    "globalCdnRule": {
-                        "protocolTypeCode": "HTTPS",
-                        "originUrl": "private-origin.example.invalid",
-                        "secureTokenPassword": "never-store-this",
-                    },
-                }
-            ],
-        )
 
 
 class EmptyResourceManagerAPI:
@@ -341,11 +279,6 @@ class EmptyCertificateManagerAPI:
         return {"totalRows": 0, "sslCertificateList": []}
 
 
-class EmptyContainerAPI:
-    def get_registry_list(self, **kwargs):
-        return {"count": 0, "next": None, "results": []}
-
-
 class InventoryResourceManagerAPI:
     def get_resource_list(self, page, size, region_code=None):
         del region_code
@@ -392,16 +325,13 @@ def build_factory(**overrides):
     apis = {
         "loadbalancer": EmptyLoadBalancerAPI(),
         "vnas": EmptyNasAPI(),
-        "nas_classic": EmptyNasAPI(),
         "cloud_db": EmptyCloudDbAPI(),
         "kubernetes": EmptyKubernetesAPI(),
-        "cdn": EmptyCdnAPI(),
         "resource_manager": EmptyResourceManagerAPI(),
         "vpc": EmptyVpcAPI(),
         "vserver": EmptyVserverAPI(),
         "global_dns": EmptyGlobalDnsAPI(),
         "certificate_manager": EmptyCertificateManagerAPI(),
-        "container": EmptyContainerAPI(),
     }
     apis.update(overrides)
     return FakeFactory(**apis)
@@ -445,96 +375,69 @@ class InfrastructureAPIContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     method(page_no=1)
 
-    def test_cdn_wrappers_and_factory_registration(self):
-        client = RecordingClient()
-        api = CdnAPI(client=client)
-
-        api.get_global_cdn_instance_list(page_no=1, page_size=100)
-        self.assertEqual(client.calls[-1][0], "/getGlobalCdnInstanceList")
-        api.get_cdn_plus_instance_list(page_no=1, page_size=100)
-        self.assertEqual(client.calls[-1][0], "/getCdnPlusInstanceList")
-
+    def test_removed_inventory_apis_are_not_registered(self):
         endpoints = build_api_endpoints("public", "KR")
         self.assertEqual(endpoints["clouddb"], endpoints["vserver"])
-        self.assertTrue(endpoints["cdn"].endswith("/cdn/v2"))
         self.assertIn("cloud_db", APIFactory().available_apis())
-        self.assertIn("cdn", APIFactory().available_apis())
+        for endpoint_key in ("cdn", "nas_classic", "containerregistry"):
+            with self.subTest(endpoint_key=endpoint_key):
+                self.assertNotIn(endpoint_key, endpoints)
+        for api_key in ("cdn", "nas_classic", "container"):
+            with self.subTest(api_key=api_key):
+                self.assertNotIn(api_key, APIFactory().available_apis())
 
 
 class InfrastructureCollectorTests(unittest.TestCase):
-    def test_collects_vpc_and_classic_nas_as_separate_platforms(self):
-        collector = InfrastructureCollector(
-            build_factory(
-                vnas=InventoryNasAPI(),
-                nas_classic=InventoryClassicNasAPI(),
-            )
-        )
+    def test_collects_vpc_nas_without_requesting_classic_nas(self):
+        factory = build_factory(vnas=InventoryNasAPI())
+        collector = InfrastructureCollector(factory)
 
         resources = collector.collect([], {}, categories=("NAS",))
         by_id = {resource["resource_id"]: resource for resource in resources}
 
-        self.assertEqual(set(by_id), {"nas-1", "classic-nas-1"})
+        self.assertEqual(set(by_id), {"nas-1"})
         self.assertEqual(by_id["nas-1"]["platform"], "VPC")
-        classic = by_id["classic-nas-1"]
-        self.assertEqual(classic["platform"], "CLASSIC")
-        self.assertEqual(classic["region_code"], "KR")
-        self.assertEqual(classic["zone_code"], "KR-2")
-        self.assertEqual(
-            classic["details"]["server_instance_nos"],
-            ["classic-server-1"],
-        )
-        self.assertEqual(
-            classic["details"]["explicit_relations"],
-            [
-                {
-                    "type": "ATTACHED_TO",
-                    "target_category": "SERVER",
-                    "target_id": "classic-server-1",
-                    "source_field": "nasVolumeServerInstanceList",
-                }
-            ],
-        )
+        self.assertNotIn("nas_classic", factory.requests)
         self.assertEqual(collector.last_errors, [])
         self.assertEqual(collector.last_warnings, [])
 
-    def test_nas_platform_permission_failure_does_not_block_other_platform(self):
+    def test_vpc_nas_permission_failure_is_an_optional_warning(self):
         response = requests.Response()
         response.status_code = 403
         response._content = b'{"error":{"errorCode":"2300"}}'
         response.headers["Content-Type"] = "application/json"
+        failing_api = Mock()
+        failing_api.get_nas_volume_instance_list.side_effect = (
+            requests.HTTPError("forbidden", response=response)
+        )
+        factory = build_factory(vnas=failing_api)
+        collector = InfrastructureCollector(factory)
 
-        for failing_key, expected_id, expected_platform in (
-            ("vnas", "classic-nas-1", "CLASSIC"),
-            ("nas_classic", "nas-1", "VPC"),
-        ):
-            with self.subTest(failing_key=failing_key):
-                failing_api = Mock()
-                failing_api.get_nas_volume_instance_list.side_effect = (
-                    requests.HTTPError("forbidden", response=response)
-                )
-                nas_apis = {
-                    "vnas": InventoryNasAPI(),
-                    "nas_classic": InventoryClassicNasAPI(),
-                }
-                nas_apis[failing_key] = failing_api
-                factory = build_factory(**nas_apis)
-                collector = InfrastructureCollector(factory)
+        resources = collector.collect([], {}, categories=("NAS",))
 
-                resources = collector.collect([], {}, categories=("NAS",))
+        self.assertEqual(resources, [])
+        self.assertNotIn("nas_classic", factory.requests)
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(len(collector.last_warnings), 1)
+        self.assertEqual(collector.last_warnings[0]["status_code"], 403)
+        self.assertEqual(collector.last_warnings[0]["error_code"], "2300")
 
-                self.assertEqual(len(resources), 1)
-                self.assertEqual(resources[0]["resource_id"], expected_id)
-                self.assertEqual(resources[0]["platform"], expected_platform)
-                self.assertEqual(collector.last_errors, [])
-                self.assertEqual(len(collector.last_warnings), 1)
-                self.assertEqual(
-                    collector.last_warnings[0]["status_code"],
-                    403,
-                )
-                self.assertEqual(
-                    collector.last_warnings[0]["error_code"],
-                    "2300",
-                )
+    def test_removed_inventory_services_are_never_requested(self):
+        factory = build_factory()
+        collector = InfrastructureCollector(factory)
+
+        resources = collector.collect(
+            [],
+            {},
+            categories=("CDN", "NAS", "CONTAINER_REGISTRY"),
+        )
+
+        self.assertEqual(resources, [])
+        self.assertIn("vnas", factory.requests)
+        for removed_api in ("cdn", "nas_classic", "container"):
+            self.assertNotIn(removed_api, factory.requests)
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(collector.last_warnings, [])
 
     def test_normalizer_canonicalizes_supported_category_aliases(self):
         resources = InfrastructureNormalizer().finalize(
@@ -1358,7 +1261,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
             vnas=InventoryNasAPI(),
             cloud_db=InventoryCloudDbAPI(),
             kubernetes=InventoryKubernetesAPI(),
-            cdn=InventoryCdnAPI(),
             resource_manager=InventoryResourceManagerAPI(),
         )
         collector = InfrastructureCollector(factory)
@@ -1403,6 +1305,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "CLOUD_DB",
                 "KUBERNETES",
                 "CDN",
+                "CONTAINER_REGISTRY",
                 "OBJECT_STORAGE",
             ),
         )
@@ -1416,7 +1319,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "NAS",
                 "CLOUD_DB",
                 "KUBERNETES",
-                "CDN",
                 "OBJECT_STORAGE",
             ],
         )
@@ -1449,8 +1351,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
         for sensitive_value in (
             "never-store-this",
             "private.example.invalid",
-            "private-origin.example.invalid",
-            "hidden.example.invalid",
         ):
             self.assertNotIn(sensitive_value, rendered)
         for excluded_id in ("alarm-1", "user-1"):
@@ -1458,6 +1358,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_errors, [])
         self.assertEqual(collector.last_warnings, [])
         self.assertNotIn("vserver", factory.requests)
+        for removed_api in ("cdn", "nas_classic", "container"):
+            self.assertNotIn(removed_api, factory.requests)
 
     def test_permission_failure_is_warning_and_other_services_continue(self):
         response = requests.Response()
@@ -1504,7 +1406,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             page_size=collector.PAGE_SIZE,
         )
 
-    def test_cloud_db_and_cdn_use_documented_zero_based_first_page(self):
+    def test_cloud_db_uses_documented_zero_based_first_page(self):
         cloud_db = Mock()
         cloud_db_responses = (
             (
@@ -1540,22 +1442,11 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 [],
             )
 
-        cdn = Mock()
-        cdn.get_global_cdn_instance_list.return_value = wrapped(
-            "getGlobalCdnInstanceListResponse",
-            "globalCdnInstanceList",
-            [],
-        )
-        cdn.get_cdn_plus_instance_list.return_value = wrapped(
-            "getCdnPlusInstanceListResponse",
-            "cdnPlusInstanceList",
-            [],
-        )
-        factory = build_factory(cloud_db=cloud_db, cdn=cdn)
+        factory = build_factory(cloud_db=cloud_db)
         factory.credentials = Mock(region="SGN")
         collector = InfrastructureCollector(factory)
 
-        collector.collect([], {"storages": []})
+        collector.collect([], {"storages": []}, categories=("CLOUD_DB",))
 
         for method_name, _, _ in cloud_db_responses:
             getattr(cloud_db, method_name).assert_called_once_with(
@@ -1563,14 +1454,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 page_size=collector.PAGE_SIZE,
                 region_code="SGN",
             )
-        cdn.get_global_cdn_instance_list.assert_called_once_with(
-            page_no=0,
-            page_size=collector.PAGE_SIZE,
-        )
-        cdn.get_cdn_plus_instance_list.assert_called_once_with(
-            page_no=0,
-            page_size=collector.PAGE_SIZE,
-        )
 
     def test_resource_manager_uses_configured_region(self):
         resource_manager = Mock()

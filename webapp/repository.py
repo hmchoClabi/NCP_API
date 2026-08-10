@@ -1026,7 +1026,7 @@ class PortalRepository:
                     ON account.id = job.cloud_account_id
                 JOIN control.tenants tenant ON tenant.id = job.tenant_id
                 WHERE job.tenant_id = ANY(%s::uuid[])
-                ORDER BY job.created_at DESC
+                ORDER BY job.created_at DESC, job.id DESC
                 LIMIT 100
                 """,
                 (tenant_ids,),

@@ -4,10 +4,8 @@ from ncp_api import (
     SubAccountAPI,
     VserverAPI,
     PlatformAPI,
-    ContainerAPI,
     KubernetesAPI,
     VnasAPI,
-    ClassicNasAPI,
     GlobaldnsAPI,
     ResourceManagerAPI,
     CloudLogAnalyticsAPI,
@@ -20,7 +18,6 @@ from ncp_api import (
     LoadbalancerAPI,
     OrganizationAPI,
     CloudDbAPI,
-    CdnAPI,
 )
 from utils.credentials import NCPCredentials
 from utils.credential_provider import get_default_credentials
@@ -42,10 +39,8 @@ class APIFactory:
             "sub_account": SubAccountAPI,
             "vserver": VserverAPI,
             "platform": PlatformAPI,
-            "container": ContainerAPI,
             "kubernetes": KubernetesAPI,
             "vnas": VnasAPI,
-            "nas_classic": ClassicNasAPI,
             "global_dns": GlobaldnsAPI,
             "resource_manager": ResourceManagerAPI,
             "cloud_log_analytics": CloudLogAnalyticsAPI,
@@ -58,7 +53,6 @@ class APIFactory:
             "loadbalancer": LoadbalancerAPI,
             "organization": OrganizationAPI,
             "cloud_db": CloudDbAPI,
-            "cdn": CdnAPI,
         }
 
     def get(self, name: str):

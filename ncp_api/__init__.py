@@ -2,10 +2,8 @@ __all__ = [
     "SubAccountAPI",
     "VserverAPI",
     "PlatformAPI",
-    "ContainerAPI",
     "KubernetesAPI",
     "VnasAPI",
-    "ClassicNasAPI",
     "GlobaldnsAPI",
     "ResourceManagerAPI",
     "CloudLogAnalyticsAPI",
@@ -18,7 +16,6 @@ __all__ = [
     "LoadbalancerAPI",
     "OrganizationAPI",
     "CloudDbAPI",
-    "CdnAPI",
 ]
 
 
@@ -32,18 +29,12 @@ def __getattr__(name):
     if name == "PlatformAPI":
         from .platformAPI import PlatformAPI
         return PlatformAPI
-    if name == "ContainerAPI":
-        from .containerAPI import ContainerAPI
-        return ContainerAPI
     if name == "KubernetesAPI":
         from .kubernetesAPI import KubernetesAPI
         return KubernetesAPI
     if name == "VnasAPI":
         from .vnasAPI import VnasAPI
         return VnasAPI
-    if name == "ClassicNasAPI":
-        from .classicnasAPI import ClassicNasAPI
-        return ClassicNasAPI
     if name == "GlobaldnsAPI":
         from .globaldnsAPI import GlobaldnsAPI
         return GlobaldnsAPI
@@ -80,8 +71,4 @@ def __getattr__(name):
     if name == "CloudDbAPI":
         from .clouddbAPI import CloudDbAPI
         return CloudDbAPI
-    if name == "CdnAPI":
-        from .cdnAPI import CdnAPI
-        return CdnAPI
-
     raise AttributeError(f"module 'ncp_api' has no attribute '{name}'")

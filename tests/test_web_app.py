@@ -656,6 +656,63 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("고객별 보고서 출력 설정".encode("utf-8"), response.data)
         self.assertNotIn(b'name="resource_categories" value="SECRET', response.data)
 
+    def test_customer_detail_limits_recent_reports_and_jobs_to_ten(self):
+        original_tenant_detail = self.repository.tenant_detail
+
+        def tenant_detail(tenant_id):
+            tenant = original_tenant_detail(tenant_id)
+            tenant["reports"] = [
+                {
+                    "id": f"recent-report-{index:02d}",
+                    "report_type": "DAILY",
+                    "period_start": datetime(2026, 8, 12 - index),
+                    "period_end": datetime(2026, 8, 13 - index),
+                    "end_exclusive": True,
+                    "account_name": "Primary",
+                    "status": "SUCCESS",
+                    "error_count": 0,
+                    "created_at": datetime(
+                        2026, 8, 12 - index, tzinfo=timezone.utc
+                    ),
+                    "completed_at": datetime(
+                        2026, 8, 12 - index, 0, 1, tzinfo=timezone.utc
+                    ),
+                    "execution_seconds": 60,
+                }
+                for index in range(1, 12)
+            ]
+            return tenant
+
+        self.repository.tenant_detail = tenant_detail
+        self.repository.jobs_for_tenants = lambda tenant_ids: [
+            {
+                "id": f"recent-job-{index:02d}",
+                "customer_name": "Customer",
+                "account_name": "Primary",
+                "report_type": "DAILY",
+                "target_value": f"recent-job-{index:02d}",
+                "trigger_type": "MANUAL",
+                "status": "SUCCESS",
+                "last_error": None,
+                "requested_at": datetime(
+                    2026, 8, 12 - index, tzinfo=timezone.utc
+                ),
+            }
+            for index in range(1, 12)
+        ]
+
+        response = self.client.get("/msp/customer/tenant-1")
+        response_text = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        for index in range(1, 11):
+            self.assertIn(f"recent-report-{index:02d}", response_text)
+        self.assertNotIn("recent-report-11", response_text)
+        for index in range(1, 11):
+            self.assertIn(f"recent-job-{index:02d}", response_text)
+        self.assertNotIn("recent-job-11", response_text)
+        self.assertIn("최신 10건".encode("utf-8"), response.data)
+
     def test_msp_admin_can_update_customer_report_settings(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
 

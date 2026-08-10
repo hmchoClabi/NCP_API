@@ -21,6 +21,9 @@ from webapp.route_access import _can_manage_tenant, _msp_admin_required, _msp_re
 from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
 
+CUSTOMER_DETAIL_RECENT_LIMIT = 10
+
+
 def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     """MSP 역할 경계가 필요한 관리 라우트를 기존 endpoint로 등록한다."""
 
@@ -190,8 +193,11 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 if "MSP_ADMIN" in set(g.user.get("platform_roles", []))
                 else []
             ),
-            reports=tenant["reports"],
-            jobs=repository.jobs_for_tenants([tenant_id]),
+            reports=tenant["reports"][:CUSTOMER_DETAIL_RECENT_LIMIT],
+            jobs=repository.jobs_for_tenants([tenant_id])[
+                :CUSTOMER_DETAIL_RECENT_LIMIT
+            ],
+            recent_item_limit=CUSTOMER_DETAIL_RECENT_LIMIT,
             can_manage_schedules=_can_manage_tenant(g.user, tenant_id),
             can_delete_reports=True,
             report_section_options=REPORT_SECTION_OPTIONS,

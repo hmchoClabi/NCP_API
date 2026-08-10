@@ -65,23 +65,6 @@ def _validated_api_type_and_region(api_type: str, region: str) -> tuple[str, str
     return normalized_api_type, normalized_region
 
 
-def get_containerregistry_endpoint(api_type: str, region: str) -> str:
-    api_type, region = _validated_api_type_and_region(api_type, region)
-
-    if api_type == "gov":
-        if region == "KRS":
-            return "https://gov-ncr.apigw.gov-ntruss.com/ncr/krs"
-        return "https://gov-ncr.apigw.gov-ntruss.com/ncr/kr"
-
-    if region == "SGN":
-        return "https://ncr.apigw.ntruss.com/ncr/sgn-api/v2"
-
-    if region == "JPN":
-        return "https://ncr.apigw.ntruss.com/ncr/jpn-api/v2"
-
-    return "https://ncr.apigw.ntruss.com/ncr/api/v2"
-
-
 def get_kubernetes_endpoint(api_type: str, region: str) -> str:
     api_type, region = _validated_api_type_and_region(api_type, region)
 
@@ -110,9 +93,7 @@ def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
         "vpc": f"{ncloud}/vpc/v2",
         "loadbalancer": f"{ncloud}/vloadbalancer/v2",
         "vnas": f"{ncloud}/vnas/v2",
-        "nas_classic": f"{ncloud}/server/v2",
         "clouddb": ncloud,
-        "cdn": f"{ncloud}/cdn/v2",
         "certificatemanager": base["certificatemanager"],
         "cloudinsight": base["cloudinsight"],
         "cloudactivitytracer": base["cloudactivitytracer"],
@@ -125,6 +106,5 @@ def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
         "platform": base["platform"],
         **({"organization": base["organization"]} if "organization" in base else {}),
 
-        "containerregistry": get_containerregistry_endpoint(api_type, region),
         "kubernetes": get_kubernetes_endpoint(api_type, region),
     }

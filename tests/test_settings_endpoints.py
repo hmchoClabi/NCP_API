@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from config.endpoints import (
     build_api_endpoints,
-    get_containerregistry_endpoint,
     get_kubernetes_endpoint,
 )
 import config.settings as settings
@@ -15,18 +14,10 @@ class EndpointTests(unittest.TestCase):
     def test_normalizes_supported_api_type_and_region(self):
         endpoints = build_api_endpoints(" PUBLIC ", " jpn ")
 
-        self.assertIn("/ncr/jpn-api/v2", endpoints["containerregistry"])
         self.assertIn("/vnks/jpn-v2", endpoints["kubernetes"])
-        self.assertEqual(
-            endpoints["nas_classic"],
-            "https://ncloud.apigw.ntruss.com/server/v2",
-        )
-
-        gov_endpoints = build_api_endpoints("gov", "KR")
-        self.assertEqual(
-            gov_endpoints["nas_classic"],
-            "https://ncloud.apigw.gov-ntruss.com/server/v2",
-        )
+        for endpoint_key in ("cdn", "nas_classic", "containerregistry"):
+            with self.subTest(endpoint_key=endpoint_key):
+                self.assertNotIn(endpoint_key, endpoints)
 
     def test_rejects_unknown_or_incompatible_region(self):
         for api_type, region in (
@@ -39,8 +30,6 @@ class EndpointTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     build_api_endpoints(api_type, region)
 
-        with self.assertRaises(ValueError):
-            get_containerregistry_endpoint("public", "UNKNOWN")
         with self.assertRaises(ValueError):
             get_kubernetes_endpoint("gov", "SGN")
 

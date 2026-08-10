@@ -26,7 +26,6 @@ class InfrastructureCollector:
         "OBJECT_STORAGE",
         "NAS",
         "CLOUD_DB",
-        "CDN",
         "KUBERNETES",
     })
     RESOURCE_MANAGER_ONLY_CATEGORIES = frozenset({
@@ -383,39 +382,14 @@ class InfrastructureCollector:
                 ),
             )
 
-        if self._category_enabled(
-            selected_categories,
-            "CONTAINER_REGISTRY",
-        ):
-            registries = self._collect_rest_pages(
-                api_key="container",
-                method_name="get_registry_list",
-                list_key="results",
-                identity_fields=("private_id", "name"),
-                target_type="container_registry",
-                page_start=1,
-                page_parameter="page",
-                size_parameter="page_size",
-                next_field="next",
-            )
-            self._extend_normalized(
-                resources,
-                target_type="container_registry",
-                api="get_registry_list",
-                normalize=lambda: (
-                    self.normalizer.normalize_container_registries(registries)
-                ),
-            )
-
     def _collect_data_resources(
         self,
         resources: List[Dict[str, Any]],
         selected_categories: Optional[frozenset[str]],
     ) -> None:
-        """로드밸런서, NAS, DB, NKS, CDN 자원을 순서대로 수집한다."""
+        """로드밸런서, VPC NAS, DB, NKS 자원을 순서대로 수집한다."""
 
-        # NAS는 VPC와 Classic API를 모두 조회하며 platform 값을 분리해 보존한다.
-        # Cloud DB와 CDN 목록 API는 기존 공급자 계약대로 0번 페이지부터 조회한다.
+        # Cloud DB 목록 API는 공급자 계약에 따라 0번 페이지부터 조회한다.
         if self._category_enabled(selected_categories, "LOAD_BALANCER"):
             load_balancers = self._collect_paged_service(
                 api_key="loadbalancer",
@@ -468,24 +442,6 @@ class InfrastructureCollector:
                 normalize=lambda: self.normalizer.normalize_nas(
                     vpc_nas_volumes,
                     platform="VPC",
-                ),
-            )
-
-            classic_nas_volumes = self._collect_wrapped_service(
-                api_key="nas_classic",
-                method_name="get_nas_volume_instance_list",
-                response_key="getNasVolumeInstanceListResponse",
-                list_key="nasVolumeInstanceList",
-                target_type="nas_classic",
-                optional=True,
-            )
-            self._extend_normalized(
-                resources,
-                target_type="nas_classic",
-                api="get_nas_volume_instance_list",
-                normalize=lambda: self.normalizer.normalize_nas(
-                    classic_nas_volumes,
-                    platform="CLASSIC",
                 ),
             )
 
@@ -567,40 +523,6 @@ class InfrastructureCollector:
                 api="get_nks_cluster_list",
                 normalize=lambda: self.normalizer.normalize_nks(clusters),
             )
-
-        cdn_specs = (
-            (
-                "GLOBAL_CDN",
-                "get_global_cdn_instance_list",
-                "getGlobalCdnInstanceListResponse",
-                "globalCdnInstanceList",
-            ),
-            (
-                "CDN_PLUS",
-                "get_cdn_plus_instance_list",
-                "getCdnPlusInstanceListResponse",
-                "cdnPlusInstanceList",
-            ),
-        )
-        if self._category_enabled(selected_categories, "CDN"):
-            for variant, method_name, response_key, list_key in cdn_specs:
-                instances = self._collect_paged_service(
-                    api_key="cdn",
-                    method_name=method_name,
-                    response_key=response_key,
-                    list_key=list_key,
-                    identity_fields=("cdnInstanceNo",),
-                    target_type=variant.lower(),
-                    page_start=0,
-                )
-                self._extend_normalized(
-                    resources,
-                    target_type=variant.lower(),
-                    api=method_name,
-                    normalize=lambda variant=variant, instances=instances: (
-                        self.normalizer.normalize_cdn(variant, instances)
-                    ),
-                )
 
     def _enrich_resource_manager_resources(
         self,
