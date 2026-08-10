@@ -4,12 +4,16 @@ import hashlib
 import ipaddress
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from app.report_models import ReportResult
+from app.report_period import (
+    build_snapshot_eligibility_window,
+    normalize_period_bounds,
+)
 from database.config import DatabaseSettings
 from utils.event_sort import event_timestamp_millis
 
@@ -206,24 +210,11 @@ class PostgresReportRepository:
             if reference_at is None
             else self._parse_datetime(reference_at)
         )
-        if reference < period_start:
-            return None
-        reference = min(
-            reference,
-            period_end - timedelta(microseconds=1),
-        )
-        eligible_start = period_start
-        eligible_end = min(
+        return build_snapshot_eligibility_window(
+            period_start,
             period_end,
-            reference + timedelta(microseconds=1),
+            reference,
         )
-        if eligible_start >= eligible_end:
-            return None
-        return {
-            "reference_at": reference,
-            "eligible_start": eligible_start,
-            "eligible_end": eligible_end,
-        }
 
     def _resolve_tenant(self, cursor: Any, report: ReportResult) -> tuple[Any, str]:
         customer = report.customer if isinstance(report.customer, dict) else {}
@@ -837,12 +828,15 @@ class PostgresReportRepository:
         start = self._parse_datetime(period.get("start_dt"))
         end = self._parse_datetime(period.get("end_dt"))
         end_exclusive = bool(period.get("end_exclusive", False))
-        if not end_exclusive:
-            end += timedelta(seconds=1)
-            end_exclusive = True
-        if start >= end:
-            raise DatabasePersistenceError("Report period is invalid.")
-        return start, end, end_exclusive
+        try:
+            start, end = normalize_period_bounds(
+                start,
+                end,
+                end_exclusive=end_exclusive,
+            )
+        except ValueError as exc:
+            raise DatabasePersistenceError(str(exc)) from exc
+        return start, end, True
 
     def _parse_datetime(self, value: Any) -> datetime:
         parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))

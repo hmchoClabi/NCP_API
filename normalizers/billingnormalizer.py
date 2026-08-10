@@ -2,8 +2,67 @@ import calendar
 import math
 from collections import Counter, defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class _BillingInputs:
+    raw_meta: Dict[str, Any]
+    collection_errors: List[Dict[str, Any]]
+    collection_warnings: List[Dict[str, Any]]
+    comparison_input_errors: List[Dict[str, Any]]
+    demand_rows: List[Dict[str, Any]]
+    confirmed_demand_rows: List[Dict[str, Any]]
+    confirmed_product_rows: List[Dict[str, Any]]
+    contract_demand_rows: List[Dict[str, Any]]
+    demand_discount_rows: List[Dict[str, Any]]
+    daily_usage_rows: List[Dict[str, Any]]
+    month_to_date_usage_rows: List[Dict[str, Any]]
+    price_rows: List[Dict[str, Any]]
+    discount_rows: List[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _BillingSummaries:
+    service_summary: List[Dict[str, Any]]
+    target_service_summary: List[Dict[str, Any]]
+    contract_cost_summary: List[Dict[str, Any]]
+    closed_cost_reference: List[Dict[str, Any]]
+    closed_cost_source: str
+    discount_summary: List[Dict[str, Any]]
+    usage_summary: List[Dict[str, Any]]
+    network_usage_summary: List[Dict[str, Any]]
+    expected_cost_summary: List[Dict[str, Any]]
+    month_to_date_cost_summary: List[Dict[str, Any]]
+    expected_by_service: List[Dict[str, Any]]
+    month_to_date_by_service: List[Dict[str, Any]]
+    confirmed_use_total: float
+    expected_total: float
+    expected_total_all: float
+    unverified_expected_amount: float
+
+
+@dataclass(frozen=True)
+class _BillingComparison:
+    comparison_status: str
+    calculation_status_counts: Dict[str, int]
+    comparison_summary: List[Dict[str, Any]]
+    diff_amount: Optional[float]
+    diff_rate: Optional[float]
+
+
+@dataclass(frozen=True)
+class _BillingEstimates:
+    confirmed_month: str
+    invoice_summary: Dict[str, Any]
+    period_estimate: Dict[str, Any]
+    month_to_date_estimate: Dict[str, Any]
+    projected_cost_summary: List[Dict[str, Any]]
+    month_end_projection: Dict[str, Any]
+    confirmed_total: Any
+    cost_facts: List[Dict[str, Any]]
 
 
 class BillingNormalizer:
@@ -34,6 +93,52 @@ class BillingNormalizer:
         billing_month = billing_month or current_month
         report_period = report_period or {}
         days_in_month = self.get_days_in_month(billing_month, use_end_date)
+
+        inputs = self._extract_normalization_inputs(raw_data)
+        summaries = self._summarize_confirmed_and_usage(
+            inputs,
+            days_in_month,
+        )
+        comparison = self._compare_confirmed_and_estimated(
+            summaries,
+            comparison_enabled=comparison_enabled,
+            comparison_input_errors=inputs.comparison_input_errors,
+        )
+        estimates = self._build_usage_estimates(
+            inputs,
+            summaries,
+            billing_month=billing_month,
+            days_in_month=days_in_month,
+            report_period=report_period,
+            calculated_at=calculated_at,
+        )
+        organization, account_costs = self._summarize_organization_accounts(
+            raw_data,
+            inputs.raw_meta,
+            billing_month=billing_month,
+            use_end_date=use_end_date,
+            comparison_enabled=comparison_enabled,
+            report_period=report_period,
+            calculated_at=calculated_at,
+            include_account_breakdown=include_account_breakdown,
+        )
+        return self._assemble_normalized_payload(
+            billing_month=billing_month,
+            days_in_month=days_in_month,
+            inputs=inputs,
+            summaries=summaries,
+            comparison=comparison,
+            estimates=estimates,
+            organization=organization,
+            account_costs=account_costs,
+        )
+
+    def _extract_normalization_inputs(
+        self,
+        raw_data: Dict[str, Any],
+    ) -> _BillingInputs:
+        """수집 응답의 기존 envelope와 fallback 순서를 유지해 입력을 추출한다."""
+
         raw_meta = self.as_dict(raw_data.get("_meta"))
         collection_errors = self._dict_list(raw_meta.get("collection_errors"))
         collection_warnings = self._dict_list(raw_meta.get("collection_warnings"))
@@ -76,13 +181,38 @@ class BillingNormalizer:
         discount_rows = self.extract_rows(
             raw_data.get("discount_list", []), "discountList"
         )
-
-        service_summary = self.summarize_confirmed_by_service(
-            confirmed_product_rows
+        return _BillingInputs(
+            raw_meta=raw_meta,
+            collection_errors=collection_errors,
+            collection_warnings=collection_warnings,
+            comparison_input_errors=comparison_input_errors,
+            demand_rows=demand_rows,
+            confirmed_demand_rows=confirmed_demand_rows,
+            confirmed_product_rows=confirmed_product_rows,
+            contract_demand_rows=contract_demand_rows,
+            demand_discount_rows=demand_discount_rows,
+            daily_usage_rows=daily_usage_rows,
+            month_to_date_usage_rows=month_to_date_usage_rows,
+            price_rows=price_rows,
+            discount_rows=discount_rows,
         )
-        target_service_summary = self.summarize_confirmed_by_service(demand_rows)
+
+    def _summarize_confirmed_and_usage(
+        self,
+        inputs: _BillingInputs,
+        days_in_month: int,
+    ) -> _BillingSummaries:
+        """확정 금액과 사용량 기반 금액을 기존 계산 기준으로 각각 요약한다."""
+
+        # 확정 비용은 할인 전 useAmount를 비교 기준으로 사용한다.
+        service_summary = self.summarize_confirmed_by_service(
+            inputs.confirmed_product_rows
+        )
+        target_service_summary = self.summarize_confirmed_by_service(
+            inputs.demand_rows
+        )
         contract_cost_summary = self.summarize_contract_demand_by_service(
-            contract_demand_rows
+            inputs.contract_demand_rows
         )
         closed_cost_reference = target_service_summary or contract_cost_summary
         closed_cost_source = (
@@ -90,17 +220,21 @@ class BillingNormalizer:
             if target_service_summary
             else "getContractDemandCostList"
         )
-        discount_summary = self.summarize_discount_by_service(demand_discount_rows)
-        usage_summary = self.summarize_usage(daily_usage_rows)
-        network_usage_summary = self.summarize_network_usage(daily_usage_rows)
+        discount_summary = self.summarize_discount_by_service(
+            inputs.demand_discount_rows
+        )
+        usage_summary = self.summarize_usage(inputs.daily_usage_rows)
+        network_usage_summary = self.summarize_network_usage(
+            inputs.daily_usage_rows
+        )
         expected_cost_summary = self.summarize_expected_cost(
-            usage_rows=daily_usage_rows,
-            price_rows=price_rows,
+            usage_rows=inputs.daily_usage_rows,
+            price_rows=inputs.price_rows,
             days_in_month=days_in_month,
         )
         month_to_date_cost_summary = self.summarize_expected_cost(
-            usage_rows=month_to_date_usage_rows,
-            price_rows=price_rows,
+            usage_rows=inputs.month_to_date_usage_rows,
+            price_rows=inputs.price_rows,
             days_in_month=days_in_month,
         )
 
@@ -114,19 +248,52 @@ class BillingNormalizer:
         confirmed_use_total = sum(
             row["use_amount"] for row in target_service_summary
         )
-        expected_total = sum(row["expected_amount"] for row in verified_expected_rows)
+        expected_total = sum(
+            row["expected_amount"] for row in verified_expected_rows
+        )
         expected_total_all = sum(
             row["expected_amount"] for row in expected_cost_summary
         )
-        unverified_expected_amount = expected_total_all - expected_total
+        return _BillingSummaries(
+            service_summary=service_summary,
+            target_service_summary=target_service_summary,
+            contract_cost_summary=contract_cost_summary,
+            closed_cost_reference=closed_cost_reference,
+            closed_cost_source=closed_cost_source,
+            discount_summary=discount_summary,
+            usage_summary=usage_summary,
+            network_usage_summary=network_usage_summary,
+            expected_cost_summary=expected_cost_summary,
+            month_to_date_cost_summary=month_to_date_cost_summary,
+            expected_by_service=expected_by_service,
+            month_to_date_by_service=month_to_date_by_service,
+            confirmed_use_total=confirmed_use_total,
+            expected_total=expected_total,
+            expected_total_all=expected_total_all,
+            unverified_expected_amount=expected_total_all - expected_total,
+        )
+
+    def _compare_confirmed_and_estimated(
+        self,
+        summaries: _BillingSummaries,
+        *,
+        comparison_enabled: bool,
+        comparison_input_errors: List[Dict[str, Any]],
+    ) -> _BillingComparison:
+        """검증된 예상 금액만 확정 금액과 비교해 신뢰도 상태를 보존한다."""
+
         calculation_status_counts = dict(Counter(
             row.get("calculation_status") or "UNKNOWN"
-            for row in expected_cost_summary
+            for row in summaries.expected_cost_summary
         ))
         has_unverified_expected = any(
             status != "OK" for status in calculation_status_counts
         )
-        if comparison_enabled and not expected_cost_summary and confirmed_use_total != 0:
+        if (
+            comparison_enabled
+            and not summaries.expected_cost_summary
+            and summaries.confirmed_use_total != 0
+        ):
             has_unverified_expected = True
 
         if not comparison_enabled:
@@ -140,38 +307,68 @@ class BillingNormalizer:
 
         comparison_summary = (
             self.compare_confirmed_and_expected(
-                confirmed_summary=target_service_summary,
-                expected_summary=expected_by_service,
+                confirmed_summary=summaries.target_service_summary,
+                expected_summary=summaries.expected_by_service,
             )
             if comparison_status == "OK" else []
         )
         diff_amount: Optional[float] = None
         diff_rate: Optional[float] = None
         if comparison_status == "OK":
-            diff_amount = round(expected_total - confirmed_use_total, 2)
-            diff_rate = self.safe_rate(diff_amount, confirmed_use_total)
+            diff_amount = round(
+                summaries.expected_total - summaries.confirmed_use_total,
+                2,
+            )
+            diff_rate = self.safe_rate(
+                diff_amount,
+                summaries.confirmed_use_total,
+            )
+        return _BillingComparison(
+            comparison_status=comparison_status,
+            calculation_status_counts=calculation_status_counts,
+            comparison_summary=comparison_summary,
+            diff_amount=diff_amount,
+            diff_rate=diff_rate,
+        )
+
+    def _build_usage_estimates(
+        self,
+        inputs: _BillingInputs,
+        summaries: _BillingSummaries,
+        *,
+        billing_month: str,
+        days_in_month: int,
+        report_period: Dict[str, Any],
+        calculated_at: Optional[str],
+    ) -> _BillingEstimates:
+        """기간·월 누적·월말 추정치를 기존 fallback 우선순위로 구성한다."""
 
         confirmed_month = str(
-            raw_meta.get("confirmed_demand_month")
+            inputs.raw_meta.get("confirmed_demand_month")
             or report_period.get("confirmed_demand_month")
             or billing_month
         )
         invoice_summary = self.summarize_confirmed_invoice(
-            confirmed_demand_rows, confirmed_month, calculated_at
+            inputs.confirmed_demand_rows,
+            confirmed_month,
+            calculated_at,
         )
         requested_start, requested_end = self.report_period_dates(
             report_period, billing_month
         )
         local_period_estimate = self.build_estimate_fact(
             "PERIOD_ESTIMATE", requested_start, requested_end,
-            self.usage_coverage(daily_usage_rows), expected_cost_summary,
+            self.usage_coverage(inputs.daily_usage_rows),
+            summaries.expected_cost_summary,
             calculated_at,
         )
         month_to_date_start = (
             self._parse_api_date(report_period.get("month_to_date_start"))
             or self.month_start_date(billing_month)
         )
-        month_to_date_coverage = self.usage_coverage(month_to_date_usage_rows)
+        month_to_date_coverage = self.usage_coverage(
+            inputs.month_to_date_usage_rows
+        )
         requested_month_to_date_end = self._parse_api_date(
             report_period.get("month_to_date_end")
         )
@@ -182,16 +379,18 @@ class BillingNormalizer:
         )
         local_month_to_date_estimate = self.build_estimate_fact(
             "MONTH_TO_DATE_ESTIMATE", month_to_date_start, month_to_date_end,
-            month_to_date_coverage, month_to_date_cost_summary, calculated_at,
+            month_to_date_coverage,
+            summaries.month_to_date_cost_summary,
+            calculated_at,
         )
         target_month_start, target_month_end = self.month_bounds(billing_month)
         target_month_closed = bool(
             report_period.get("target_month_closed", False)
         )
         calculated_date = self._parse_api_date(calculated_at)
-        ncp_write_date = self.latest_write_date(demand_rows)
+        ncp_write_date = self.latest_write_date(inputs.demand_rows)
         all_ncp_rows_fresh = self.all_rows_written_on_or_after(
-            demand_rows,
+            inputs.demand_rows,
             month_to_date_end,
         )
         cutoff_age_days = (
@@ -200,7 +399,7 @@ class BillingNormalizer:
             else None
         )
         ncp_current_eligible = bool(
-            target_service_summary
+            summaries.target_service_summary
             and not target_month_closed
             and cutoff_age_days is not None
             and 0 <= cutoff_age_days <= 1
@@ -213,17 +412,18 @@ class BillingNormalizer:
             and requested_end == target_month_end
         )
 
-        if full_closed_month and closed_cost_reference:
+        # 확정 월, 최신 NCP 금액, 로컬 계산 순서가 신뢰도 표시를 결정한다.
+        if full_closed_month and summaries.closed_cost_reference:
             period_estimate = self.build_ncp_usage_fact(
                 "PERIOD_ESTIMATE",
                 requested_start,
                 requested_end,
                 requested_start,
                 requested_end,
-                closed_cost_reference,
+                summaries.closed_cost_reference,
                 calculated_at,
                 closed_month=True,
-                source_api=closed_cost_source,
+                source_api=summaries.closed_cost_source,
             )
         elif (
             not target_month_closed
@@ -248,24 +448,24 @@ class BillingNormalizer:
         ):
             month_to_date_estimate = self.apply_ncp_current_fallback(
                 local_month_to_date_estimate,
-                target_service_summary,
+                summaries.target_service_summary,
                 ncp_write_date,
             )
         else:
             month_to_date_estimate = local_month_to_date_estimate
 
         projected_cost_summary: List[Dict[str, Any]] = []
-        if not target_month_closed and month_to_date_usage_rows:
+        if not target_month_closed and inputs.month_to_date_usage_rows:
             projected_usage_rows = self.project_usage_to_month_end(
-                month_to_date_usage_rows,
+                inputs.month_to_date_usage_rows,
                 target_month_start,
                 month_to_date_end,
                 target_month_end,
-                price_rows=price_rows,
+                price_rows=inputs.price_rows,
             )
             projected_cost_summary = self.summarize_expected_cost(
                 usage_rows=projected_usage_rows,
-                price_rows=price_rows,
+                price_rows=inputs.price_rows,
                 days_in_month=days_in_month,
             )
         month_end_projection = self.build_month_end_projection(
@@ -273,24 +473,24 @@ class BillingNormalizer:
             target_month_closed,
             month_to_date_estimate,
             calculated_at,
-            current_cost_rows=month_to_date_cost_summary,
+            current_cost_rows=summaries.month_to_date_cost_summary,
             projected_cost_rows=projected_cost_summary,
             ncp_service_summary=(
-                target_service_summary
+                summaries.target_service_summary
                 if ncp_current_eligible
-                else closed_cost_reference
+                else summaries.closed_cost_reference
                 if target_month_closed and not full_closed_month
                 else []
             ),
             ncp_reference_source=(
                 "getProductDemandCostList"
                 if ncp_current_eligible
-                else closed_cost_source
+                else summaries.closed_cost_source
             ),
         )
         confirmed_total = self.first_present(
             invoice_summary.get("total_amount"),
-            sum(row["amount"] for row in service_summary),
+            sum(row["amount"] for row in summaries.service_summary),
             default=0.0,
         )
         cost_facts = [invoice_summary]
@@ -300,6 +500,30 @@ class BillingNormalizer:
             cost_facts.append(month_to_date_estimate)
         if month_end_projection.get("status") != "NOT_APPLICABLE":
             cost_facts.append(month_end_projection)
+        return _BillingEstimates(
+            confirmed_month=confirmed_month,
+            invoice_summary=invoice_summary,
+            period_estimate=period_estimate,
+            month_to_date_estimate=month_to_date_estimate,
+            projected_cost_summary=projected_cost_summary,
+            month_end_projection=month_end_projection,
+            confirmed_total=confirmed_total,
+            cost_facts=cost_facts,
+        )
+
+    def _summarize_organization_accounts(
+        self,
+        raw_data: Dict[str, Any],
+        raw_meta: Dict[str, Any],
+        *,
+        billing_month: str,
+        use_end_date: Optional[str],
+        comparison_enabled: bool,
+        report_period: Dict[str, Any],
+        calculated_at: Optional[str],
+        include_account_breakdown: bool,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Organization 범위일 때만 기존 계정별 정규화를 재사용한다."""
 
         organization = self.as_dict(raw_meta.get("organization"))
         account_costs = (
@@ -311,61 +535,94 @@ class BillingNormalizer:
             and organization.get("scope") == "ORGANIZATION"
             else []
         )
+        return organization, account_costs
+
+    def _assemble_normalized_payload(
+        self,
+        *,
+        billing_month: str,
+        days_in_month: int,
+        inputs: _BillingInputs,
+        summaries: _BillingSummaries,
+        comparison: _BillingComparison,
+        estimates: _BillingEstimates,
+        organization: Dict[str, Any],
+        account_costs: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """금액 기준과 키 순서를 유지해 기존 공개 payload를 조립한다."""
 
         return {
             "summary": {
                 "billing_month": billing_month,
-                "confirmed_billing_month": confirmed_month,
+                "confirmed_billing_month": estimates.confirmed_month,
                 "days_in_month": days_in_month,
-                "confirmed_total_amount": round(self.to_float(confirmed_total), 2),
-                "confirmed_use_total_amount": round(confirmed_use_total, 2),
-                "comparison_base_total_amount": round(confirmed_use_total, 2),
+                "confirmed_total_amount": round(
+                    self.to_float(estimates.confirmed_total), 2
+                ),
+                "confirmed_use_total_amount": round(
+                    summaries.confirmed_use_total, 2
+                ),
+                "comparison_base_total_amount": round(
+                    summaries.confirmed_use_total, 2
+                ),
                 "comparison_basis": "PRE_DISCOUNT_USE_AMOUNT",
-                "expected_total_amount": round(expected_total, 2),
-                "expected_total_amount_all": round(expected_total_all, 2),
-                "month_to_date_expected_amount": month_to_date_estimate.get("total_amount"),
-                "month_end_projection_amount": month_end_projection.get("total_amount"),
-                "unverified_expected_amount": round(unverified_expected_amount, 2),
-                "diff_amount": diff_amount,
-                "diff_rate": diff_rate,
-                "comparison_status": comparison_status,
-                "calculation_status_counts": calculation_status_counts,
-                "service_count": len(service_summary),
-                "usage_summary_count": len(usage_summary),
-                "network_usage_count": len(network_usage_summary),
-                "expected_cost_count": len(expected_cost_summary),
-                "discount_count": len(discount_rows),
-                "collection_error_count": len(collection_errors),
-                "collection_warning_count": len(collection_warnings),
-                "comparison_input_error_count": len(comparison_input_errors),
+                "expected_total_amount": round(summaries.expected_total, 2),
+                "expected_total_amount_all": round(
+                    summaries.expected_total_all, 2
+                ),
+                "month_to_date_expected_amount": (
+                    estimates.month_to_date_estimate.get("total_amount")
+                ),
+                "month_end_projection_amount": (
+                    estimates.month_end_projection.get("total_amount")
+                ),
+                "unverified_expected_amount": round(
+                    summaries.unverified_expected_amount, 2
+                ),
+                "diff_amount": comparison.diff_amount,
+                "diff_rate": comparison.diff_rate,
+                "comparison_status": comparison.comparison_status,
+                "calculation_status_counts": (
+                    comparison.calculation_status_counts
+                ),
+                "service_count": len(summaries.service_summary),
+                "usage_summary_count": len(summaries.usage_summary),
+                "network_usage_count": len(summaries.network_usage_summary),
+                "expected_cost_count": len(summaries.expected_cost_summary),
+                "discount_count": len(inputs.discount_rows),
+                "collection_error_count": len(inputs.collection_errors),
+                "collection_warning_count": len(inputs.collection_warnings),
+                "comparison_input_error_count": len(
+                    inputs.comparison_input_errors
+                ),
             },
-            "service_summary": service_summary,
-            "target_service_summary": target_service_summary,
-            "discount_summary": discount_summary,
-            "usage_summary": usage_summary,
-            "network_usage_summary": network_usage_summary,
-            "expected_cost_summary": expected_cost_summary,
-            "month_to_date_cost_summary": month_to_date_cost_summary,
-            "projected_cost_summary": projected_cost_summary,
-            "expected_by_service": expected_by_service,
-            "month_to_date_by_service": month_to_date_by_service,
-            "comparison_summary": comparison_summary,
-            "discount_rows": discount_rows,
-            "demand_cost_rows": demand_rows,
-            "contract_demand_cost_rows": contract_demand_rows,
-            "contract_cost_summary": contract_cost_summary,
-            "confirmed_demand_cost_rows": confirmed_demand_rows,
-            "demand_discount_rows": demand_discount_rows,
-            "daily_usage_rows": daily_usage_rows,
-            "month_to_date_usage_rows": month_to_date_usage_rows,
-            "price_rows": price_rows,
-            "collection_errors": collection_errors,
-            "collection_warnings": collection_warnings,
-            "invoice_summary": invoice_summary,
-            "period_estimate": period_estimate,
-            "month_to_date_estimate": month_to_date_estimate,
-            "month_end_projection": month_end_projection,
-            "cost_facts": cost_facts,
+            "service_summary": summaries.service_summary,
+            "target_service_summary": summaries.target_service_summary,
+            "discount_summary": summaries.discount_summary,
+            "usage_summary": summaries.usage_summary,
+            "network_usage_summary": summaries.network_usage_summary,
+            "expected_cost_summary": summaries.expected_cost_summary,
+            "month_to_date_cost_summary": summaries.month_to_date_cost_summary,
+            "projected_cost_summary": estimates.projected_cost_summary,
+            "expected_by_service": summaries.expected_by_service,
+            "month_to_date_by_service": summaries.month_to_date_by_service,
+            "comparison_summary": comparison.comparison_summary,
+            "discount_rows": inputs.discount_rows,
+            "demand_cost_rows": inputs.demand_rows,
+            "contract_demand_cost_rows": inputs.contract_demand_rows,
+            "contract_cost_summary": summaries.contract_cost_summary,
+            "confirmed_demand_cost_rows": inputs.confirmed_demand_rows,
+            "demand_discount_rows": inputs.demand_discount_rows,
+            "daily_usage_rows": inputs.daily_usage_rows,
+            "month_to_date_usage_rows": inputs.month_to_date_usage_rows,
+            "price_rows": inputs.price_rows,
+            "collection_errors": inputs.collection_errors,
+            "collection_warnings": inputs.collection_warnings,
+            "invoice_summary": estimates.invoice_summary,
+            "period_estimate": estimates.period_estimate,
+            "month_to_date_estimate": estimates.month_to_date_estimate,
+            "month_end_projection": estimates.month_end_projection,
+            "cost_facts": estimates.cost_facts,
             "organization": organization,
             "account_costs": account_costs,
         }

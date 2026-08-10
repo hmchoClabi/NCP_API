@@ -6,264 +6,19 @@ import numbers
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from . import _infrastructure_catalog as infrastructure_catalog
+
 
 class InfrastructureNormalizer:
-    COMMON_FIELDS = (
-        "category",
-        "category_label",
-        "service_name",
-        "resource_type",
-        "resource_id",
-        "resource_name",
-        "status",
-        "region_code",
-        "zone_code",
-        "platform",
-        "create_time",
-        "details",
-    )
-    CATEGORY_LABELS = {
-        "SERVER": "서버",
-        "BLOCK_STORAGE": "블록 스토리지",
-        "LOAD_BALANCER": "로드밸런서",
-        "TARGET_GROUP": "LB Target Group",
-        "NAS": "NAS",
-        "CLOUD_DB": "Cloud DB",
-        "KUBERNETES": "Kubernetes",
-        "CDN": "CDN",
-        "OBJECT_STORAGE": "Object Storage",
-        "VPC": "VPC",
-        "SUBNET": "Subnet",
-        "NAT_GATEWAY": "NAT Gateway",
-        "PUBLIC_IP": "Public IP",
-        "VPC_PEERING": "VPC Peering",
-        "VIRTUAL_PRIVATE_GATEWAY": "Virtual Private Gateway",
-        "AUTO_SCALING": "Auto Scaling",
-        "GLOBAL_EDGE": "Global Edge",
-        "GLOBAL_DNS": "Global DNS",
-        "GLOBAL_TRAFFIC_MANAGER": "Global Traffic Manager",
-        "API_GATEWAY": "API Gateway",
-        "CERTIFICATE": "Certificate",
-        "BLOCK_STORAGE_SNAPSHOT": "Block Storage Snapshot",
-        "SERVER_IMAGE": "Server Image",
-        "BACKUP": "Backup",
-        "ARCHIVE_STORAGE": "Archive Storage",
-        "SEARCH_ENGINE": "Search Engine Service",
-        "DATA_STREAMING": "Cloud Data Streaming Service",
-        "CLOUD_HADOOP": "Cloud Hadoop",
-        "DATA_STREAM": "Data Stream",
-        "CLOUD_FUNCTIONS": "Cloud Functions",
-        "CONTAINER_REGISTRY": "Container Registry",
-        "SECURITY_SERVICE": "Security Service",
-        "IPSEC_VPN": "IPsec VPN",
-        "CLOUD_CONNECT": "Cloud Connect",
-    }
-    CATEGORY_ORDER = {
-        category: index
-        for index, category in enumerate(CATEGORY_LABELS)
-    }
-    CATEGORY_ALIASES = {
-        **{category: category for category in CATEGORY_LABELS},
-        "CDB": "CLOUD_DB",
-        "NKS": "KUBERNETES",
-        "LB": "LOAD_BALANCER",
-        "NATGW": "NAT_GATEWAY",
-        "VPCPEERING": "VPC_PEERING",
-        "VGW": "VIRTUAL_PRIVATE_GATEWAY",
-        "AUTOSCALING": "AUTO_SCALING",
-        "GTM": "GLOBAL_TRAFFIC_MANAGER",
-        "APIGW": "API_GATEWAY",
-        "SNAPSHOT": "BLOCK_STORAGE_SNAPSHOT",
-        "IPSECVPN": "IPSEC_VPN",
-        "CLOUDCONNECT": "CLOUD_CONNECT",
-    }
-
-    _SENSITIVE_KEY_FRAGMENTS = (
-        "accesskey",
-        "apikey",
-        "credential",
-        "endpoint",
-        "login",
-        "password",
-        "privatekey",
-        "raw",
-        "secret",
-        "signature",
-        "token",
-    )
-    _EXCLUDED_RESOURCE_MARKERS = (
-        "ALARM",
-        "EVENT",
-        "IAM",
-        "POLICY",
-        "ROLE",
-        "RULE",
-        "SUBACCOUNT",
-        "USER",
-    )
-
-    _RESOURCE_MANAGER_PRODUCTS = {
-        "SERVER": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
-        "BLOCK_STORAGE": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
-        "LOAD_BALANCER": frozenset(
-            {"LOADBALANCER", "VPCLOADBALANCER", "VLOADBALANCER"}
-        ),
-        "TARGET_GROUP": frozenset(),
-        "NAS": frozenset({"NAS", "VPCNAS", "VNAS"}),
-        "CLOUD_DB": frozenset(
-            {
-                "CLOUDDB",
-                "CDBSERVERLESS",
-                "CLOUDDBFORCACHE",
-                "CLOUDDBFORMONGODB",
-                "CLOUDDBFORMSSQL",
-                "CLOUDDBFORMYSQL",
-                "CLOUDDBFORPOSTGRESQL",
-                "CLOUDDBFORREDIS",
-                "VPCCLOUDDBFORCACHE",
-                "VPCCLOUDDBFORMONGODB",
-                "VPCCLOUDDBFORMSSQL",
-                "VPCCLOUDDBFORMYSQL",
-                "VPCCLOUDDBFORPOSTGRESQL",
-                "VPCCLOUDDBFORREDIS",
-                "VCACHE",
-                "VMONGODB",
-                "VMSSQL",
-                "VMYSQL",
-                "VPOSTGRESQL",
-            }
-        ),
-        "KUBERNETES": frozenset(
-            {
-                "KUBERNETESSERVICE",
-                "NCLOUDKUBERNETESSERVICE",
-                "NKS",
-                "VPCKUBERNETESSERVICE",
-            }
-        ),
-        "CDN": frozenset({"CDN", "CDNPLUS", "GCDN", "GLOBALCDN"}),
-        "OBJECT_STORAGE": frozenset({"OBJECTSTORAGE"}),
-        "VPC": frozenset({"VPC"}),
-        "SUBNET": frozenset({"VPC"}),
-        "NAT_GATEWAY": frozenset({"VPC"}),
-        "PUBLIC_IP": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
-        "VPC_PEERING": frozenset({"VPC"}),
-        "VIRTUAL_PRIVATE_GATEWAY": frozenset({"VPC"}),
-        "AUTO_SCALING": frozenset({"AUTOSCALING", "VPCAUTOSCALING"}),
-        "GLOBAL_EDGE": frozenset({"GLOBALEDGE"}),
-        "GLOBAL_DNS": frozenset({"GLOBALDNS"}),
-        "GLOBAL_TRAFFIC_MANAGER": frozenset({"GLOBALTRAFFICMANAGER"}),
-        "API_GATEWAY": frozenset({"APIGATEWAY"}),
-        "CERTIFICATE": frozenset({"CERTIFICATEMANAGER"}),
-        "BLOCK_STORAGE_SNAPSHOT": frozenset(
-            {"SERVER", "VPCSERVER", "VSERVER"}
-        ),
-        "SERVER_IMAGE": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
-        "BACKUP": frozenset({"BACKUP", "VPCBACKUP"}),
-        "ARCHIVE_STORAGE": frozenset({"ARCHIVESTORAGE"}),
-        "SEARCH_ENGINE": frozenset({"SEARCHENGINE", "VPCSEARCHENGINE"}),
-        "DATA_STREAMING": frozenset({"CLOUDDATASTREAMINGSERVICE"}),
-        "CLOUD_HADOOP": frozenset({"CLOUDHADOOP", "VPCCLOUDHADOOP"}),
-        "DATA_STREAM": frozenset({"DATASTREAM", "VPCDATASTREAM"}),
-        "CLOUD_FUNCTIONS": frozenset({"CLOUDFUNCTIONS", "VPCCLOUDFUNCTIONS"}),
-        "CONTAINER_REGISTRY": frozenset({"CONTAINERREGISTRY"}),
-        "SECURITY_SERVICE": frozenset(
-            {"SECURITYMONITORING", "VPCSECURITYMONITORING"}
-        ),
-        "IPSEC_VPN": frozenset({"IPSECVPN", "VPCIPSECVPN"}),
-        "CLOUD_CONNECT": frozenset({"CLOUDCONNECT", "VPCCLOUDCONNECT"}),
-    }
-    _RESOURCE_MANAGER_TYPES = {
-        "SERVER": frozenset(
-            {"SERVER", "SERVERINSTANCE", "VSERVER", "VSERVERINSTANCE"}
-        ),
-        "BLOCK_STORAGE": frozenset(
-            {"BLOCKSTORAGE", "BLOCKSTORAGEINSTANCE", "STORAGE"}
-        ),
-        "LOAD_BALANCER": frozenset(
-            {"INSTANCE", "LOADBALANCER", "LOADBALANCERINSTANCE"}
-        ),
-        "TARGET_GROUP": frozenset(),
-        "NAS": frozenset(
-            {"NAS", "NASVOLUME", "NASVOLUMEINSTANCE", "VOLUME"}
-        ),
-        "CLOUD_DB": frozenset(
-            {
-                "CLOUDCACHEINSTANCE",
-                "CLOUDDBINSTANCE",
-                "CLOUDMONGODBINSTANCE",
-                "CLOUDMSSQLINSTANCE",
-                "CLOUDMYSQLINSTANCE",
-                "CLOUDPOSTGRESQLINSTANCE",
-                "SERVICE",
-            }
-        ),
-        "KUBERNETES": frozenset(
-            {"CLUSTER", "KUBERNETESCLUSTER", "NKSCLUSTER"}
-        ),
-        "CDN": frozenset(
-            {
-                "CDNINSTANCE",
-                "CDNPLUSINSTANCE",
-                "GLOBALCDNINSTANCE",
-                "SERVICE",
-            }
-        ),
-        "OBJECT_STORAGE": frozenset({"BUCKET", "OBJECTSTORAGEBUCKET"}),
-        "VPC": frozenset({"VPC"}),
-        "SUBNET": frozenset({"SUBNET"}),
-        "NAT_GATEWAY": frozenset({"NATGATEWAY"}),
-        "PUBLIC_IP": frozenset({"PUBLICIP"}),
-        "VPC_PEERING": frozenset({"VPCPEERING"}),
-        "VIRTUAL_PRIVATE_GATEWAY": frozenset({"VIRTUALPRIVATEGATEWAY"}),
-        "AUTO_SCALING": frozenset({"AUTOSCALINGGROUP"}),
-        "GLOBAL_EDGE": frozenset({"EDGE"}),
-        "GLOBAL_DNS": frozenset({"DOMAIN"}),
-        "GLOBAL_TRAFFIC_MANAGER": frozenset({"PROFILE"}),
-        "API_GATEWAY": frozenset({"API"}),
-        "CERTIFICATE": frozenset({"CERTIFICATE"}),
-        "BLOCK_STORAGE_SNAPSHOT": frozenset({"SNAPSHOT"}),
-        "SERVER_IMAGE": frozenset({"SERVERIMAGE"}),
-        "BACKUP": frozenset({"DBINSTANCE", "RESOURCE", "STORAGE"}),
-        "ARCHIVE_STORAGE": frozenset({"CONTAINER"}),
-        "SEARCH_ENGINE": frozenset({"CLUSTER"}),
-        "DATA_STREAMING": frozenset({"CLUSTER"}),
-        "CLOUD_HADOOP": frozenset({"CLUSTER"}),
-        "DATA_STREAM": frozenset({"TOPIC"}),
-        "CLOUD_FUNCTIONS": frozenset({"NAMESPACE"}),
-        "CONTAINER_REGISTRY": frozenset({"REGISTRY"}),
-        "SECURITY_SERVICE": frozenset({"AV", "DDOS", "IDS", "IPS", "WAF"}),
-        "IPSEC_VPN": frozenset({"IPSECVPNGATEWAY"}),
-        "CLOUD_CONNECT": frozenset({"CLOUDCONNECT"}),
-    }
-
-    _CDB_SPECS = {
-        "MYSQL": {
-            "prefix": "cloudMysql",
-            "service": "Cloud DB for MySQL",
-            "resource_type": "CloudMysqlInstance",
-        },
-        "POSTGRESQL": {
-            "prefix": "cloudPostgresql",
-            "service": "Cloud DB for PostgreSQL",
-            "resource_type": "CloudPostgresqlInstance",
-        },
-        "MSSQL": {
-            "prefix": "cloudMssql",
-            "service": "Cloud DB for MSSQL",
-            "resource_type": "CloudMssqlInstance",
-        },
-        "MONGODB": {
-            "prefix": "cloudMongoDb",
-            "service": "Cloud DB for MongoDB",
-            "resource_type": "CloudMongoDbInstance",
-        },
-        "CACHE": {
-            "prefix": "cloudCache",
-            "service": "Cloud DB for Cache",
-            "resource_type": "CloudCacheInstance",
-        },
-    }
+    COMMON_FIELDS = infrastructure_catalog.COMMON_FIELDS
+    CATEGORY_LABELS = infrastructure_catalog.CATEGORY_LABELS
+    CATEGORY_ORDER = infrastructure_catalog.CATEGORY_ORDER
+    CATEGORY_ALIASES = infrastructure_catalog.CATEGORY_ALIASES
+    _SENSITIVE_KEY_FRAGMENTS = infrastructure_catalog._SENSITIVE_KEY_FRAGMENTS
+    _EXCLUDED_RESOURCE_MARKERS = infrastructure_catalog._EXCLUDED_RESOURCE_MARKERS
+    _RESOURCE_MANAGER_PRODUCTS = infrastructure_catalog._RESOURCE_MANAGER_PRODUCTS
+    _RESOURCE_MANAGER_TYPES = infrastructure_catalog._RESOURCE_MANAGER_TYPES
+    _CDB_SPECS = infrastructure_catalog._CDB_SPECS
 
     def normalize_servers(
         self,
@@ -547,18 +302,64 @@ class InfrastructureNormalizer:
             Mapping[str, Iterable[Mapping[str, Any]]]
         ] = None,
     ) -> List[Dict[str, Any]]:
+        (
+            normalized_groups,
+            groups_by_load_balancer,
+            normalized_targets_by_group,
+            group_health,
+        ) = self._index_load_balancer_responses(
+            target_groups,
+            targets_by_group,
+        )
+
+        # 기존 결과 계약대로 LB 레코드를 먼저, Target Group을 나중에 배치한다.
+        result = [
+            self._normalize_load_balancer_record(
+                load_balancer,
+                groups_by_load_balancer,
+                normalized_targets_by_group,
+                group_health,
+            )
+            for load_balancer in self._dict_items(load_balancers)
+        ]
+        for group in normalized_groups:
+            normalized_group = self._normalize_target_group_record(
+                group,
+                group_health,
+            )
+            if normalized_group is not None:
+                result.append(normalized_group)
+        return result
+
+    def _index_load_balancer_responses(
+        self,
+        target_groups: Iterable[Mapping[str, Any]],
+        targets_by_group: Optional[
+            Mapping[str, Iterable[Mapping[str, Any]]]
+        ],
+    ) -> tuple[
+        List[Dict[str, Any]],
+        Dict[str, List[Dict[str, Any]]],
+        Mapping[str, Iterable[Mapping[str, Any]]],
+        Dict[str, Dict[str, Any]],
+    ]:
+        """공급자 ID를 기준으로 Target Group과 상태 응답을 인덱싱한다."""
+
         normalized_groups = self._dict_items(target_groups)
-        group_map: Dict[str, List[Dict[str, Any]]] = {}
+        groups_by_load_balancer: Dict[str, List[Dict[str, Any]]] = {}
         for group in normalized_groups:
             load_balancer_no = self._string(
                 group.get("loadBalancerInstanceNo")
             )
             if load_balancer_no:
-                group_map.setdefault(load_balancer_no, []).append(group)
+                groups_by_load_balancer.setdefault(
+                    load_balancer_no,
+                    [],
+                ).append(group)
+
         normalized_targets_by_group = (
             targets_by_group if isinstance(targets_by_group, Mapping) else {}
         )
-
         group_health = {
             str(group.get("targetGroupNo")): self._target_group_health(
                 group,
@@ -567,282 +368,334 @@ class InfrastructureNormalizer:
             for group in normalized_groups
             if self._string(group.get("targetGroupNo"))
         }
+        return (
+            normalized_groups,
+            groups_by_load_balancer,
+            normalized_targets_by_group,
+            group_health,
+        )
 
-        result = []
-        for load_balancer in self._dict_items(load_balancers):
-            load_balancer_no = self._string(
-                load_balancer.get("loadBalancerInstanceNo")
-            )
-            associated_groups = group_map.get(load_balancer_no or "", [])
-            target_group_nos = self._unique_values(
-                group.get("targetGroupNo") for group in associated_groups
-            )
-            group_target_server_instance_nos = []
-            listed_target_server_instance_nos = []
-            for group in associated_groups:
-                target_type = self._code_value(group.get("targetType"))
-                if str(target_type or "").upper() != "VSVR":
-                    continue
-                group_target_server_instance_nos.extend(
-                    self._as_list(group.get("targetNoList"))
-                )
-                group_no = self._string(group.get("targetGroupNo"))
-                target_items = self._dict_items(
-                    normalized_targets_by_group.get(group_no or "", [])
-                )
-                listed_target_server_instance_nos.extend(
-                    target.get("targetNo") for target in target_items
-                )
-            group_target_server_instance_nos = self._unique_values(
-                group_target_server_instance_nos
-            )
-            listed_target_server_instance_nos = self._unique_values(
-                listed_target_server_instance_nos
-            )
-            target_server_instance_nos = self._unique_values(
-                [
-                    *group_target_server_instance_nos,
-                    *listed_target_server_instance_nos,
-                ]
-            )
-            health_summaries = [
-                group_health[str(group.get("targetGroupNo"))]
-                for group in associated_groups
-                if str(group.get("targetGroupNo")) in group_health
-            ]
-            health_snapshot_available = all(
-                summary["health_snapshot_available"]
-                for summary in health_summaries
-            ) if health_summaries else True
-            subnet_nos = self._unique_values(
-                load_balancer.get("subnetNoList") or []
-            )
-            relation_specs = [
-                (
-                    "BELONGS_TO",
-                    "VPC",
-                    load_balancer.get("vpcNo"),
-                    "vpcNo",
-                )
-            ]
-            relation_specs.extend(
-                ("BELONGS_TO", "SUBNET", subnet_no, "subnetNoList[]")
-                for subnet_no in subnet_nos
-            )
-            relation_specs.extend(
-                (
-                    "USES",
-                    "TARGET_GROUP",
-                    target_group_no,
-                    "targetGroupList[].targetGroupNo",
-                )
-                for target_group_no in target_group_nos
-            )
-            relation_specs.extend(
-                (
-                    "ROUTES_TO",
-                    "SERVER",
-                    server_instance_no,
-                    "targetGroupList[].targetNoList[]",
-                )
-                for server_instance_no in group_target_server_instance_nos
-            )
-            relation_specs.extend(
-                (
-                    "ROUTES_TO",
-                    "SERVER",
-                    server_instance_no,
-                    "targetList[].targetNo",
-                )
-                for server_instance_no in listed_target_server_instance_nos
-            )
-            result.append(
-                self._resource(
-                    category="LOAD_BALANCER",
-                    service_name="Load Balancer",
-                    resource_type="LoadBalancerInstance",
-                    resource_id=load_balancer.get("loadBalancerInstanceNo"),
-                    resource_name=load_balancer.get("loadBalancerName"),
-                    status=load_balancer.get("loadBalancerInstanceStatusName")
-                    or self._code_name(
-                        load_balancer.get("loadBalancerInstanceStatus")
-                    ),
-                    region_code=load_balancer.get("regionCode"),
-                    zone_code=load_balancer.get("zoneCode"),
-                    platform="VPC",
-                    create_time=load_balancer.get("createDate"),
-                    details={
-                        "load_balancer_type": self._code_name(
-                            load_balancer.get("loadBalancerType")
-                            or load_balancer.get("loadBalancerTypeCode")
-                        ),
-                        "network_type": self._code_name(
-                            load_balancer.get("loadBalancerNetworkType")
-                            or load_balancer.get(
-                                "loadBalancerNetworkTypeCode"
-                            )
-                        ),
-                        "throughput_type": self._code_name(
-                            load_balancer.get("throughputType")
-                        ),
-                        "vpc_no": load_balancer.get("vpcNo"),
-                        "subnet_nos": subnet_nos,
-                        "load_balancer_instance_no": load_balancer_no,
-                        "ip_addresses": self._unique_values(
-                            load_balancer.get("loadBalancerIpList") or []
-                        ),
-                        "target_group_nos": target_group_nos,
-                        "target_group_count": len(target_group_nos),
-                        "target_health_snapshot_available": (
-                            health_snapshot_available
-                        ),
-                        "registered_target_count": sum(
-                            summary["registered_target_count"]
-                            for summary in health_summaries
-                        ),
-                        "ready_target_count": sum(
-                            summary["ready_target_count"]
-                            for summary in health_summaries
-                            if summary["health_snapshot_available"]
-                        ),
-                        "unready_target_count": sum(
-                            summary["unready_target_count"]
-                            for summary in health_summaries
-                            if summary["health_snapshot_available"]
-                        ),
-                        "unused_target_count": sum(
-                            summary["unused_target_count"]
-                            for summary in health_summaries
-                            if summary["health_snapshot_available"]
-                        ),
-                        "unknown_target_count": sum(
-                            summary["unknown_target_count"]
-                            for summary in health_summaries
-                            if summary["health_snapshot_available"]
-                        ),
-                        "target_server_instance_nos": (
-                            target_server_instance_nos
-                        ),
-                        "subnet_count": len(
-                            self._as_list(
-                                load_balancer.get("subnetNoList")
-                            )
-                        ),
-                        "idle_timeout_seconds": load_balancer.get(
-                            "idleTimeout"
-                        ),
-                        "explicit_relations": self._explicit_relations(
-                            *relation_specs
-                        ),
-                    },
-                )
-            )
+    def _normalize_load_balancer_record(
+        self,
+        load_balancer: Mapping[str, Any],
+        groups_by_load_balancer: Dict[str, List[Dict[str, Any]]],
+        targets_by_group: Mapping[
+            str,
+            Iterable[Mapping[str, Any]],
+        ],
+        group_health: Mapping[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """VPC Load Balancer 한 건과 공급자가 명시한 대상 정보를 정규화한다."""
 
-        for group in normalized_groups:
-            group_no = self._string(group.get("targetGroupNo"))
-            if not group_no:
-                continue
-            health = group_health[group_no]
+        load_balancer_no = self._string(
+            load_balancer.get("loadBalancerInstanceNo")
+        )
+        associated_groups = groups_by_load_balancer.get(
+            load_balancer_no or "",
+            [],
+        )
+        target_group_nos = self._unique_values(
+            group.get("targetGroupNo") for group in associated_groups
+        )
+        group_target_server_instance_nos = []
+        listed_target_server_instance_nos = []
+        for group in associated_groups:
             target_type = self._code_value(group.get("targetType"))
-            target_server_instance_nos = self._unique_values([
-                *(
-                    self._as_list(group.get("targetNoList"))
-                    if str(target_type or "").upper() == "VSVR"
-                    else []
-                ),
-                *(
-                    health["target_nos"]
-                    if str(target_type or "").upper() == "VSVR"
-                    else []
-                ),
-            ])
-            relation_specs = [
-                (
-                    "BELONGS_TO",
-                    "LOAD_BALANCER",
-                    group.get("loadBalancerInstanceNo"),
-                    "loadBalancerInstanceNo",
-                ),
-                (
-                    "BELONGS_TO",
-                    "VPC",
-                    group.get("vpcNo"),
-                    "vpcNo",
-                ),
+            if str(target_type or "").upper() != "VSVR":
+                continue
+            group_target_server_instance_nos.extend(
+                self._as_list(group.get("targetNoList"))
+            )
+            group_no = self._string(group.get("targetGroupNo"))
+            target_items = self._dict_items(
+                targets_by_group.get(group_no or "", [])
+            )
+            listed_target_server_instance_nos.extend(
+                target.get("targetNo") for target in target_items
+            )
+        group_target_server_instance_nos = self._unique_values(
+            group_target_server_instance_nos
+        )
+        listed_target_server_instance_nos = self._unique_values(
+            listed_target_server_instance_nos
+        )
+        target_server_instance_nos = self._unique_values(
+            [
+                *group_target_server_instance_nos,
+                *listed_target_server_instance_nos,
             ]
-            relation_specs.extend(
-                (
-                    "ROUTES_TO",
-                    "SERVER",
-                    server_instance_no,
-                    "targetList[].targetNo",
-                )
-                for server_instance_no in target_server_instance_nos
+        )
+        health_summaries = [
+            group_health[str(group.get("targetGroupNo"))]
+            for group in associated_groups
+            if str(group.get("targetGroupNo")) in group_health
+        ]
+        health_snapshot_available = all(
+            summary["health_snapshot_available"]
+            for summary in health_summaries
+        ) if health_summaries else True
+        subnet_nos = self._unique_values(
+            load_balancer.get("subnetNoList") or []
+        )
+        relation_specs = self._load_balancer_relation_specs(
+            load_balancer,
+            subnet_nos=subnet_nos,
+            target_group_nos=target_group_nos,
+            group_target_server_instance_nos=(
+                group_target_server_instance_nos
+            ),
+            listed_target_server_instance_nos=(
+                listed_target_server_instance_nos
+            ),
+        )
+        return self._resource(
+            category="LOAD_BALANCER",
+            service_name="Load Balancer",
+            resource_type="LoadBalancerInstance",
+            resource_id=load_balancer.get("loadBalancerInstanceNo"),
+            resource_name=load_balancer.get("loadBalancerName"),
+            status=load_balancer.get("loadBalancerInstanceStatusName")
+            or self._code_name(
+                load_balancer.get("loadBalancerInstanceStatus")
+            ),
+            region_code=load_balancer.get("regionCode"),
+            zone_code=load_balancer.get("zoneCode"),
+            platform="VPC",
+            create_time=load_balancer.get("createDate"),
+            details={
+                "load_balancer_type": self._code_name(
+                    load_balancer.get("loadBalancerType")
+                    or load_balancer.get("loadBalancerTypeCode")
+                ),
+                "network_type": self._code_name(
+                    load_balancer.get("loadBalancerNetworkType")
+                    or load_balancer.get("loadBalancerNetworkTypeCode")
+                ),
+                "throughput_type": self._code_name(
+                    load_balancer.get("throughputType")
+                ),
+                "vpc_no": load_balancer.get("vpcNo"),
+                "subnet_nos": subnet_nos,
+                "load_balancer_instance_no": load_balancer_no,
+                "ip_addresses": self._unique_values(
+                    load_balancer.get("loadBalancerIpList") or []
+                ),
+                "target_group_nos": target_group_nos,
+                "target_group_count": len(target_group_nos),
+                "target_health_snapshot_available": (
+                    health_snapshot_available
+                ),
+                "registered_target_count": sum(
+                    summary["registered_target_count"]
+                    for summary in health_summaries
+                ),
+                "ready_target_count": sum(
+                    summary["ready_target_count"]
+                    for summary in health_summaries
+                    if summary["health_snapshot_available"]
+                ),
+                "unready_target_count": sum(
+                    summary["unready_target_count"]
+                    for summary in health_summaries
+                    if summary["health_snapshot_available"]
+                ),
+                "unused_target_count": sum(
+                    summary["unused_target_count"]
+                    for summary in health_summaries
+                    if summary["health_snapshot_available"]
+                ),
+                "unknown_target_count": sum(
+                    summary["unknown_target_count"]
+                    for summary in health_summaries
+                    if summary["health_snapshot_available"]
+                ),
+                "target_server_instance_nos": (
+                    target_server_instance_nos
+                ),
+                "subnet_count": len(
+                    self._as_list(load_balancer.get("subnetNoList"))
+                ),
+                "idle_timeout_seconds": load_balancer.get("idleTimeout"),
+                "explicit_relations": self._explicit_relations(
+                    *relation_specs
+                ),
+            },
+        )
+
+    def _load_balancer_relation_specs(
+        self,
+        load_balancer: Mapping[str, Any],
+        *,
+        subnet_nos: Iterable[Any],
+        target_group_nos: Iterable[Any],
+        group_target_server_instance_nos: Iterable[Any],
+        listed_target_server_instance_nos: Iterable[Any],
+    ) -> List[tuple[str, str, Any, str]]:
+        """LB 응답에 명시된 식별자만 관계 근거로 변환한다."""
+
+        # 이름이나 IP가 같다는 이유로 관계를 추론하면 계정 간 오연결이 생길 수 있다.
+        relation_specs = [
+            (
+                "BELONGS_TO",
+                "VPC",
+                load_balancer.get("vpcNo"),
+                "vpcNo",
             )
-            status = "UNKNOWN"
-            if health["health_snapshot_available"]:
-                if health["unready_target_count"]:
-                    status = "UNREADY"
-                elif (
-                    health["unused_target_count"]
-                    or health["unknown_target_count"]
-                ):
-                    status = "PARTIAL"
-                elif health["registered_target_count"]:
-                    status = "READY"
-                else:
-                    status = "EMPTY"
-            result.append(
-                self._resource(
-                    category="TARGET_GROUP",
-                    service_name="Load Balancer",
-                    resource_type="TargetGroup",
-                    resource_id=group_no,
-                    resource_name=group.get("targetGroupName"),
-                    status=status,
-                    region_code=group.get("regionCode"),
-                    zone_code=None,
-                    platform="VPC",
-                    create_time=group.get("createDate"),
-                    details={
-                        "target_group_no": group_no,
-                        "load_balancer_instance_no": group.get(
-                            "loadBalancerInstanceNo"
-                        ),
-                        "vpc_no": group.get("vpcNo"),
-                        "protocol": self._code_name(
-                            group.get("targetGroupProtocolType")
-                        ),
-                        "port": group.get("targetGroupPort"),
-                        "target_type": target_type,
-                        "health_check_protocol": self._code_name(
-                            group.get("healthCheckProtocolType")
-                        ),
-                        "health_check_port": group.get("healthCheckPort"),
-                        "registered_target_count": (
-                            health["registered_target_count"]
-                        ),
-                        "ready_target_count": health["ready_target_count"],
-                        "unready_target_count": (
-                            health["unready_target_count"]
-                        ),
-                        "unused_target_count": health["unused_target_count"],
-                        "unknown_target_count": (
-                            health["unknown_target_count"]
-                        ),
-                        "health_snapshot_available": (
-                            health["health_snapshot_available"]
-                        ),
-                        "target_server_instance_nos": (
-                            target_server_instance_nos
-                        ),
-                        "explicit_relations": self._explicit_relations(
-                            *relation_specs
-                        ),
-                    },
-                )
+        ]
+        relation_specs.extend(
+            ("BELONGS_TO", "SUBNET", subnet_no, "subnetNoList[]")
+            for subnet_no in subnet_nos
+        )
+        relation_specs.extend(
+            (
+                "USES",
+                "TARGET_GROUP",
+                target_group_no,
+                "targetGroupList[].targetGroupNo",
             )
-        return result
+            for target_group_no in target_group_nos
+        )
+        relation_specs.extend(
+            (
+                "ROUTES_TO",
+                "SERVER",
+                server_instance_no,
+                "targetGroupList[].targetNoList[]",
+            )
+            for server_instance_no in group_target_server_instance_nos
+        )
+        relation_specs.extend(
+            (
+                "ROUTES_TO",
+                "SERVER",
+                server_instance_no,
+                "targetList[].targetNo",
+            )
+            for server_instance_no in listed_target_server_instance_nos
+        )
+        return relation_specs
+
+    def _normalize_target_group_record(
+        self,
+        group: Mapping[str, Any],
+        group_health: Mapping[str, Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Target Group 한 건과 명시된 VServer 대상 관계를 정규화한다."""
+
+        group_no = self._string(group.get("targetGroupNo"))
+        if not group_no:
+            return None
+        health = group_health[group_no]
+        target_type = self._code_value(group.get("targetType"))
+        target_server_instance_nos = self._unique_values([
+            *(
+                self._as_list(group.get("targetNoList"))
+                if str(target_type or "").upper() == "VSVR"
+                else []
+            ),
+            *(
+                health["target_nos"]
+                if str(target_type or "").upper() == "VSVR"
+                else []
+            ),
+        ])
+        relation_specs = self._target_group_relation_specs(
+            group,
+            target_server_instance_nos,
+        )
+        status = "UNKNOWN"
+        if health["health_snapshot_available"]:
+            if health["unready_target_count"]:
+                status = "UNREADY"
+            elif (
+                health["unused_target_count"]
+                or health["unknown_target_count"]
+            ):
+                status = "PARTIAL"
+            elif health["registered_target_count"]:
+                status = "READY"
+            else:
+                status = "EMPTY"
+        return self._resource(
+            category="TARGET_GROUP",
+            service_name="Load Balancer",
+            resource_type="TargetGroup",
+            resource_id=group_no,
+            resource_name=group.get("targetGroupName"),
+            status=status,
+            region_code=group.get("regionCode"),
+            zone_code=None,
+            platform="VPC",
+            create_time=group.get("createDate"),
+            details={
+                "target_group_no": group_no,
+                "load_balancer_instance_no": group.get(
+                    "loadBalancerInstanceNo"
+                ),
+                "vpc_no": group.get("vpcNo"),
+                "protocol": self._code_name(
+                    group.get("targetGroupProtocolType")
+                ),
+                "port": group.get("targetGroupPort"),
+                "target_type": target_type,
+                "health_check_protocol": self._code_name(
+                    group.get("healthCheckProtocolType")
+                ),
+                "health_check_port": group.get("healthCheckPort"),
+                "registered_target_count": (
+                    health["registered_target_count"]
+                ),
+                "ready_target_count": health["ready_target_count"],
+                "unready_target_count": (
+                    health["unready_target_count"]
+                ),
+                "unused_target_count": health["unused_target_count"],
+                "unknown_target_count": (
+                    health["unknown_target_count"]
+                ),
+                "health_snapshot_available": (
+                    health["health_snapshot_available"]
+                ),
+                "target_server_instance_nos": (
+                    target_server_instance_nos
+                ),
+                "explicit_relations": self._explicit_relations(
+                    *relation_specs
+                ),
+            },
+        )
+
+    def _target_group_relation_specs(
+        self,
+        group: Mapping[str, Any],
+        target_server_instance_nos: Iterable[Any],
+    ) -> List[tuple[str, str, Any, str]]:
+        """Target Group 응답의 명시 ID만 관계 근거로 변환한다."""
+
+        relation_specs = [
+            (
+                "BELONGS_TO",
+                "LOAD_BALANCER",
+                group.get("loadBalancerInstanceNo"),
+                "loadBalancerInstanceNo",
+            ),
+            (
+                "BELONGS_TO",
+                "VPC",
+                group.get("vpcNo"),
+                "vpcNo",
+            ),
+        ]
+        relation_specs.extend(
+            (
+                "ROUTES_TO",
+                "SERVER",
+                server_instance_no,
+                "targetList[].targetNo",
+            )
+            for server_instance_no in target_server_instance_nos
+        )
+        return relation_specs
 
     def _target_group_health(
         self,

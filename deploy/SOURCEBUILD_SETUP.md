@@ -131,6 +131,51 @@ The runtime project owns the full tests. Do not put the migration project in
 the routine runtime pipeline. Run it deliberately only when `database/schema`
 or the migration runner changes.
 
+## Start cloud builds from PowerShell
+
+The build API credential is separate from the report API credential and the
+NKS Container Registry pull credential. Store only these two entries in the
+ignored `deploy/private/.env.sourcebuild` file:
+
+```text
+NCP_SOURCEBUILD_ACCESS_KEY=...
+NCP_SOURCEBUILD_SECRET_KEY=...
+```
+
+Validate the saved credential and both project configurations without starting
+a build:
+
+```powershell
+.\deploy\scripts\run-sourcebuild.ps1 `
+  -ProjectId 53175 `
+  -ExpectedProjectName architect-report-runtime `
+  -WhatIf
+
+.\deploy\scripts\run-sourcebuild.ps1 `
+  -ProjectId 53205 `
+  -ExpectedProjectName architect-report-migration `
+  -WhatIf
+```
+
+After the reviewed commit is present on SourceCommit `master`, start the
+required projects. The script signs the official SourceBuild API request,
+tracks the exact returned build ID, stops on failure or timeout, and returns
+the final `build-N` tag without printing either credential.
+
+```powershell
+$runtimeBuild = .\deploy\scripts\run-sourcebuild.ps1 `
+  -ProjectId 53175 `
+  -ExpectedProjectName architect-report-runtime
+
+# Run this only for a schema release.
+$migrationBuild = .\deploy\scripts\run-sourcebuild.ps1 `
+  -ProjectId 53205 `
+  -ExpectedProjectName architect-report-migration
+```
+
+Do not substitute values from `~/.ncloud/configure`; that credential is used
+for the NKS/registry path and is not the SourceBuild API identity.
+
 ## Deploy cloud-built tags
 
 After the runtime SourceBuild project succeeds, copy its immutable `build-N`
@@ -138,16 +183,17 @@ tag and the full SourceCommit SHA. This command performs no Docker build:
 
 ```powershell
 $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
+$sourceRevision = (git rev-parse HEAD).Trim().ToLowerInvariant()
 .\deploy\scripts\deploy-sourcebuild-images.ps1 `
-  -RuntimeTag "build-1" `
-  -SourceRevision "FULL_40_CHARACTER_SOURCECOMMIT_SHA" `
+  -RuntimeTag $runtimeBuild.Tag `
+  -SourceRevision $sourceRevision `
   -Helm "C:\Tools\helm\helm.exe"
 ```
 
 For a schema release, build the migration image from the same commit and add:
 
 ```powershell
-  -EnableMigration -MigrationTag "build-1"
+  -EnableMigration -MigrationTag $migrationBuild.Tag
 ```
 
 The script rejects a revision that does not equal SourceCommit `master`, then

@@ -55,6 +55,8 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | Table | Purpose |
 | --- | --- |
 | `tenants` | Customer identity, Public/GOV environment and region |
+| `tenant_report_settings` | Per-customer report sections, resources and diagram options |
+| `tenant_branding` | Validated customer logo used by newly generated report snapshots |
 | `users` | Login identity and MFA state; passwords are hashes only |
 | `memberships` | Customer-scoped viewer/admin roles |
 | `platform_roles` | MSP and system-wide roles with environment scope |

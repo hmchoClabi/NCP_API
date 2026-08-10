@@ -2,7 +2,7 @@
 쿠버네티스 리소스 API 모듈
 Kubernetes 환경 제어 및 관리 기능에 대한 API를 RESTful 형태로 제공합니다.
 """
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 

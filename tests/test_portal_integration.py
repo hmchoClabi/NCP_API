@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 
+from app.report_branding import validate_customer_logo
 from database.config import DatabaseSettings
 from webapp.repository import PortalRepository
 from webapp.jobs import ReportJobRepository
@@ -150,6 +151,16 @@ class PortalIntegrationTests(unittest.TestCase):
                 },
                 admin_id,
             )
+            logo = validate_customer_logo(
+                b"\x89PNG\r\n\x1a\n"
+                + (13).to_bytes(4, "big")
+                + b"IHDR"
+                + (320).to_bytes(4, "big")
+                + (120).to_bytes(4, "big")
+                + b"\x08\x06\x00\x00\x00\x00\x00\x00\x00",
+                "image/png",
+            )
+            self.repository.update_tenant_logo(tenant_id, logo, admin_id)
             customer, credentials = self.repository.account_credentials(
                 account_id, cipher
             )
@@ -160,6 +171,7 @@ class PortalIntegrationTests(unittest.TestCase):
         self.assertFalse(
             customer.report_options.section_enabled("activity_history")
         )
+        self.assertEqual(customer.logo_data_uri, logo.data_uri)
         self.assertEqual(credentials.access_key, "PORTAL-ACCESS-KEY")
         self.assertEqual(credentials.secret_key, "PORTAL-SECRET-KEY")
 

@@ -7,7 +7,7 @@ Container Registry는 Docker Registry v2 스펙의 프라이빗 도커 컨테이
 Container Registry 서비스에서는 레지스트리와 도커 컨테이너 이미지 관리 기능에 대한 API를 RESTful 형태로 제공합니다.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 

@@ -13,6 +13,8 @@ from utils.credentials import NCPCredentials
 
 
 class CredentialProvider(Protocol):
+    """고객별 NCP 자격증명을 제공하는 객체의 공개 호환 계약."""
+
     def get_credentials(
         self,
         customer: CustomerProfile,

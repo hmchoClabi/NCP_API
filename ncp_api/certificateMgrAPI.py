@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 class CertificateMgrAPI(BaseNCPAPI):

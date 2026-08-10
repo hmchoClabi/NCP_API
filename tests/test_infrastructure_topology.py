@@ -397,7 +397,11 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
         hidden_section = self._topology_section(hidden_html)
 
         self.assertIn("<svg", hidden_section)
+        self.assertIn('class="topology-boundary-icon"', hidden_section)
+        self.assertIn('class="topology-node-icon"', hidden_section)
+        self.assertIn('href="data:image/png;base64,', hidden_section)
         self.assertNotIn("<script", hidden_section)
+        self.assertNotIn("ncp/", hidden_section)
         self.assertIn("confidence", hidden_section)
         self.assertIn("details.subnet_no", hidden_section)
         for hidden_value in (

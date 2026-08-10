@@ -3,6 +3,69 @@
   gap: 18px;
 }
 
+.branding-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 22px;
+  align-items: center;
+}
+
+.branding-preview {
+  display: grid;
+  place-items: center;
+  min-height: 132px;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.branding-preview img {
+  display: block;
+  width: 100%;
+  height: 92px;
+  object-fit: contain;
+}
+
+.branding-preview span {
+  color: var(--blue);
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: -.06em;
+}
+
+.branding-controls,
+.branding-upload {
+  display: grid;
+  gap: 11px;
+}
+
+.branding-upload {
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+.branding-upload label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.branding-upload input[type="file"] {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cdd9e7;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.branding-controls > small {
+  color: var(--muted);
+}
+
 .report-settings-form fieldset {
   margin: 0;
   padding: 17px;
@@ -78,6 +141,11 @@
 
 @media (max-width: 720px) {
   .option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .branding-layout,
+  .branding-upload {
     grid-template-columns: 1fr;
   }
 }

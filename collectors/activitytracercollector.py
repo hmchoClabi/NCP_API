@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from ._event_collection_support import _EventCollectorBase
 from normalizers.activitytracereventnormalizer import ActivityTracerEventNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
@@ -9,16 +10,13 @@ from utils.response_validation import validate_collection_response
 logger = logging.getLogger(__name__)
 
 
-class ActivityTracerEventCollector:
+class ActivityTracerEventCollector(_EventCollectorBase):
     PAGE_SIZE = 100
     MAX_PAGES = 10_000
+    NORMALIZER_ERROR_API = "get_activity_list"
 
     def __init__(self, api_factory: Any):
-        self.api_factory = api_factory
-        self.normalizer = ActivityTracerEventNormalizer()
-        self.last_errors: List[Dict[str, Any]] = []
-        self.last_events: List[Dict[str, Any]] = []
-        self.last_grouped_events: Dict[str, List[Dict[str, Any]]] = {}
+        super().__init__(api_factory, ActivityTracerEventNormalizer())
 
     def collect(
         self,
@@ -28,9 +26,7 @@ class ActivityTracerEventCollector:
         group_by: str = "resource",
     ) -> Dict[str, List[Dict[str, Any]]]:
         logger.info("Cloud Activity Tracer 이벤트 수집을 시작합니다.")
-        self.last_errors = []
-        self.last_events = []
-        self.last_grouped_events = {}
+        self._reset_event_state()
 
         try:
             raw_events = self.collect_raw(
@@ -39,19 +35,14 @@ class ActivityTracerEventCollector:
                 nrn=nrn,
             )
 
-            normalized_events = self.normalizer.normalize(raw_events)
-            self._extend_normalizer_errors()
-
-            grouped_events = self.normalizer.group_events(
-                events=normalized_events,
-                group_by=group_by,
+            grouped_events = self._normalize_and_group_events(
+                raw_events,
+                group_by,
             )
-            self.last_events = normalized_events
-            self.last_grouped_events = grouped_events
 
             logger.info(
                 "Cloud Activity Tracer 이벤트 수집 완료: %s건",
-                len(normalized_events),
+                len(self.last_events),
             )
 
             return grouped_events
@@ -95,6 +86,8 @@ class ActivityTracerEventCollector:
         previous_fingerprint = None
         page = 0
 
+        # Activity Tracer는 0번 페이지부터 시작하고 hasMore로 종료한다.
+        # nrn은 공급자 API에 전달되므로 Insight의 로컬 필터와 섞지 않는다.
         while page < self.MAX_PAGES:
             try:
                 response = activity_api.get_activity_list(
@@ -266,45 +259,3 @@ class ActivityTracerEventCollector:
             sort_keys=True,
             default=str,
         )
-
-    def _extend_normalizer_errors(self) -> None:
-        for error in getattr(self.normalizer, "last_errors", []):
-            normalized_error = dict(error)
-            normalized_error.setdefault(
-                "collector",
-                self.__class__.__name__,
-            )
-            normalized_error.setdefault("target_type", "event")
-            normalized_error.setdefault("api", "get_activity_list")
-            self.last_errors.append(normalized_error)
-
-    def _record_error(
-        self,
-        stage: str,
-        api: str,
-        exc: Optional[Exception] = None,
-        page_no: Optional[int] = None,
-        message: Optional[str] = None,
-    ) -> None:
-        error: Dict[str, Any] = {
-            "collector": self.__class__.__name__,
-            "stage": stage,
-            "target_type": "event",
-            "api": api,
-            "message": (
-                message
-                or (
-                    safe_exception_message(exc)
-                    if exc
-                    else "알 수 없는 오류"
-                )
-            ),
-        }
-
-        if page_no is not None:
-            error["page_no"] = page_no
-
-        if exc is not None:
-            error["exception_type"] = type(exc).__name__
-
-        self.last_errors.append(error)

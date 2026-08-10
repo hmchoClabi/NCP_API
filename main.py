@@ -399,57 +399,6 @@ def send_report_email(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    # parser = build_parser()
-    # args = parser.parse_args(argv)
-
-    # if bool(args.start_date) != bool(args.end_date):
-    #     parser.error("--start-date와 --end-date는 함께 지정해야 합니다.")
-
-    # setup_logging()
-    # customer = build_customer_profile(args)
-    # credential_provider = EnvironmentCredentialProvider()
-    # credentials = credential_provider.get_credentials(customer)
-    # validate_settings(credentials)
-
-    # target_month = args.target_month
-    # if not any(
-    #     (
-    #         target_month,
-    #         args.target_day,
-    #         args.start_date,
-    #         args.end_date,
-    #     )
-    # ):
-    #     target_month = LEGACY_DEFAULT_TARGET_MONTH
-
-    # api_factory = APIFactory(credentials=credentials)
-    # runner = ReportRunner(
-    #     output_dir=args.output_dir,
-    #     api_factory=api_factory,
-    #     customer=customer,
-    # )
-    # try:
-    #     runner.get_period(
-    #         target_month=target_month,
-    #         target_day=args.target_day,
-    #         start_date=args.start_date,
-    #         end_date=args.end_date,
-    #     )
-    # except ValueError as exc:
-    #     parser.error(str(exc))
-
-    # report = runner.run(
-    #     target_month=target_month,
-    #     target_day=args.target_day,
-    #     start_date=args.start_date,
-    #     end_date=args.end_date,
-    # )
-    # if args.send_email:
-    #     send_report_email(
-    #         report=report,
-    #         runner=runner,
-    #         recipient_values=args.email_to,
-    #     )
     parser = build_parser()
     args = parser.parse_args(argv)
 

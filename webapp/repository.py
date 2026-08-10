@@ -17,6 +17,7 @@ from database.config import DatabaseSettings
 from webapp.security import CredentialCipher, hash_password, token_hash
 from utils.credentials import NCPCredentials
 from app.customer import CustomerProfile
+from app.report_branding import CustomerLogo, validate_customer_logo
 from app.report_options import (
     normalize_report_options,
     validate_report_options,
@@ -598,6 +599,17 @@ class PortalRepository:
             )
             cursor.execute(
                 """
+                SELECT logo_content, logo_content_type, logo_width,
+                       logo_height, logo_sha256, updated_at
+                FROM control.tenant_branding
+                WHERE tenant_id = %s
+                """,
+                (tenant_id,),
+            )
+            branding = cursor.fetchone()
+            tenant["branding"] = self._branding_view(branding)
+            cursor.execute(
+                """
                 SELECT account.*,
                        credential.status AS credential_status,
                        credential.access_key_hint,
@@ -682,6 +694,130 @@ class PortalRepository:
                 ),
             )
         return normalized
+
+    def update_tenant_logo(
+        self,
+        tenant_id: str,
+        logo: CustomerLogo,
+        actor_id: str,
+    ) -> None:
+        """검증된 로고를 저장하고 이미지 원문은 감사 로그에서 제외한다."""
+        if not isinstance(logo, CustomerLogo):
+            raise ValueError("검증된 고객사 로고가 필요합니다.")
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM control.tenants "
+                "WHERE id = %s AND status <> 'OFFBOARDED'",
+                (tenant_id,),
+            )
+            if not cursor.fetchone():
+                raise ValueError("활성 고객을 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO control.tenant_branding (
+                    tenant_id, logo_content, logo_content_type,
+                    logo_width, logo_height, logo_sha256, updated_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id) DO UPDATE SET
+                    logo_content = EXCLUDED.logo_content,
+                    logo_content_type = EXCLUDED.logo_content_type,
+                    logo_width = EXCLUDED.logo_width,
+                    logo_height = EXCLUDED.logo_height,
+                    logo_sha256 = EXCLUDED.logo_sha256,
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (
+                    tenant_id,
+                    logo.content,
+                    logo.content_type,
+                    logo.width,
+                    logo.height,
+                    logo.sha256,
+                    actor_id,
+                ),
+            )
+            self._record_logo_change(cursor, tenant_id, actor_id, logo)
+
+    def delete_tenant_logo(self, tenant_id: str, actor_id: str) -> None:
+        """새 보고서에서 로고를 제거하되 기존 보고서 스냅샷은 유지한다."""
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM control.tenants "
+                "WHERE id = %s AND status <> 'OFFBOARDED'",
+                (tenant_id,),
+            )
+            if not cursor.fetchone():
+                raise ValueError("활성 고객을 찾을 수 없습니다.")
+            cursor.execute(
+                "DELETE FROM control.tenant_branding WHERE tenant_id = %s",
+                (tenant_id,),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("삭제할 고객사 로고가 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                ) VALUES (%s, %s, 'control.tenant_branding', %s,
+                          'DELETE', '{"logo":"removed"}'::jsonb)
+                """,
+                (tenant_id, actor_id, tenant_id),
+            )
+
+    @staticmethod
+    def _record_logo_change(
+        cursor: Any,
+        tenant_id: str,
+        actor_id: str,
+        logo: CustomerLogo,
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT INTO audit.data_change_logs (
+                tenant_id, actor_id, table_name, record_id,
+                operation, changed_fields
+            ) VALUES (%s, %s, 'control.tenant_branding', %s,
+                      'UPDATE', %s::jsonb)
+            """,
+            (
+                tenant_id,
+                actor_id,
+                tenant_id,
+                json.dumps(
+                    {
+                        "logo": "updated",
+                        "content_type": logo.content_type,
+                        "width": logo.width,
+                        "height": logo.height,
+                        "size_bytes": len(logo.content),
+                        "sha256": logo.sha256,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _branding_view(branding: Optional[dict[str, Any]]) -> dict[str, Any]:
+        if not branding:
+            return {}
+        content = bytes(branding["logo_content"])
+        logo = validate_customer_logo(content, branding["logo_content_type"])
+        if (
+            logo.width != branding["logo_width"]
+            or logo.height != branding["logo_height"]
+            or logo.sha256 != str(branding["logo_sha256"]).strip()
+        ):
+            raise ValueError("저장된 고객사 로고의 무결성 검증에 실패했습니다.")
+        return {
+            "logo_data_uri": logo.data_uri,
+            "content_type": logo.content_type,
+            "width": logo.width,
+            "height": logo.height,
+            "sha256": logo.sha256,
+            "updated_at": branding["updated_at"],
+        }
 
     def account_tenant(self, account_id: str) -> Optional[str]:
         with self._connect() as connection, connection.cursor() as cursor:
@@ -1311,190 +1447,255 @@ class PortalRepository:
             return tenant["customer_name"]
 
     def anonymize_tenant(self, tenant_id: str, actor_id: str) -> str:
+        """고객과 연관 개인정보를 하나의 트랜잭션에서 익명화한다.
+
+        일부 테이블만 익명화된 중간 상태는 개인정보 제거와 보고서 재현 계약을
+        모두 깨뜨리므로 모든 단계에 같은 cursor를 전달해 함께 commit/rollback한다.
+        """
         with self._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT customer_name, environment, region, status, metadata,
-                       EXISTS (
-                           SELECT 1 FROM control.report_jobs job
-                           WHERE job.tenant_id = tenant.id
-                             AND job.status = 'RUNNING'
-                       ) AS has_running_job
-                FROM control.tenants tenant
-                WHERE id = %s FOR UPDATE
-                """,
-                (tenant_id,),
+            tenant = self._tenant_for_anonymization(cursor, tenant_id)
+            anonymous_code, anonymous_name, anonymous_customer = (
+                self._anonymous_tenant_identity(tenant_id, tenant)
             )
-            tenant = cursor.fetchone()
-            if not tenant:
-                raise ValueError("고객사를 찾을 수 없습니다.")
-            if tenant["status"] != "OFFBOARDED":
-                raise ValueError("OFFBOARDED 고객만 익명화할 수 있습니다.")
-            if (tenant.get("metadata") or {}).get("anonymized_at"):
-                raise ValueError("이미 익명화된 고객입니다.")
-            if tenant["has_running_job"]:
-                raise ValueError("실행 중인 보고서가 있어 익명화할 수 없습니다.")
-
-            token = str(tenant_id).replace("-", "")
-            anonymous_code = f"anon-{token}"
-            anonymous_name = f"익명 고객 {token[:8]}"
-            anonymous_customer = {
-                "id": anonymous_code,
-                "name": anonymous_name,
-                "api_type": tenant["environment"],
-                "region": tenant["region"],
-                "credential_ref": None,
-                "cloud_account_id": None,
-                "cloud_account_code": None,
-            }
-
-            cursor.execute(
-                "SELECT user_id FROM control.memberships WHERE tenant_id = %s",
-                (tenant_id,),
+            self._anonymize_tenant_members(cursor, tenant_id)
+            self._anonymize_tenant_contacts_and_accounts(cursor, tenant_id)
+            self._anonymize_tenant_report_data(
+                cursor,
+                tenant_id,
+                anonymous_customer,
             )
-            member_ids = [str(row["user_id"]) for row in cursor.fetchall()]
-            cursor.execute(
-                "DELETE FROM control.memberships WHERE tenant_id = %s",
-                (tenant_id,),
-            )
-            orphan_ids: list[str] = []
-            if member_ids:
-                cursor.execute(
-                    """
-                    SELECT users.id
-                    FROM control.users users
-                    WHERE users.id = ANY(%s::uuid[])
-                      AND NOT EXISTS (
-                          SELECT 1 FROM control.memberships membership
-                          WHERE membership.user_id = users.id
-                      )
-                      AND NOT EXISTS (
-                          SELECT 1 FROM control.platform_roles role
-                          WHERE role.user_id = users.id
-                      )
-                    """,
-                    (member_ids,),
-                )
-                orphan_ids = [str(row["id"]) for row in cursor.fetchall()]
-            if orphan_ids:
-                cursor.execute(
-                    "DELETE FROM control.user_sessions "
-                    "WHERE user_id = ANY(%s::uuid[])",
-                    (orphan_ids,),
-                )
-                cursor.execute(
-                    """
-                    UPDATE control.users
-                    SET email = 'anon-' || replace(id::text, '-', '') || '@deleted.invalid',
-                        display_name = '익명 사용자', status = 'DISABLED',
-                        password_hash = '!anonymized!', last_login_at = NULL,
-                        external_identity_provider = NULL,
-                        external_subject = NULL
-                    WHERE id = ANY(%s::uuid[])
-                    """,
-                    (orphan_ids,),
-                )
-                cursor.execute(
-                    """
-                    UPDATE audit.authentication_logs
-                    SET email_attempted = 'redacted@deleted.invalid',
-                        source_ip = NULL, user_agent = NULL,
-                        failure_reason = NULL
-                    WHERE user_id = ANY(%s::uuid[])
-                    """,
-                    (orphan_ids,),
-                )
-                cursor.execute(
-                    """
-                    UPDATE audit.access_logs
-                    SET source_ip = NULL, user_agent = NULL,
-                        details = '{"anonymized":true}'::jsonb
-                    WHERE actor_id = ANY(%s::uuid[])
-                    """,
-                    (orphan_ids,),
-                )
-
-            cursor.execute(
-                """
-                UPDATE control.email_deliveries
-                SET recipient_email = 'redacted@deleted.invalid',
-                    provider_message_id = NULL, last_error = NULL
-                WHERE tenant_id = %s
-                """,
-                (tenant_id,),
-            )
-            cursor.execute(
-                "DELETE FROM control.email_recipients WHERE tenant_id = %s",
-                (tenant_id,),
-            )
-            cursor.execute(
-                """
-                WITH ranked AS (
-                    SELECT id, row_number() OVER (ORDER BY id) AS sequence
-                    FROM control.cloud_accounts WHERE tenant_id = %s
-                )
-                UPDATE control.cloud_accounts account
-                SET account_code = 'anonymous-' || ranked.sequence,
-                    display_name = '익명 계정 ' || ranked.sequence,
-                    status = 'DISABLED'
-                FROM ranked WHERE account.id = ranked.id
-                """,
-                (tenant_id,),
-            )
-
-            for schema in ("public_data", "gov_data"):
-                cursor.execute(
-                    f"SELECT id, normalized_data FROM {schema}.report_snapshots "
-                    "WHERE tenant_id = %s",
-                    (tenant_id,),
-                )
-                for snapshot in cursor.fetchall():
-                    anonymized = _anonymize_report_payload(
-                        snapshot["normalized_data"], anonymous_customer
-                    )
-                    cursor.execute(
-                        f"UPDATE {schema}.report_snapshots "
-                        "SET normalized_data = %s::jsonb WHERE id = %s",
-                        (json.dumps(anonymized, ensure_ascii=False), snapshot["id"]),
-                    )
-                cursor.execute(
-                    f"UPDATE {schema}.activity_events "
-                    "SET account_name = %s WHERE tenant_id = %s",
-                    (_ANONYMIZED_VALUE, tenant_id),
-                )
-
-            cursor.execute(
-                """
-                UPDATE audit.data_change_logs
-                SET changed_fields = '{"anonymized":true}'::jsonb
-                WHERE tenant_id = %s
-                """,
-                (tenant_id,),
-            )
-            cursor.execute(
-                """
-                UPDATE control.tenants
-                SET customer_code = %s, customer_name = %s,
-                    primary_contact_email = NULL,
-                    metadata = jsonb_build_object(
-                        'anonymized_at', clock_timestamp(),
-                        'irreversible', true
-                    )
-                WHERE id = %s
-                """,
-                (anonymous_code, anonymous_name, tenant_id),
-            )
-            cursor.execute(
-                """
-                INSERT INTO audit.data_change_logs (
-                    tenant_id, actor_id, table_name, record_id,
-                    operation, changed_fields
-                ) VALUES (%s, %s, 'control.tenants', %s, 'UPDATE',
-                          '{"anonymized":true,"irreversible":true}'::jsonb)
-                """,
-                (tenant_id, actor_id, tenant_id),
+            self._record_tenant_anonymization(
+                cursor,
+                tenant_id,
+                actor_id,
+                anonymous_code,
+                anonymous_name,
             )
             return anonymous_name
+
+    @staticmethod
+    def _tenant_for_anonymization(cursor: Any, tenant_id: str) -> dict[str, Any]:
+        cursor.execute(
+            """
+            SELECT customer_name, environment, region, status, metadata,
+                   EXISTS (
+                       SELECT 1 FROM control.report_jobs job
+                       WHERE job.tenant_id = tenant.id
+                         AND job.status = 'RUNNING'
+                   ) AS has_running_job
+            FROM control.tenants tenant
+            WHERE id = %s FOR UPDATE
+            """,
+            (tenant_id,),
+        )
+        tenant = cursor.fetchone()
+        if not tenant:
+            raise ValueError("고객사를 찾을 수 없습니다.")
+        if tenant["status"] != "OFFBOARDED":
+            raise ValueError("OFFBOARDED 고객만 익명화할 수 있습니다.")
+        if (tenant.get("metadata") or {}).get("anonymized_at"):
+            raise ValueError("이미 익명화된 고객입니다.")
+        if tenant["has_running_job"]:
+            raise ValueError("실행 중인 보고서가 있어 익명화할 수 없습니다.")
+        return tenant
+
+    @staticmethod
+    def _anonymous_tenant_identity(
+        tenant_id: str,
+        tenant: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any]]:
+        token = str(tenant_id).replace("-", "")
+        anonymous_code = f"anon-{token}"
+        anonymous_name = f"익명 고객 {token[:8]}"
+        anonymous_customer = {
+            "id": anonymous_code,
+            "name": anonymous_name,
+            "api_type": tenant["environment"],
+            "region": tenant["region"],
+            "credential_ref": None,
+            "cloud_account_id": None,
+            "cloud_account_code": None,
+        }
+        return anonymous_code, anonymous_name, anonymous_customer
+
+    def _anonymize_tenant_members(self, cursor: Any, tenant_id: str) -> None:
+        cursor.execute(
+            "SELECT user_id FROM control.memberships WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        member_ids = [str(row["user_id"]) for row in cursor.fetchall()]
+        cursor.execute(
+            "DELETE FROM control.memberships WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        orphan_ids: list[str] = []
+        if member_ids:
+            cursor.execute(
+                """
+                SELECT users.id
+                FROM control.users users
+                WHERE users.id = ANY(%s::uuid[])
+                  AND NOT EXISTS (
+                      SELECT 1 FROM control.memberships membership
+                      WHERE membership.user_id = users.id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM control.platform_roles role
+                      WHERE role.user_id = users.id
+                  )
+                """,
+                (member_ids,),
+            )
+            orphan_ids = [str(row["id"]) for row in cursor.fetchall()]
+        if orphan_ids:
+            self._anonymize_orphan_users(cursor, orphan_ids)
+
+    @staticmethod
+    def _anonymize_orphan_users(cursor: Any, orphan_ids: list[str]) -> None:
+        cursor.execute(
+            "DELETE FROM control.user_sessions "
+            "WHERE user_id = ANY(%s::uuid[])",
+            (orphan_ids,),
+        )
+        cursor.execute(
+            """
+            UPDATE control.users
+            SET email = 'anon-' || replace(id::text, '-', '') || '@deleted.invalid',
+                display_name = '익명 사용자', status = 'DISABLED',
+                password_hash = '!anonymized!', last_login_at = NULL,
+                external_identity_provider = NULL,
+                external_subject = NULL
+            WHERE id = ANY(%s::uuid[])
+            """,
+            (orphan_ids,),
+        )
+        cursor.execute(
+            """
+            UPDATE audit.authentication_logs
+            SET email_attempted = 'redacted@deleted.invalid',
+                source_ip = NULL, user_agent = NULL,
+                failure_reason = NULL
+            WHERE user_id = ANY(%s::uuid[])
+            """,
+            (orphan_ids,),
+        )
+        cursor.execute(
+            """
+            UPDATE audit.access_logs
+            SET source_ip = NULL, user_agent = NULL,
+                details = '{"anonymized":true}'::jsonb
+            WHERE actor_id = ANY(%s::uuid[])
+            """,
+            (orphan_ids,),
+        )
+
+    @staticmethod
+    def _anonymize_tenant_contacts_and_accounts(
+        cursor: Any,
+        tenant_id: str,
+    ) -> None:
+        cursor.execute(
+            """
+            UPDATE control.email_deliveries
+            SET recipient_email = 'redacted@deleted.invalid',
+                provider_message_id = NULL, last_error = NULL
+            WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        cursor.execute(
+            "DELETE FROM control.email_recipients WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        cursor.execute(
+            "DELETE FROM control.tenant_branding WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        cursor.execute(
+            """
+            WITH ranked AS (
+                SELECT id, row_number() OVER (ORDER BY id) AS sequence
+                FROM control.cloud_accounts WHERE tenant_id = %s
+            )
+            UPDATE control.cloud_accounts account
+            SET account_code = 'anonymous-' || ranked.sequence,
+                display_name = '익명 계정 ' || ranked.sequence,
+                status = 'DISABLED'
+            FROM ranked WHERE account.id = ranked.id
+            """,
+            (tenant_id,),
+        )
+
+    @staticmethod
+    def _anonymize_tenant_report_data(
+        cursor: Any,
+        tenant_id: str,
+        anonymous_customer: dict[str, Any],
+    ) -> None:
+        for schema in ("public_data", "gov_data"):
+            cursor.execute(
+                f"SELECT id, normalized_data FROM {schema}.report_snapshots "
+                "WHERE tenant_id = %s",
+                (tenant_id,),
+            )
+            for snapshot in cursor.fetchall():
+                anonymized = _anonymize_report_payload(
+                    snapshot["normalized_data"],
+                    anonymous_customer,
+                )
+                cursor.execute(
+                    f"UPDATE {schema}.report_snapshots "
+                    "SET normalized_data = %s::jsonb WHERE id = %s",
+                    (
+                        json.dumps(anonymized, ensure_ascii=False),
+                        snapshot["id"],
+                    ),
+                )
+            cursor.execute(
+                f"UPDATE {schema}.activity_events "
+                "SET account_name = %s WHERE tenant_id = %s",
+                (_ANONYMIZED_VALUE, tenant_id),
+            )
+
+    @staticmethod
+    def _record_tenant_anonymization(
+        cursor: Any,
+        tenant_id: str,
+        actor_id: str,
+        anonymous_code: str,
+        anonymous_name: str,
+    ) -> None:
+        cursor.execute(
+            """
+            UPDATE audit.data_change_logs
+            SET changed_fields = '{"anonymized":true}'::jsonb
+            WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        cursor.execute(
+            """
+            UPDATE control.tenants
+            SET customer_code = %s, customer_name = %s,
+                primary_contact_email = NULL,
+                metadata = jsonb_build_object(
+                    'anonymized_at', clock_timestamp(),
+                    'irreversible', true
+                )
+            WHERE id = %s
+            """,
+            (anonymous_code, anonymous_name, tenant_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO audit.data_change_logs (
+                tenant_id, actor_id, table_name, record_id,
+                operation, changed_fields
+            ) VALUES (%s, %s, 'control.tenants', %s, 'UPDATE',
+                      '{"anonymized":true,"irreversible":true}'::jsonb)
+            """,
+            (tenant_id, actor_id, tenant_id),
+        )
 
     def permanently_delete_tenant(
         self,
@@ -1587,6 +1788,9 @@ class PortalRepository:
                        account.environment, account.region,
                        tenant.customer_code, tenant.customer_name,
                        report_settings.settings AS report_options,
+                       branding.logo_content, branding.logo_content_type,
+                       branding.logo_width, branding.logo_height,
+                       branding.logo_sha256, branding.updated_at,
                        credential.encrypted_dek, credential.dek_nonce,
                        credential.ciphertext, credential.credential_nonce,
                        credential.status
@@ -1596,6 +1800,8 @@ class PortalRepository:
                     ON credential.cloud_account_id = account.id
                 LEFT JOIN control.tenant_report_settings report_settings
                     ON report_settings.tenant_id = account.tenant_id
+                LEFT JOIN control.tenant_branding branding
+                    ON branding.tenant_id = account.tenant_id
                 WHERE account.id = %s AND account.status = 'ACTIVE'
                 """,
                 (account_id,),
@@ -1607,6 +1813,11 @@ class PortalRepository:
             str(row["id"]), row["encrypted_dek"], row["dek_nonce"],
             row["ciphertext"], row["credential_nonce"],
         )
+        branding = (
+            self._branding_view(row)
+            if row["logo_content"] is not None
+            else {}
+        )
         customer = CustomerProfile(
             customer_id=row["customer_code"],
             customer_name=row["customer_name"],
@@ -1616,6 +1827,7 @@ class PortalRepository:
             cloud_account_id=str(row["id"]),
             cloud_account_code=row["account_code"],
             report_options=normalize_report_options(row["report_options"]),
+            logo_data_uri=branding.get("logo_data_uri"),
         )
         credentials = NCPCredentials(
             access_key=plaintext["access_key"],

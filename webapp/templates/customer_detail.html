@@ -10,6 +10,44 @@
   <span class="status {{ 'ok' if tenant.status == 'ACTIVE' else 'warn' }}">{{ tenant.status }}</span>
 </header>
 
+{% if 'MSP_ADMIN' in current_user.platform_roles and tenant.status != 'OFFBOARDED' %}
+<section class="panel branding-panel">
+  <div class="panel-heading">
+    <div>
+      <h2>고객사 로고</h2>
+      <p>새 보고서의 상단 브랜드 영역에 표시합니다. 기존 보고서는 생성 당시 로고를 그대로 유지합니다.</p>
+    </div>
+  </div>
+  <div class="branding-layout">
+    <div class="branding-preview" aria-label="현재 고객사 로고 미리보기">
+      {% if tenant.branding and tenant.branding.logo_data_uri %}
+      <img src="{{ tenant.branding.logo_data_uri }}" alt="{{ tenant.customer_name }} 로고">
+      {% else %}
+      <span aria-hidden="true">{{ tenant.customer_name[:2] }}</span>
+      {% endif %}
+    </div>
+    <div class="branding-controls">
+      <form class="branding-upload" method="post" enctype="multipart/form-data" action="{{ url_for('update_customer_logo', tenant_id=tenant.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>로고 파일
+          <input type="file" name="logo" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" required>
+        </label>
+        <button class="primary" type="submit">{{ '로고 교체' if tenant.branding else '로고 등록' }}</button>
+      </form>
+      {% if tenant.branding %}
+      <form method="post" action="{{ url_for('delete_customer_logo', tenant_id=tenant.id) }}" onsubmit="return confirm('새로 생성하는 보고서에서 고객사 로고를 제거하시겠습니까?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="secondary" type="submit">로고 삭제</button>
+      </form>
+      <small>{{ tenant.branding.content_type }} · {{ tenant.branding.width }}×{{ tenant.branding.height }} · 최근 변경 {{ tenant.branding.updated_at|kst }}</small>
+      {% endif %}
+      <p class="settings-note">PNG, JPEG, WebP · 최대 512KB · 최대 4,096px · 투명 배경 PNG 권장</p>
+      <p class="settings-warning">SVG는 스크립트 삽입 위험을 차단하기 위해 지원하지 않습니다. 로고의 종횡비는 보고서에서 변경하지 않습니다.</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 <section class="panel">
   <div class="panel-heading"><div><h2>NCP 계정 및 보고서 자동화</h2><p>등록 상태와 API 키 버전을 확인하고 보고서를 생성합니다.</p></div></div>
   <div class="account-list">

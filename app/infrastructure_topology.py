@@ -1,8 +1,8 @@
-"""Build a deterministic topology from explicitly collected relationships."""
+"""수집 API가 명시한 관계만 사용해 결정적인 인프라 토폴로지를 만든다."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from hashlib import sha256
 from ipaddress import ip_address, ip_network
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
@@ -17,9 +17,38 @@ REPRESENTATIVE_CATEGORIES = tuple(RESOURCE_CATEGORY_OPTIONS)
 SUPPORTING_CATEGORIES = frozenset({"NETWORK_INTERFACE", "TARGET_GROUP"})
 
 
+@dataclass
+class _TopologyGraph:
+    """노드 식별과 명시 관계 연결 단계가 공유하는 내부 그래프 상태."""
+
+    nodes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    lookup: Dict[tuple[str, str], str] = field(default_factory=dict)
+    resource_nodes: List[tuple[Dict[str, Any], Mapping[str, Any]]] = field(
+        default_factory=list
+    )
+    edges: Dict[tuple[str, str, str], Dict[str, Any]] = field(
+        default_factory=dict
+    )
+    warnings: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class _TopologySelection:
+    """표시 제한을 적용한 그래프와 전체 그래프의 품질 통계."""
+
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+    unmapped_nodes: List[Dict[str, Any]]
+    unresolved_nodes: List[Dict[str, Any]]
+    full_edge_count: int
+    full_unmapped_count: int
+    full_unresolved_count: int
+    omitted_node_count: int
+
+
 @dataclass(frozen=True)
 class TopologyDisplayOptions:
-    """Select which optional resource attributes can appear in the diagram."""
+    """구성도에 표시할 선택적 자원 속성을 정의한다."""
 
     enabled: bool = True
     show_resource_name: bool = True
@@ -53,7 +82,7 @@ class TopologyDisplayOptions:
 
 
 class InfrastructureTopologyBuilder:
-    """Create nodes and verified edges without name/IP/CIDR inference."""
+    """이름·IP·CIDR 추론 없이 노드와 검증된 관계만 생성한다."""
 
     DEFAULT_MAX_NODES = 120
     CATEGORY_ALIASES = {
@@ -138,26 +167,235 @@ class InfrastructureTopologyBuilder:
         collection_issue_count: int = 0,
     ) -> Dict[str, Any]:
         limit = self._max_nodes(max_nodes)
-        allowed_categories = (
-            frozenset(REPRESENTATIVE_CATEGORIES)
-            if allowed_reference_categories is None
-            else frozenset(
-                category
-                for category in (
-                    self._category(value)
-                    for value in allowed_reference_categories
-                )
-                if category in REPRESENTATIVE_CATEGORY_LABELS
-            )
+        allowed_categories = self._allowed_categories(
+            allowed_reference_categories
         )
         allowed_references = allowed_categories | SUPPORTING_CATEGORIES
-        nodes: Dict[str, Dict[str, Any]] = {}
-        lookup: Dict[tuple[str, str], str] = {}
-        resource_nodes: List[tuple[Dict[str, Any], Mapping[str, Any]]] = []
-        warnings: List[Dict[str, Any]] = []
         resource_items = self._mapping_items(resources)
+        graph = self._build_resource_graph(resource_items, allowed_categories)
+        self._connect_resource_graph(graph, allowed_references)
+        full_edges = list(graph.edges.values())
+        self._mark_mapped_nodes(graph.nodes, full_edges)
+        selection = self._select_topology(graph.nodes, full_edges, limit)
+        (
+            normalized_completeness,
+            normalized_issue_count,
+            relationship_coverage,
+            confidence,
+        ) = self._topology_quality(
+            selection,
+            inventory_completeness,
+            collection_issue_count,
+        )
+        self._append_topology_warnings(graph.warnings, selection, limit)
+        selection.nodes.sort(key=self._node_sort_key)
+        selection.edges.sort(key=self._edge_sort_key)
+        return self._topology_payload(
+            selection,
+            graph.warnings,
+            collected_at=collected_at,
+            max_nodes=limit,
+            confidence=confidence,
+            relationship_coverage=relationship_coverage,
+            inventory_completeness=normalized_completeness,
+            collection_issue_count=normalized_issue_count,
+        )
+
+    def _select_topology(
+        self,
+        nodes: Dict[str, Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        limit: int,
+    ) -> _TopologySelection:
+        full_nodes = list(nodes.values())
+        selected_nodes, selected_edges = self._truncate(
+            full_nodes,
+            edges,
+            limit,
+        )
+        return _TopologySelection(
+            nodes=selected_nodes,
+            edges=selected_edges,
+            unmapped_nodes=[
+                node for node in selected_nodes
+                if (
+                    node["kind"] == "representative"
+                    and not node.get("is_mapped")
+                )
+            ],
+            unresolved_nodes=[
+                node for node in selected_nodes
+                if node.get("resolution") == "UNRESOLVED"
+            ],
+            full_edge_count=len(edges),
+            full_unmapped_count=sum(
+                1 for node in full_nodes
+                if (
+                    node["kind"] == "representative"
+                    and not node.get("is_mapped")
+                )
+            ),
+            full_unresolved_count=sum(
+                1 for node in full_nodes
+                if node.get("resolution") == "UNRESOLVED"
+            ),
+            omitted_node_count=len(full_nodes) - len(selected_nodes),
+        )
+
+    @staticmethod
+    def _topology_quality(
+        selection: _TopologySelection,
+        inventory_completeness: str,
+        collection_issue_count: int,
+    ) -> tuple[str, int, str, str]:
+        normalized_completeness = str(
+            inventory_completeness or "UNKNOWN"
+        ).strip().upper()[:60]
+        try:
+            normalized_issue_count = max(int(collection_issue_count or 0), 0)
+        except (TypeError, ValueError):
+            normalized_issue_count = 0
+        relationship_coverage = (
+            "PARTIAL"
+            if (
+                selection.full_unmapped_count
+                or selection.full_unresolved_count
+            )
+            else "COMPLETE"
+        )
+        confidence = (
+            "PARTIAL"
+            if (
+                selection.full_unmapped_count
+                or selection.full_unresolved_count
+                or selection.omitted_node_count
+                or normalized_issue_count
+                or normalized_completeness
+                not in {
+                    "COMPLETE",
+                    "COMPLETE_FOR_SELECTED_SCOPE",
+                    "COMPLETE_FOR_SNAPSHOT_SCOPE",
+                }
+            )
+            else "VERIFIED"
+        )
+        return (
+            normalized_completeness,
+            normalized_issue_count,
+            relationship_coverage,
+            confidence,
+        )
+
+    @staticmethod
+    def _append_topology_warnings(
+        warnings: List[Dict[str, Any]],
+        selection: _TopologySelection,
+        limit: int,
+    ) -> None:
+        if selection.full_unmapped_count:
+            warnings.append({
+                "code": "UNMAPPED_RESOURCES",
+                "message": (
+                    "명시적인 리소스 ID 관계가 없어 미매핑 그룹에 "
+                    f"{selection.full_unmapped_count}개 자원을 표시합니다."
+                ),
+                "source": "normalized_inventory",
+                "confidence": "UNMAPPED",
+            })
+        if selection.full_unresolved_count:
+            warnings.append({
+                "code": "UNRESOLVED_REFERENCES",
+                "message": (
+                    "관계 대상 ID는 확인되었지만 인벤토리에서 상세 자원을 "
+                    f"찾지 못한 참조가 {selection.full_unresolved_count}개 있습니다."
+                ),
+                "source": "explicit_resource_id_relation",
+                "confidence": "VERIFIED",
+            })
+        if selection.omitted_node_count:
+            warnings.append({
+                "code": "TOPOLOGY_TRUNCATED",
+                "message": (
+                    f"구성도 노드 제한({limit}개)으로 "
+                    f"{selection.omitted_node_count}개 노드를 생략했습니다."
+                ),
+                "source": "renderer_limit",
+                "confidence": "VERIFIED",
+            })
+
+    @staticmethod
+    def _topology_payload(
+        selection: _TopologySelection,
+        warnings: List[Dict[str, Any]],
+        *,
+        collected_at: Optional[str],
+        max_nodes: int,
+        confidence: str,
+        relationship_coverage: str,
+        inventory_completeness: str,
+        collection_issue_count: int,
+    ) -> Dict[str, Any]:
+        selected_ids = {node["node_id"] for node in selection.nodes}
+        return {
+            "nodes": selection.nodes,
+            "edges": selection.edges,
+            "unmapped_node_ids": [
+                node["node_id"] for node in selection.unmapped_nodes
+                if node["node_id"] in selected_ids
+            ],
+            "unresolved_node_ids": [
+                node["node_id"] for node in selection.unresolved_nodes
+                if node["node_id"] in selected_ids
+            ],
+            "warnings": warnings,
+            "summary": {
+                "representative_node_count": sum(
+                    1 for node in selection.nodes
+                    if node.get("count_as_infrastructure")
+                ),
+                "supporting_node_count": sum(
+                    1 for node in selection.nodes
+                    if not node.get("count_as_infrastructure")
+                ),
+                "verified_edge_count": len(selection.edges),
+                "total_verified_edge_count": selection.full_edge_count,
+                "unmapped_resource_count": selection.full_unmapped_count,
+                "unresolved_reference_count": (
+                    selection.full_unresolved_count
+                ),
+                "collected_at": collected_at,
+                "max_nodes": max_nodes,
+                "truncated": bool(selection.omitted_node_count),
+                "omitted_node_count": selection.omitted_node_count,
+                "confidence": confidence,
+                "relationship_confidence": "VERIFIED",
+                "relationship_coverage": relationship_coverage,
+                "inventory_completeness": inventory_completeness,
+                "collection_issue_count": collection_issue_count,
+            },
+        }
+
+    def _allowed_categories(
+        self,
+        values: Optional[Iterable[str]],
+    ) -> frozenset[str]:
+        if values is None:
+            return frozenset(REPRESENTATIVE_CATEGORIES)
+        return frozenset(
+            category
+            for category in (self._category(value) for value in values)
+            if category in REPRESENTATIVE_CATEGORY_LABELS
+        )
+
+    def _build_resource_graph(
+        self,
+        resources: List[Dict[str, Any]],
+        allowed_categories: frozenset[str],
+    ) -> _TopologyGraph:
+        """명시 ID를 기준으로 자원 노드를 만들고 충돌 ID를 분리한다."""
+        graph = _TopologyGraph()
         identity_counts: Dict[tuple[str, str], int] = {}
-        for resource in resource_items:
+        for resource in resources:
             category = self._category(resource.get("category"))
             if category not in allowed_categories:
                 continue
@@ -169,7 +407,7 @@ class InfrastructureTopologyBuilder:
                     identity_counts.get(identity_key, 0) + 1
                 )
 
-        for index, resource in enumerate(resource_items):
+        for index, resource in enumerate(resources):
             category = self._category(resource.get("category"))
             if (
                 category not in REPRESENTATIVE_CATEGORY_LABELS
@@ -180,8 +418,7 @@ class InfrastructureTopologyBuilder:
             resource_id = self._resource_id(category, resource, details)
             identity_key = (category, resource_id) if resource_id else None
             identity_collision = bool(
-                identity_key
-                and identity_counts.get(identity_key, 0) > 1
+                identity_key and identity_counts.get(identity_key, 0) > 1
             )
             discriminator = None
             if identity_collision:
@@ -197,187 +434,63 @@ class InfrastructureTopologyBuilder:
                 index=index,
                 discriminator=discriminator,
             )
-            node = self._inventory_node(
+            candidate = self._inventory_node(
                 node_id,
                 category,
                 resource_id,
                 resource,
                 details,
             )
-            existing = nodes.get(node_id)
-            if existing is None:
-                nodes[node_id] = node
-                existing = node
+            node = graph.nodes.get(node_id)
+            if node is None:
+                graph.nodes[node_id] = candidate
+                node = candidate
             else:
-                self._merge_node(existing, node)
+                self._merge_node(node, candidate)
             if resource_id and not identity_collision:
-                lookup[(category, resource_id)] = node_id
-            resource_nodes.append((existing, resource))
+                graph.lookup[(category, resource_id)] = node_id
+            graph.resource_nodes.append((node, resource))
+        return graph
 
-        edges: Dict[tuple[str, str, str], Dict[str, Any]] = {}
-        for node, resource in resource_nodes:
+    def _connect_resource_graph(
+        self,
+        graph: _TopologyGraph,
+        allowed_references: frozenset[str],
+    ) -> None:
+        """API가 리소스 ID로 밝힌 관계만 그래프 간선으로 연결한다."""
+        for node, resource in graph.resource_nodes:
             details = self._mapping(resource.get("details"))
             self._add_explicit_relations(
                 node,
                 details,
-                nodes,
-                lookup,
-                edges,
-                warnings,
+                graph.nodes,
+                graph.lookup,
+                graph.edges,
+                graph.warnings,
                 allowed_references,
             )
             self._add_field_relations(
                 node,
                 details,
-                nodes,
-                lookup,
-                edges,
+                graph.nodes,
+                graph.lookup,
+                graph.edges,
                 allowed_references,
             )
 
-        full_edges = list(edges.values())
+    @staticmethod
+    def _mark_mapped_nodes(
+        nodes: Dict[str, Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+    ) -> None:
         degree = {node_id: 0 for node_id in nodes}
-        for edge in full_edges:
+        for edge in edges:
             degree[edge["source_node_id"]] += 1
             degree[edge["target_node_id"]] += 1
         for node_id, node in nodes.items():
             node["is_mapped"] = degree.get(node_id, 0) > 0
             if not node["is_mapped"] and node["kind"] == "representative":
                 node["confidence"] = "UNMAPPED"
-
-        full_nodes = list(nodes.values())
-        selected_nodes, selected_edges = self._truncate(
-            full_nodes,
-            full_edges,
-            limit,
-        )
-        selected_ids = {node["node_id"] for node in selected_nodes}
-        unmapped_nodes = [
-            node for node in selected_nodes
-            if (
-                node["kind"] == "representative"
-                and not node.get("is_mapped")
-            )
-        ]
-        unresolved_nodes = [
-            node for node in selected_nodes
-            if node.get("resolution") == "UNRESOLVED"
-        ]
-        full_unmapped_count = sum(
-            1 for node in full_nodes
-            if (
-                node["kind"] == "representative"
-                and not node.get("is_mapped")
-            )
-        )
-        full_unresolved_count = sum(
-            1 for node in full_nodes
-            if node.get("resolution") == "UNRESOLVED"
-        )
-        omitted_node_count = len(full_nodes) - len(selected_nodes)
-        normalized_inventory_completeness = str(
-            inventory_completeness or "UNKNOWN"
-        ).strip().upper()[:60]
-        try:
-            normalized_issue_count = max(
-                int(collection_issue_count or 0),
-                0,
-            )
-        except (TypeError, ValueError):
-            normalized_issue_count = 0
-        relation_coverage = (
-            "PARTIAL"
-            if full_unmapped_count or full_unresolved_count
-            else "COMPLETE"
-        )
-        overall_confidence = (
-            "PARTIAL"
-            if (
-                full_unmapped_count
-                or full_unresolved_count
-                or omitted_node_count
-                or normalized_issue_count
-                or normalized_inventory_completeness
-                not in {
-                    "COMPLETE",
-                    "COMPLETE_FOR_SELECTED_SCOPE",
-                    "COMPLETE_FOR_SNAPSHOT_SCOPE",
-                }
-            )
-            else "VERIFIED"
-        )
-
-        if full_unmapped_count:
-            warnings.append({
-                "code": "UNMAPPED_RESOURCES",
-                "message": (
-                    "명시적인 리소스 ID 관계가 없어 미매핑 그룹에 "
-                    f"{full_unmapped_count}개 자원을 표시합니다."
-                ),
-                "source": "normalized_inventory",
-                "confidence": "UNMAPPED",
-            })
-        if full_unresolved_count:
-            warnings.append({
-                "code": "UNRESOLVED_REFERENCES",
-                "message": (
-                    "관계 대상 ID는 확인되었지만 인벤토리에서 상세 자원을 "
-                    f"찾지 못한 참조가 {full_unresolved_count}개 있습니다."
-                ),
-                "source": "explicit_resource_id_relation",
-                "confidence": "VERIFIED",
-            })
-        if omitted_node_count:
-            warnings.append({
-                "code": "TOPOLOGY_TRUNCATED",
-                "message": (
-                    f"구성도 노드 제한({limit}개)으로 "
-                    f"{omitted_node_count}개 노드를 생략했습니다."
-                ),
-                "source": "renderer_limit",
-                "confidence": "VERIFIED",
-            })
-
-        selected_nodes.sort(key=self._node_sort_key)
-        selected_edges.sort(key=self._edge_sort_key)
-        return {
-            "nodes": selected_nodes,
-            "edges": selected_edges,
-            "unmapped_node_ids": [
-                node["node_id"] for node in unmapped_nodes
-                if node["node_id"] in selected_ids
-            ],
-            "unresolved_node_ids": [
-                node["node_id"] for node in unresolved_nodes
-                if node["node_id"] in selected_ids
-            ],
-            "warnings": warnings,
-            "summary": {
-                "representative_node_count": sum(
-                    1 for node in selected_nodes
-                    if node.get("count_as_infrastructure")
-                ),
-                "supporting_node_count": sum(
-                    1 for node in selected_nodes
-                    if not node.get("count_as_infrastructure")
-                ),
-                "verified_edge_count": len(selected_edges),
-                "total_verified_edge_count": len(full_edges),
-                "unmapped_resource_count": full_unmapped_count,
-                "unresolved_reference_count": full_unresolved_count,
-                "collected_at": collected_at,
-                "max_nodes": limit,
-                "truncated": bool(omitted_node_count),
-                "omitted_node_count": omitted_node_count,
-                "confidence": overall_confidence,
-                "relationship_confidence": "VERIFIED",
-                "relationship_coverage": relation_coverage,
-                "inventory_completeness": (
-                    normalized_inventory_completeness
-                ),
-                "collection_issue_count": normalized_issue_count,
-            },
-        }
 
     def _add_explicit_relations(
         self,

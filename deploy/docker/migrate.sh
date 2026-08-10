@@ -2,7 +2,7 @@
 set -eu
 
 mode="${1:-migrate}"
-schema_version="${2:-${REPORT_SCHEMA_VERSION:-140}}"
+schema_version="${2:-${REPORT_SCHEMA_VERSION:-150}}"
 wait_seconds="${DB_WAIT_SECONDS:-180}"
 
 require_value() {

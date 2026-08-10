@@ -5,7 +5,6 @@ VPC 인스턴스 및 관련 정보를 조회하는 API 모듈입니다.
 
 """
 
-from bisect import insort_right
 from typing import Dict, List, Optional
 from ncp_api.base import BaseNCPAPI
 
@@ -702,4 +701,3 @@ class VpcAPI(BaseNCPAPI):
         if region_code is not None:
             params['regionCode'] = region_code
         return self.client.get('/getRouteTableSubnetList', params=params)
-

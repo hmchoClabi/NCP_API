@@ -46,8 +46,17 @@ BEGIN
     WHERE table_schema IN ('control', 'public_data', 'gov_data', 'audit')
       AND table_type = 'BASE TABLE';
 
-    IF table_count < 32 THEN
-        RAISE EXCEPTION 'Expected at least 32 tables, found %', table_count;
+    IF table_count < 33 THEN
+        RAISE EXCEPTION 'Expected at least 33 tables, found %', table_count;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'control'
+          AND tablename = 'tenant_branding'
+          AND rowsecurity
+    ) THEN
+        RAISE EXCEPTION 'Tenant branding table or RLS is missing';
     END IF;
 
     SELECT count(*)

@@ -3,8 +3,9 @@ from hashlib import sha256
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
-from config.endpoints import build_api_endpoints
+from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import ReportOptions
+from config.endpoints import build_api_endpoints
 
 
 CUSTOMER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -29,6 +30,7 @@ class CustomerProfile:
     report_options: ReportOptions | Dict[str, Any] = field(
         default_factory=ReportOptions
     )
+    logo_data_uri: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         customer_id = self.customer_id.strip()
@@ -58,13 +60,18 @@ class CustomerProfile:
             "report_options",
             ReportOptions.from_value(self.report_options),
         )
+        object.__setattr__(
+            self,
+            "logo_data_uri",
+            normalize_customer_logo_data_uri(self.logo_data_uri),
+        )
 
     @property
     def is_default(self) -> bool:
         return self.customer_id == "default"
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        snapshot = {
             "id": self.customer_id,
             "name": self.customer_name,
             "api_type": self.api_type,
@@ -74,3 +81,6 @@ class CustomerProfile:
             "cloud_account_code": self.cloud_account_code,
             "report_options": self.report_options.to_dict(),
         }
+        if self.logo_data_uri:
+            snapshot["logo_data_uri"] = self.logo_data_uri
+        return snapshot

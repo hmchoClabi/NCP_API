@@ -4,6 +4,18 @@ from app.infrastructure_topology import InfrastructureTopologyBuilder
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
 from app.report_options import ReportOptions
+from app.report_pipeline import (
+    ObservabilityResult,
+    ReportCollectionPlan,
+    ResourceCollectionResult,
+    SnapshotDecision,
+    build_collection_plan,
+)
+from app.report_period import (
+    build_snapshot_eligibility_window,
+    normalize_period_bounds,
+    snapshot_window_metadata,
+)
 from collectors import (
     ServerCollector,
     InsightMetricCollector,
@@ -300,14 +312,14 @@ class ReportRunner:
         self,
         period: Dict[str, Any],
     ) -> tuple[datetime, datetime]:
-        """Return canonical ``[start, end)`` report bounds in KST."""
+        """KST 보고 기간을 표준 ``[start, end)`` 경계로 반환한다."""
         period_start = self._parse_kst_datetime(period["start_dt"])
         period_end = self._parse_kst_datetime(period["end_dt"])
-        if not period.get("end_exclusive"):
-            period_end += timedelta(seconds=1)
-        if period_start >= period_end:
-            raise ValueError("Report period is invalid.")
-        return period_start, period_end
+        return normalize_period_bounds(
+            period_start,
+            period_end,
+            end_exclusive=bool(period.get("end_exclusive")),
+        )
 
     def _snapshot_eligibility_window(
         self,
@@ -320,49 +332,18 @@ class ReportRunner:
             requested_reference = self._parse_kst_datetime(str(reference_at))
         except (KeyError, TypeError, ValueError):
             return None
-        if requested_reference < period_start:
-            return None
-
-        reference = min(
-            requested_reference,
-            period_end - timedelta(microseconds=1),
-        )
-        eligible_start = period_start
-        eligible_end = min(
+        return build_snapshot_eligibility_window(
+            period_start,
             period_end,
-            reference + timedelta(microseconds=1),
+            requested_reference,
         )
-        if eligible_start >= eligible_end:
-            return None
-        return {
-            "reference_at": reference,
-            "eligible_start": eligible_start,
-            "eligible_end": eligible_end,
-        }
 
     @staticmethod
     def _snapshot_window_metadata(
         window: Optional[Dict[str, datetime]],
         observed_at: Any = None,
     ) -> Dict[str, Any]:
-        if not window:
-            return {
-                "reference_at": None,
-                "eligible_start": None,
-                "eligible_end": None,
-                "snapshot_age_seconds": None,
-            }
-        metadata: Dict[str, Any] = {
-            key: window[key].isoformat()
-            for key in ("reference_at", "eligible_start", "eligible_end")
-        }
-        metadata["snapshot_age_seconds"] = None
-        if isinstance(observed_at, datetime):
-            metadata["snapshot_age_seconds"] = max(
-                0,
-                int((window["reference_at"] - observed_at).total_seconds()),
-            )
-        return metadata
+        return snapshot_window_metadata(window, observed_at)
 
     def _snapshot_observed_in_window(
         self,
@@ -712,73 +693,16 @@ class ReportRunner:
             })
         return topology
 
-    def run(
+    def _resolve_snapshot_decision(
         self,
-        target_month: Optional[str] = None,
-        target_day: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        start_datetime: Optional[str] = None,
-        end_datetime: Optional[str] = None,
-    ) -> ReportResult:
-        period = self.get_period(
-            target_month=target_month,
-            target_day=target_day,
-            start_date=start_date,
-            end_date=end_date,
-            start_datetime=start_datetime,
-            end_datetime=end_datetime,
-        )
-        billing_context = self._billing_period_context(period)
-        period.update(billing_context)
-
-        self.print_period_summary(period)
-        report_options = self._selected_report_options()
-        report_options_snapshot = report_options.to_dict()
-        customer_snapshot = (
-            getattr(self, "customer", None).to_dict()
-            if getattr(self, "customer", None) is not None
-            else {}
-        )
-        selected_resource_categories = set(
-            report_options_snapshot["resource_categories"]
-        )
-        selected_monitoring_categories = set(
-            report_options_snapshot["monitoring_categories"]
-        )
-        inventory_enabled = report_options.section_enabled(
-            "infrastructure_inventory"
-        )
-        diagram_enabled = (
-            report_options.section_enabled("infrastructure_diagram")
-            and bool(report_options.diagram_option("enabled", True))
-        )
-        monitoring_enabled = report_options.section_enabled("monitoring")
-        active_monitoring_categories = (
-            selected_monitoring_categories if monitoring_enabled else set()
-        )
-        monitored_infrastructure_categories = (
-            active_monitoring_categories - {"SERVER"}
-        )
-        collection_resource_categories = set()
-        if inventory_enabled or diagram_enabled:
-            collection_resource_categories.update(
-                selected_resource_categories
-            )
-        collection_resource_categories.update(active_monitoring_categories)
-        needs_infrastructure_collection = bool(
-            collection_resource_categories
-        )
-        needs_resource_snapshot = (
-            needs_infrastructure_collection
-            or (
-                monitoring_enabled
-                and "SERVER" in selected_monitoring_categories
-            )
-        )
-
+        *,
+        period: Dict[str, Any],
+        collection_plan: ReportCollectionPlan,
+        customer_snapshot: Dict[str, Any],
+    ) -> SnapshotDecision:
+        """보고 기간에 저장 스냅샷과 현재 수집 중 무엇을 쓸지 결정한다."""
         observation_check_at = self._now_kst_iso()
-        request_snapshot_window = self._snapshot_eligibility_window(
+        request_window = self._snapshot_eligibility_window(
             period,
             observation_check_at,
         )
@@ -791,217 +715,990 @@ class ReportRunner:
             self._parse_kst_datetime(observation_check_at)
             >= report_period_end
         )
+
         period_snapshot = None
-        snapshot_lookup_warning = None
-        if needs_resource_snapshot and not live_snapshot_in_period:
-            (
-                period_snapshot,
-                snapshot_lookup_warning,
-            ) = self._load_period_infrastructure_snapshot(
-                period,
-                customer_snapshot,
-                observation_check_at,
+        lookup_warning = None
+        if (
+            collection_plan.needs_resource_snapshot
+            and not live_snapshot_in_period
+        ):
+            period_snapshot, lookup_warning = (
+                self._load_period_infrastructure_snapshot(
+                    period,
+                    customer_snapshot,
+                    observation_check_at,
+                )
             )
+
+        # 과거 스냅샷이 없을 때만 생성 시각 기반의 보수적 보완을 허용한다.
         current_state_period_fallback = bool(
-            needs_resource_snapshot
+            collection_plan.needs_resource_snapshot
             and not live_snapshot_in_period
             and observation_after_period
             and period_snapshot is None
         )
         needs_server_collection = (
             period_snapshot is None
+            and (live_snapshot_in_period or current_state_period_fallback)
             and (
-                live_snapshot_in_period
-                or current_state_period_fallback
-            )
-            and (
-                "SERVER" in collection_resource_categories
+                "SERVER" in collection_plan.collection_resource_categories
                 or (
-                    monitoring_enabled
-                    and "SERVER" in selected_monitoring_categories
+                    collection_plan.monitoring_enabled
+                    and "SERVER"
+                    in collection_plan.selected_monitoring_categories
                 )
             )
         )
+        return SnapshotDecision(
+            observation_check_at=observation_check_at,
+            request_window=request_window,
+            live_snapshot_in_period=live_snapshot_in_period,
+            current_state_period_fallback=current_state_period_fallback,
+            period_snapshot=period_snapshot,
+            lookup_warning=lookup_warning,
+            needs_server_collection=needs_server_collection,
+        )
 
-        collection_metadata: Dict[str, Any] = {}
-        server_data: List[Dict[str, Any]] = []
-        server_errors: List[Dict[str, Any]] = []
-        server_raw_data: Dict[str, Any] = {}
-        infrastructure_collected_data: List[Dict[str, Any]] = []
-        infrastructure_errors: List[Dict[str, Any]] = []
-        infrastructure_warnings: List[Dict[str, Any]] = []
-        if snapshot_lookup_warning:
-            infrastructure_warnings.append(snapshot_lookup_warning)
-
-        if period_snapshot is not None:
-            server_data = self._dict_records(
-                period_snapshot.get("servers")
-            )
-            infrastructure_collected_data = self._dict_records(
-                period_snapshot.get("infrastructure")
-            )
-            snapshot_options_value = period_snapshot.get("report_options")
-            snapshot_resource_categories: Optional[set[str]] = None
-            if isinstance(snapshot_options_value, dict):
-                snapshot_resource_categories = set(
-                    ReportOptions.from_value(
-                        snapshot_options_value
-                    ).to_dict()["resource_categories"]
-                )
-            snapshot_metadata = period_snapshot.get("collection_metadata")
-            snapshot_infrastructure_metadata = (
-                snapshot_metadata.get("infrastructure")
-                if isinstance(snapshot_metadata, dict)
-                else None
-            )
-            if not isinstance(snapshot_infrastructure_metadata, dict):
-                snapshot_infrastructure_metadata = {}
-            metadata_categories = (
-                snapshot_infrastructure_metadata.get(
-                    "collected_categories"
-                )
-                or snapshot_infrastructure_metadata.get(
+    def _stored_snapshot_result(
+        self,
+        *,
+        period: Dict[str, Any],
+        snapshot: Dict[str, Any],
+        observation_check_at: str,
+        requested_categories: set[str] | frozenset[str],
+        initial_warnings: List[Dict[str, Any]],
+    ) -> ResourceCollectionResult:
+        """저장된 보고서 스냅샷을 현재 실행의 수집 결과 형식으로 복원한다."""
+        result = ResourceCollectionResult(
+            servers=self._dict_records(snapshot.get("servers")),
+            infrastructure=self._dict_records(snapshot.get("infrastructure")),
+            infrastructure_warnings=list(initial_warnings),
+        )
+        snapshot_options = snapshot.get("report_options")
+        snapshot_categories: Optional[set[str]] = None
+        if isinstance(snapshot_options, dict):
+            snapshot_categories = set(
+                ReportOptions.from_value(snapshot_options).to_dict()[
                     "resource_categories"
-                )
+                ]
             )
-            if isinstance(metadata_categories, list):
-                snapshot_resource_categories = {
-                    str(category).upper()
-                    for category in metadata_categories
-                }
-            snapshot_reference = period_snapshot.get("_snapshot_reference")
-            if not isinstance(snapshot_reference, dict):
-                snapshot_reference = {}
-            stored_observed_at = (
-                snapshot_infrastructure_metadata.get("completed_at")
-                or snapshot_infrastructure_metadata.get("started_at")
-                or snapshot_reference.get("observed_at")
-            )
-            stored_reference_at = (
-                snapshot_reference.get("reference_at")
-                or observation_check_at
-            )
-            stored_window = self._snapshot_eligibility_window(
-                period,
-                stored_reference_at,
-            )
-            try:
-                parsed_stored_observed_at = self._parse_kst_datetime(
-                    str(stored_observed_at)
-                )
-            except (TypeError, ValueError):
-                parsed_stored_observed_at = None
-            collection_metadata["infrastructure"] = {
-                **snapshot_infrastructure_metadata,
-                "completed_at": stored_observed_at,
-                "source": "STORED_REPORT_SNAPSHOT",
-                "time_basis": "REPORT_PERIOD",
-                "source_report_run_id": snapshot_reference.get(
-                    "report_run_id"
-                ),
-                **self._snapshot_window_metadata(
-                    stored_window,
-                    parsed_stored_observed_at,
-                ),
+
+        snapshot_metadata = snapshot.get("collection_metadata")
+        infrastructure_metadata = (
+            snapshot_metadata.get("infrastructure")
+            if isinstance(snapshot_metadata, dict)
+            else None
+        )
+        if not isinstance(infrastructure_metadata, dict):
+            infrastructure_metadata = {}
+        metadata_categories = (
+            infrastructure_metadata.get("collected_categories")
+            or infrastructure_metadata.get("resource_categories")
+        )
+        if isinstance(metadata_categories, list):
+            snapshot_categories = {
+                str(category).upper() for category in metadata_categories
             }
 
-            original_issue_count = snapshot_infrastructure_metadata.get(
-                "collection_issue_count"
+        snapshot_reference = snapshot.get("_snapshot_reference")
+        if not isinstance(snapshot_reference, dict):
+            snapshot_reference = {}
+        stored_observed_at = (
+            infrastructure_metadata.get("completed_at")
+            or infrastructure_metadata.get("started_at")
+            or snapshot_reference.get("observed_at")
+        )
+        stored_reference_at = (
+            snapshot_reference.get("reference_at") or observation_check_at
+        )
+        stored_window = self._snapshot_eligibility_window(
+            period,
+            stored_reference_at,
+        )
+        try:
+            parsed_observed_at = self._parse_kst_datetime(
+                str(stored_observed_at)
             )
-            try:
-                original_issue_count = max(0, int(original_issue_count or 0))
-            except (TypeError, ValueError):
-                original_issue_count = 1
-            original_completeness = str(
-                snapshot_infrastructure_metadata.get(
-                    "inventory_completeness"
-                )
-                or "UNKNOWN"
-            ).upper()
-            coverage_issue_count = 0
-            if snapshot_resource_categories is None:
-                infrastructure_warnings.append({
-                    "collector": "InfrastructureSnapshotRepository",
-                    "stage": "historical_snapshot_coverage",
-                    "target_type": "infrastructure",
-                    "severity": "warning",
-                    "code": "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN",
-                    "message": (
-                        "저장된 과거 스냅샷에 수집 자원 범주 메타데이터가 없어 "
-                        "현재 선택 항목의 전체 포함 여부를 검증할 수 없습니다."
-                    ),
-                })
-                collection_metadata["infrastructure"].update({
-                    "inventory_completeness": "PARTIAL",
-                    "collection_issue_count": original_issue_count + 1,
-                })
-            else:
-                missing_categories = sorted(
-                    collection_resource_categories
-                    - snapshot_resource_categories
-                )
-                if missing_categories:
-                    coverage_issue_count = 1
-                    infrastructure_warnings.append({
-                        "collector": "InfrastructureSnapshotRepository",
-                        "stage": "historical_snapshot_coverage",
-                        "target_type": "infrastructure",
-                        "severity": "warning",
-                        "code": "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE",
-                        "missing_categories": missing_categories,
-                        "message": (
-                            "저장된 과거 스냅샷이 현재 선택한 일부 자원 범주를 "
-                            "수집하지 않아 구성도에서 제외했습니다."
-                        ),
-                    })
-                collection_metadata["infrastructure"].update({
-                    "inventory_completeness": (
-                        "PARTIAL"
-                        if (
-                            missing_categories
-                            or original_issue_count
-                            or original_completeness
-                            not in {
-                                "COMPLETE_FOR_SELECTED_SCOPE",
-                                "COMPLETE_FOR_SNAPSHOT_SCOPE",
-                            }
-                        )
-                        else "COMPLETE_FOR_SNAPSHOT_SCOPE"
-                    ),
-                    "collection_issue_count": (
-                        original_issue_count + coverage_issue_count
-                    ),
-                })
-        elif needs_resource_snapshot and not live_snapshot_in_period:
-            collection_metadata["infrastructure"] = {
-                "source": "UNAVAILABLE",
-                "time_basis": "REPORT_PERIOD",
-                "period_start": period.get("start_dt"),
-                "period_end": period.get("end_dt"),
-                "inventory_completeness": "UNAVAILABLE",
-                "collection_issue_count": 1,
-                **self._snapshot_window_metadata(request_snapshot_window),
-            }
-            infrastructure_warnings.append({
-                "collector": "InfrastructureCollector",
-                "stage": "historical_snapshot_lookup",
+        except (TypeError, ValueError):
+            parsed_observed_at = None
+        result.collection_metadata["infrastructure"] = {
+            **infrastructure_metadata,
+            "completed_at": stored_observed_at,
+            "source": "STORED_REPORT_SNAPSHOT",
+            "time_basis": "REPORT_PERIOD",
+            "source_report_run_id": snapshot_reference.get("report_run_id"),
+            **self._snapshot_window_metadata(
+                stored_window,
+                parsed_observed_at,
+            ),
+        }
+
+        original_issue_count = infrastructure_metadata.get(
+            "collection_issue_count"
+        )
+        try:
+            original_issue_count = max(0, int(original_issue_count or 0))
+        except (TypeError, ValueError):
+            original_issue_count = 1
+        original_completeness = str(
+            infrastructure_metadata.get("inventory_completeness") or "UNKNOWN"
+        ).upper()
+
+        if snapshot_categories is None:
+            result.infrastructure_warnings.append({
+                "collector": "InfrastructureSnapshotRepository",
+                "stage": "historical_snapshot_coverage",
                 "target_type": "infrastructure",
                 "severity": "warning",
-                "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
+                "code": "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN",
                 "message": (
-                    (
-                        "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
-                        "목록은 현재 자원의 생성 시각으로 보완하고 구성도는 "
-                        "과거 상태를 임의로 대체하지 않습니다."
-                    )
-                    if current_state_period_fallback
-                    else (
-                        "보고 기간이 아직 시작되지 않았거나 기간 안에 "
-                        "수집된 인프라 스냅샷이 없어 현재 상태로 "
-                        "대체하지 않았습니다."
-                    )
+                    "저장된 과거 스냅샷에 수집 자원 범주 메타데이터가 없어 "
+                    "현재 선택 항목의 전체 포함 여부를 검증할 수 없습니다."
                 ),
             })
+            result.collection_metadata["infrastructure"].update({
+                "inventory_completeness": "PARTIAL",
+                "collection_issue_count": original_issue_count + 1,
+            })
+            return result
+
+        missing_categories = sorted(
+            requested_categories - snapshot_categories
+        )
+        if missing_categories:
+            result.infrastructure_warnings.append({
+                "collector": "InfrastructureSnapshotRepository",
+                "stage": "historical_snapshot_coverage",
+                "target_type": "infrastructure",
+                "severity": "warning",
+                "code": "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE",
+                "missing_categories": missing_categories,
+                "message": (
+                    "저장된 과거 스냅샷이 현재 선택한 일부 자원 범주를 "
+                    "수집하지 않아 구성도에서 제외했습니다."
+                ),
+            })
+        result.collection_metadata["infrastructure"].update({
+            "inventory_completeness": (
+                "PARTIAL"
+                if (
+                    missing_categories
+                    or original_issue_count
+                    or original_completeness
+                    not in {
+                        "COMPLETE_FOR_SELECTED_SCOPE",
+                        "COMPLETE_FOR_SNAPSHOT_SCOPE",
+                    }
+                )
+                else "COMPLETE_FOR_SNAPSHOT_SCOPE"
+            ),
+            "collection_issue_count": (
+                original_issue_count + int(bool(missing_categories))
+            ),
+        })
+        return result
+
+    def _unavailable_snapshot_result(
+        self,
+        *,
+        period: Dict[str, Any],
+        decision: SnapshotDecision,
+        initial_warnings: List[Dict[str, Any]],
+    ) -> ResourceCollectionResult:
+        """보고 기간의 스냅샷을 확보하지 못한 상태를 명시적으로 만든다."""
+        warnings = list(initial_warnings)
+        warnings.append({
+            "collector": "InfrastructureCollector",
+            "stage": "historical_snapshot_lookup",
+            "target_type": "infrastructure",
+            "severity": "warning",
+            "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
+            "message": (
+                (
+                    "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
+                    "목록은 현재 자원의 생성 시각으로 보완하고 구성도는 "
+                    "과거 상태를 임의로 대체하지 않습니다."
+                )
+                if decision.current_state_period_fallback
+                else (
+                    "보고 기간이 아직 시작되지 않았거나 기간 안에 "
+                    "수집된 인프라 스냅샷이 없어 현재 상태로 "
+                    "대체하지 않았습니다."
+                )
+            ),
+        })
+        return ResourceCollectionResult(
+            infrastructure_warnings=warnings,
+            collection_metadata={
+                "infrastructure": {
+                    "source": "UNAVAILABLE",
+                    "time_basis": "REPORT_PERIOD",
+                    "period_start": period.get("start_dt"),
+                    "period_end": period.get("end_dt"),
+                    "inventory_completeness": "UNAVAILABLE",
+                    "collection_issue_count": 1,
+                    **self._snapshot_window_metadata(
+                        decision.request_window
+                    ),
+                }
+            },
+        )
+
+    def _collect_observability(
+        self,
+        *,
+        period: Dict[str, Any],
+        report_options: ReportOptions,
+        server_data: List[Dict[str, Any]],
+        infrastructure_data: List[Dict[str, Any]],
+        monitoring_enabled: bool,
+        selected_monitoring_categories: set[str] | frozenset[str],
+        monitored_infrastructure_categories: set[str] | frozenset[str],
+        base_errors: List[List[Dict[str, Any]]],
+        base_warnings: List[List[Dict[str, Any]]],
+    ) -> ObservabilityResult:
+        """메트릭과 이벤트 수집을 한 단계로 실행하고 오류를 병합한다."""
+        server_metrics: List[Dict[str, Any]] = []
+        server_metric_errors: List[Dict[str, Any]] = []
+        if monitoring_enabled and "SERVER" in selected_monitoring_categories:
+            server_metrics, server_metric_errors = (
+                self.collect_insight_metrics(
+                    server_data=server_data,
+                    period=period,
+                )
+            )
+
+        infrastructure_metrics: List[Dict[str, Any]] = []
+        infrastructure_metric_errors: List[Dict[str, Any]] = []
+        infrastructure_metric_warnings: List[Dict[str, Any]] = []
+        if monitored_infrastructure_categories:
+            metric_resource_categories = set(
+                monitored_infrastructure_categories
+            )
+            if "LOAD_BALANCER" in metric_resource_categories:
+                metric_resource_categories.add("TARGET_GROUP")
+            monitoring_infrastructure = [
+                item for item in infrastructure_data
+                if str(item.get("category") or "").upper()
+                in metric_resource_categories
+            ]
+            (
+                infrastructure_metrics,
+                infrastructure_metric_errors,
+                infrastructure_metric_warnings,
+            ) = self.collect_infrastructure_metrics(
+                infrastructure=monitoring_infrastructure,
+                start_time=period["start_time"],
+                end_time=period["end_time"],
+                categories=monitored_infrastructure_categories,
+            )
+
+        insight_events: List[Dict[str, Any]] = []
+        grouped_insight_events: Dict[str, List[Dict[str, Any]]] = {}
+        insight_event_errors: List[Dict[str, Any]] = []
+        if report_options.section_enabled("insight_events"):
+            (
+                insight_events,
+                grouped_insight_events,
+                insight_event_errors,
+            ) = self.collect_insight_events(period=period)
+
+        activity_events: Dict[str, Any] = {}
+        activity_errors: List[Dict[str, Any]] = []
+        if report_options.section_enabled("activity_history"):
+            activity_collector = ActivityTracerEventCollector(
+                api_factory=self.api_factory
+            )
+            activity_events = activity_collector.collect(
+                start_time=period["start_time"],
+                end_time=period["end_time"],
+            )
+            activity_errors = list(
+                getattr(activity_collector, "last_errors", [])
+            )
+
+        insight_errors = self._merge_error_lists(
+            server_metric_errors,
+            insight_event_errors,
+        )
+        return ObservabilityResult(
+            server_metrics=server_metrics,
+            infrastructure_metrics=infrastructure_metrics,
+            insight_events=insight_events,
+            grouped_insight_events=grouped_insight_events,
+            activity_events=activity_events,
+            activity_errors=activity_errors,
+            insight_event_errors=insight_event_errors,
+            insight_errors=insight_errors,
+            errors=self._merge_error_lists(
+                *base_errors,
+                insight_errors,
+                infrastructure_metric_errors,
+                activity_errors,
+            ),
+            warnings=self._merge_error_lists(
+                *base_warnings,
+                infrastructure_metric_warnings,
+            ),
+        )
+
+    def _write_prebilling_artifacts(
+        self,
+        *,
+        period: Dict[str, Any],
+        observability: ObservabilityResult,
+        infrastructure: List[Dict[str, Any]],
+    ) -> None:
+        """과금 단계와 무관하게 완료된 수집 산출물을 먼저 보존한다.
+
+        Billing API가 실패해도 서버·인프라·이벤트 수집 결과는 진단에
+        필요하므로 이 저장 단계는 과금 수집보다 반드시 먼저 실행한다.
+        """
+        file_suffix = period["file_suffix"]
+        self.print_server_metric_summary(
+            observability.server_metrics,
+            file_suffix=file_suffix,
+        )
+        self.print_insight_event_summary(observability.insight_events)
+        self.print_insight_error_summary(
+            observability.insight_errors,
+            file_suffix=file_suffix,
+        )
+        self.save_json_file(
+            data={
+                "events": observability.insight_events,
+                "grouped_events": observability.grouped_insight_events,
+                "errors": observability.insight_event_errors,
+            },
+            output_dir=self.output_dir,
+            filename=f"cloud_insight_events_{file_suffix}.json",
+        )
+        self.save_json_file(
+            data=observability.activity_events,
+            output_dir=self.output_dir,
+            filename=f"activity_tracer_events_{file_suffix}.json",
+        )
+        self.save_json_file(
+            data=observability.errors,
+            output_dir=self.output_dir,
+            filename=f"collection_errors_{file_suffix}.json",
+        )
+        self.save_json_file(
+            data=infrastructure,
+            output_dir=self.output_dir,
+            filename=f"infrastructure_inventory_{file_suffix}.json",
+        )
+        self.save_json_file(
+            data=observability.infrastructure_metrics,
+            output_dir=self.output_dir,
+            filename=f"infrastructure_metrics_{file_suffix}.json",
+        )
+
+        # 기존 진단 파일 계약상 Activity 오류는 병합 파일과 별도로도 남긴다.
+        self.save_json_file(
+            data=observability.activity_errors,
+            output_dir=self.output_dir,
+            filename=f"activity_tracer_errors_{file_suffix}.json",
+        )
+
+    def _collect_billing(
+        self,
+        *,
+        period: Dict[str, Any],
+        report_options: ReportOptions,
+        collection_errors: List[Dict[str, Any]],
+        collection_warnings: List[Dict[str, Any]],
+    ) -> tuple[
+        Dict[str, Any],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
+        """Organization 범위를 포함한 과금 수집과 정규화를 실행한다."""
+        billing_enabled = (
+            report_options.section_enabled("billing")
+            or report_options.section_enabled("organization_billing")
+        )
+        if not billing_enabled:
+            return {}, collection_errors, collection_warnings
+
+        billing_collector = None
+        billing_stage = "collection"
+        try:
+            organization_context = (
+                OrganizationCollector(api_factory=self.api_factory).discover()
+                if report_options.section_enabled("organization_billing")
+                else {"scope": "SELF", "members": []}
+            )
+            billing_collector = BillingCollector(api_factory=self.api_factory)
+            billing_raw = billing_collector.collect_raw(
+                use_start_date=period["use_start_date"],
+                use_end_date=period["usage_query_end_date"],
+                demand_month=period["billing_month"],
+                region_code="KR",
+                pay_currency_code="KRW",
+                confirmed_demand_month=period["confirmed_demand_month"],
+                month_to_date_start=period["month_to_date_start"],
+                month_to_date_end=period["month_to_date_end"],
+                organization_context=organization_context,
+            )
+            collection_errors = self._merge_error_lists(
+                collection_errors,
+                getattr(billing_collector, "last_errors", []),
+            )
+            collection_warnings = self._merge_error_lists(
+                collection_warnings,
+                getattr(billing_collector, "last_warnings", []),
+            )
+            self.save_json_file(
+                data=collection_errors,
+                output_dir=self.output_dir,
+                filename=(
+                    f"collection_errors_{period['file_suffix']}.json"
+                ),
+            )
+            self.save_json_file(
+                data=billing_raw,
+                output_dir=self.output_dir,
+                filename=f"billing_raw_{period['file_suffix']}.json",
+            )
+
+            billing_stage = "normalization"
+            billing_result = BillingNormalizer().normalize(
+                raw_data=billing_raw,
+                current_month=period["billing_month"],
+                billing_month=period["billing_month"],
+                use_end_date=period["use_end_date"],
+                comparison_enabled=bool(period.get("is_closed_month", False)),
+                report_period=period,
+                calculated_at=period["calculated_at"],
+            )
+            self.save_json_file(
+                data=billing_result,
+                output_dir=self.output_dir,
+                filename=f"billing_result_{period['file_suffix']}.json",
+            )
+        except Exception as exc:
+            billing_failure = {
+                "collector": (
+                    "BillingCollector"
+                    if billing_stage == "collection"
+                    else "BillingNormalizer"
+                ),
+                "stage": billing_stage,
+                "target_type": "billing",
+                "api": "platform",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+            collection_errors = self._merge_error_lists(
+                collection_errors,
+                getattr(billing_collector, "last_errors", []),
+                [billing_failure],
+            )
+            self.save_json_file(
+                data=collection_errors,
+                output_dir=self.output_dir,
+                filename=(
+                    f"collection_errors_{period['file_suffix']}.json"
+                ),
+            )
+            raise
+
+        self.print_network_usage_summary(
+            billing_result.get("network_usage_summary", [])
+        )
+        self.print_billing_summary(billing_result, period=period)
+        self.print_usage_summary(billing_result.get("usage_summary", []))
+        return billing_result, collection_errors, collection_warnings
+
+    def _persist_report_artifacts(
+        self,
+        report: ReportResult,
+        *,
+        file_suffix: str,
+    ) -> None:
+        """공개 산출물을 기록하고, 설정된 경우 동일 보고서를 DB에 저장한다."""
+        report_json_path = self.save_json_file(
+            data=report.to_dict(),
+            output_dir=self.output_dir,
+            filename=f"ncp_report_{file_suffix}.json",
+        )
+        report_html_path = Path(self.output_dir) / (
+            f"ncp_report_{file_suffix}.html"
+        )
+        HtmlReportRenderer().write(report=report, path=report_html_path)
+
+        repository = getattr(self, "report_repository", None)
+        if repository is None:
+            return
+        try:
+            repository.save_report(
+                report,
+                artifacts={
+                    "PUBLIC_JSON": report_json_path,
+                    "HTML": report_html_path,
+                },
+            )
+        except Exception:
+            if getattr(
+                getattr(repository, "settings", None),
+                "required",
+                True,
+            ):
+                raise
+            logging.getLogger(__name__).exception(
+                "보고서는 생성했지만 선택적 DB 저장에 실패했습니다."
+            )
+
+    def _apply_current_state_period_fallback(
+        self,
+        *,
+        period: Dict[str, Any],
+        server_data: List[Dict[str, Any]],
+        infrastructure_collected_data: List[Dict[str, Any]],
+        infrastructure_warnings: List[Dict[str, Any]],
+    ) -> tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        Dict[str, Any],
+    ]:
+        """현재 자원에서 보고 종료 전에 생성된 항목만 보수적으로 남긴다.
+
+        현재 API만으로 삭제·변경된 과거 자원을 복원할 수 없으므로 생성 시각이
+        확인된 신규 자원만 제외한다. 생성 시각이 없는 자원은 누락 방지를 위해
+        유지하되 UNKNOWN 경고로 과거 존재 여부가 확정되지 않았음을 표시한다.
+        """
+        current_infrastructure = infrastructure_collected_data
+        (
+            infrastructure_collected_data,
+            infrastructure_filter_stats,
+        ) = self._filter_current_infrastructure_for_period(
+            current_infrastructure,
+            period,
+        )
+        server_data, server_filter_stats = (
+            self._filter_current_servers_for_period(
+                server_data,
+                current_infrastructure,
+                period,
+            )
+        )
+        historical_filter_stats = {
+            "infrastructure": infrastructure_filter_stats,
+            "servers": server_filter_stats,
+        }
+        infrastructure_warnings.append({
+            "collector": "InfrastructureCollector",
+            "stage": "historical_presence_inference",
+            "target_type": "infrastructure",
+            "severity": "warning",
+            "code": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
+            "message": (
+                "저장된 기간 스냅샷이 없어 현재 자원 중 보고 종료 "
+                "이전에 생성된 자원만 목록과 모니터링 대상으로 "
+                "사용했습니다. 삭제되었거나 변경된 과거 자원은 "
+                "복원되지 않습니다."
+            ),
+        })
+        unknown_resource_keys = {
+            (
+                str(resource.get("category") or "").upper(),
+                str(
+                    resource.get("resource_id")
+                    or resource.get("resource_name")
+                    or f"row-{index}"
+                ),
+            )
+            for index, resource in enumerate(
+                infrastructure_collected_data
+            )
+            if (
+                isinstance(resource.get("details"), dict)
+                and resource["details"].get(
+                    "historical_presence_confidence"
+                ) == "UNKNOWN"
+            )
+        }
+        unknown_resource_keys.update(
+            (
+                "SERVER",
+                str(
+                    server.get("server_id")
+                    or server.get("server_name")
+                    or f"row-{index}"
+                ),
+            )
+            for index, server in enumerate(server_data)
+            if server.get("historical_presence_confidence")
+            == "UNKNOWN"
+        )
+        unknown_create_time_count = len(unknown_resource_keys)
+        historical_filter_stats["unknown_create_time_count"] = (
+            unknown_create_time_count
+        )
+        if unknown_create_time_count:
+            infrastructure_warnings.append({
+                "collector": "InfrastructureCollector",
+                "stage": "historical_presence_inference",
+                "target_type": "infrastructure",
+                "severity": "warning",
+                "code": "RESOURCE_CREATE_TIME_UNAVAILABLE",
+                "unknown_create_time_count": (
+                    unknown_create_time_count
+                ),
+                "message": (
+                    "생성 시각을 확인할 수 없는 현재 자원은 누락을 "
+                    "방지하기 위해 포함했으며 과거 존재 여부는 "
+                    "확정할 수 없습니다."
+                ),
+            })
+
+        return (
+            server_data,
+            infrastructure_collected_data,
+            historical_filter_stats,
+        )
+
+    def _restore_boundary_snapshot_payload(
+        self,
+        *,
+        period: Dict[str, Any],
+        boundary_snapshot: Dict[str, Any],
+        completed_at: Any,
+    ) -> tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        Dict[str, Any],
+        Dict[str, Any],
+    ]:
+        """경계 대체 스냅샷의 payload와 관측 기준 metadata를 복원한다.
+
+        서버와 인프라는 저장 payload만 사용하고, 관측 시각은 수집 완료·시작·
+        저장소 참조 시각 순으로 선택해 기존 저장 보고서의 시간 기준을 유지한다.
+        """
+        server_data = self._dict_records(boundary_snapshot.get("servers"))
+        infrastructure_collected_data = self._dict_records(
+            boundary_snapshot.get("infrastructure")
+        )
+        boundary_metadata = boundary_snapshot.get("collection_metadata")
+        if not isinstance(boundary_metadata, dict):
+            boundary_metadata = {}
+        boundary_infrastructure_metadata = boundary_metadata.get(
+            "infrastructure"
+        )
+        if not isinstance(boundary_infrastructure_metadata, dict):
+            boundary_infrastructure_metadata = {}
+        boundary_reference = boundary_snapshot.get("_snapshot_reference")
+        if not isinstance(boundary_reference, dict):
+            boundary_reference = {}
+        boundary_observed_at = (
+            boundary_infrastructure_metadata.get("completed_at")
+            or boundary_infrastructure_metadata.get("started_at")
+            or boundary_reference.get("observed_at")
+        )
+        boundary_reference_at = (
+            boundary_reference.get("reference_at") or completed_at
+        )
+        boundary_window = self._snapshot_eligibility_window(
+            period,
+            boundary_reference_at,
+        )
+        try:
+            parsed_boundary_observed_at = self._parse_kst_datetime(
+                str(boundary_observed_at)
+            )
+        except (TypeError, ValueError):
+            parsed_boundary_observed_at = None
+        restored_metadata = {
+            **boundary_infrastructure_metadata,
+            "completed_at": boundary_observed_at,
+            "source": "STORED_REPORT_SNAPSHOT",
+            "time_basis": "REPORT_PERIOD",
+            "source_report_run_id": boundary_reference.get(
+                "report_run_id"
+            ),
+            **self._snapshot_window_metadata(
+                boundary_window,
+                parsed_boundary_observed_at,
+            ),
+        }
+        return (
+            server_data,
+            infrastructure_collected_data,
+            boundary_infrastructure_metadata,
+            restored_metadata,
+        )
+
+    def _validate_boundary_snapshot_observation(
+        self,
+        *,
+        period: Dict[str, Any],
+        collection_metadata: Dict[str, Any],
+        infrastructure_warnings: List[Dict[str, Any]],
+    ) -> bool:
+        """대체 스냅샷 관측 시각이 보고 기간 안인지 검증한다.
+
+        검증 실패 시 현재 또는 저장 payload를 노출하지 않도록 metadata를
+        UNAVAILABLE로 바꾸고, 호출자가 서버·raw·인프라 데이터를 비우게 한다.
+        """
+        boundary_observed_at = collection_metadata["infrastructure"].get(
+            "completed_at"
+        )
+        if self._period_contains_timestamp(period, boundary_observed_at):
+            return True
+
+        collection_metadata["infrastructure"] = {
+            "source": "UNAVAILABLE",
+            "time_basis": "REPORT_PERIOD",
+            "period_start": period.get("start_dt"),
+            "period_end": period.get("end_dt"),
+            "inventory_completeness": "UNAVAILABLE",
+            "collection_issue_count": 1,
+        }
+        infrastructure_warnings.append({
+            "collector": "InfrastructureSnapshotRepository",
+            "stage": "period_boundary_fallback_validation",
+            "target_type": "infrastructure",
+            "severity": "warning",
+            "code": "SNAPSHOT_OUTSIDE_REPORT_PERIOD",
+            "message": (
+                "경계 대체 스냅샷의 관측 시각이 보고 기간 "
+                "밖이어서 사용하지 않았습니다."
+            ),
+        })
+        return False
+
+    def _update_boundary_snapshot_coverage(
+        self,
+        *,
+        collection_resource_categories: frozenset[str],
+        boundary_infrastructure_metadata: Dict[str, Any],
+        collection_metadata: Dict[str, Any],
+        infrastructure_warnings: List[Dict[str, Any]],
+    ) -> None:
+        """요청 범주 coverage와 원본 수집 상태를 최종 completeness에 반영한다."""
+        boundary_categories = (
+            boundary_infrastructure_metadata.get("collected_categories")
+            or boundary_infrastructure_metadata.get("resource_categories")
+        )
+        missing_boundary_categories = []
+        coverage_unknown = not isinstance(boundary_categories, list)
+        if not coverage_unknown:
+            missing_boundary_categories = sorted(
+                collection_resource_categories
+                - {
+                    str(category).upper()
+                    for category in boundary_categories
+                }
+            )
+        original_boundary_issue_count = (
+            boundary_infrastructure_metadata.get("collection_issue_count")
+        )
+        try:
+            original_boundary_issue_count = max(
+                0,
+                int(original_boundary_issue_count or 0),
+            )
+        except (TypeError, ValueError):
+            original_boundary_issue_count = 1
+        original_boundary_completeness = str(
+            boundary_infrastructure_metadata.get("inventory_completeness")
+            or "UNKNOWN"
+        ).upper()
+        coverage_issue_count = int(
+            coverage_unknown or bool(missing_boundary_categories)
+        )
+        if coverage_unknown or missing_boundary_categories:
+            infrastructure_warnings.append({
+                "collector": "InfrastructureSnapshotRepository",
+                "stage": "period_boundary_fallback_coverage",
+                "target_type": "infrastructure",
+                "severity": "warning",
+                "code": (
+                    "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN"
+                    if coverage_unknown
+                    else "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE"
+                ),
+                "missing_categories": missing_boundary_categories,
+                "message": (
+                    "경계 대체 스냅샷이 현재 선택 범주의 "
+                    "전체 수집 범위를 충족하지 않습니다."
+                ),
+            })
+        collection_metadata["infrastructure"].update({
+            "inventory_completeness": (
+                "PARTIAL"
+                if (
+                    coverage_issue_count
+                    or original_boundary_issue_count
+                    or original_boundary_completeness
+                    not in {
+                        "COMPLETE_FOR_SELECTED_SCOPE",
+                        "COMPLETE_FOR_SNAPSHOT_SCOPE",
+                    }
+                )
+                else "COMPLETE_FOR_SNAPSHOT_SCOPE"
+            ),
+            "collection_issue_count": (
+                original_boundary_issue_count + coverage_issue_count
+            ),
+        })
+
+    def _mark_missing_boundary_snapshot_unavailable(
+        self,
+        *,
+        period: Dict[str, Any],
+        completed_at: Any,
+        collection_metadata: Dict[str, Any],
+    ) -> tuple[
+        List[Dict[str, Any]],
+        Dict[str, Any],
+        List[Dict[str, Any]],
+    ]:
+        """경계 시각에 적합한 저장 스냅샷이 없음을 명시하고 데이터를 비운다."""
+        collection_metadata["infrastructure"] = {
+            "source": "UNAVAILABLE",
+            "time_basis": "REPORT_PERIOD",
+            "period_start": period.get("start_dt"),
+            "period_end": period.get("end_dt"),
+            "inventory_completeness": "UNAVAILABLE",
+            "collection_issue_count": 1,
+            **self._snapshot_window_metadata(
+                self._snapshot_eligibility_window(
+                    period,
+                    completed_at,
+                )
+            ),
+        }
+        return [], {}, []
+
+    def _reselect_snapshot_after_period_boundary(
+        self,
+        *,
+        period: Dict[str, Any],
+        customer_snapshot: Dict[str, Any],
+        collection_resource_categories: frozenset[str],
+        live_snapshot_in_period: bool,
+        collection_metadata: Dict[str, Any],
+        server_data: List[Dict[str, Any]],
+        server_raw_data: Dict[str, Any],
+        infrastructure_collected_data: List[Dict[str, Any]],
+        infrastructure_warnings: List[Dict[str, Any]],
+    ) -> tuple[
+        List[Dict[str, Any]],
+        Dict[str, Any],
+        List[Dict[str, Any]],
+    ]:
+        """실시간 수집 완료가 기간 경계를 넘으면 저장 스냅샷을 다시 선택한다.
+
+        조회와 경고 순서는 이 조율 메서드가 유지하고, payload 복원·관측시각
+        검증·범주 coverage 판정은 각각 독립된 정책 helper에 위임한다.
+        """
+        completed_at = collection_metadata["infrastructure"].get(
+            "completed_at"
+        )
+        if not (
+            live_snapshot_in_period
+            and not self._period_contains_timestamp(period, completed_at)
+        ):
+            return (
+                server_data,
+                server_raw_data,
+                infrastructure_collected_data,
+            )
+
+        boundary_snapshot, boundary_lookup_warning = (
+            self._load_period_infrastructure_snapshot(
+                period,
+                customer_snapshot,
+                completed_at,
+            )
+        )
+        infrastructure_warnings.append({
+            "collector": "InfrastructureCollector",
+            "stage": "period_boundary_validation",
+            "target_type": "infrastructure",
+            "severity": "warning",
+            "code": "LIVE_SNAPSHOT_OUTSIDE_PERIOD",
+            "message": (
+                "인프라 수집이 보고 기간 종료 경계를 넘어 완료되어 "
+                "해당 실시간 결과를 보고서에서 제외했습니다."
+            ),
+        })
+        if boundary_lookup_warning:
+            infrastructure_warnings.append(boundary_lookup_warning)
+        if boundary_snapshot is None:
+            return self._mark_missing_boundary_snapshot_unavailable(
+                period=period,
+                completed_at=completed_at,
+                collection_metadata=collection_metadata,
+            )
+
+        (
+            server_data,
+            infrastructure_collected_data,
+            boundary_infrastructure_metadata,
+            restored_metadata,
+        ) = self._restore_boundary_snapshot_payload(
+            period=period,
+            boundary_snapshot=boundary_snapshot,
+            completed_at=completed_at,
+        )
+        collection_metadata["infrastructure"] = restored_metadata
+        if not self._validate_boundary_snapshot_observation(
+            period=period,
+            collection_metadata=collection_metadata,
+            infrastructure_warnings=infrastructure_warnings,
+        ):
+            return [], {}, []
+
+        self._update_boundary_snapshot_coverage(
+            collection_resource_categories=collection_resource_categories,
+            boundary_infrastructure_metadata=(
+                boundary_infrastructure_metadata
+            ),
+            collection_metadata=collection_metadata,
+            infrastructure_warnings=infrastructure_warnings,
+        )
+        return (
+            server_data,
+            server_raw_data,
+            infrastructure_collected_data,
+        )
+
+    def _collect_live_resource_state(
+        self,
+        *,
+        period: Dict[str, Any],
+        collection_plan: ReportCollectionPlan,
+        snapshot_decision: SnapshotDecision,
+        customer_snapshot: Dict[str, Any],
+        resource_result: ResourceCollectionResult,
+    ) -> ResourceCollectionResult:
+        """서버와 인프라의 실시간 수집 및 기간 보정 단계를 실행한다."""
+
+        selected_resource_categories = (
+            collection_plan.selected_resource_categories
+        )
+        collection_resource_categories = (
+            collection_plan.collection_resource_categories
+        )
+        needs_infrastructure_collection = (
+            collection_plan.needs_infrastructure_collection
+        )
+        collection_metadata = resource_result.collection_metadata
+        server_data = resource_result.servers
+        server_errors = resource_result.server_errors
+        server_raw_data = resource_result.server_raw_data
+        infrastructure_collected_data = resource_result.infrastructure
+        infrastructure_errors = resource_result.infrastructure_errors
+        infrastructure_warnings = resource_result.infrastructure_warnings
+        period_snapshot = snapshot_decision.period_snapshot
+        live_snapshot_in_period = snapshot_decision.live_snapshot_in_period
+        current_state_period_fallback = (
+            snapshot_decision.current_state_period_fallback
+        )
+        needs_server_collection = snapshot_decision.needs_server_collection
 
         if needs_server_collection:
             server_collector = ServerCollector(api_factory=self.api_factory)
@@ -1047,91 +1744,18 @@ class ReportRunner:
             )
             historical_filter_stats: Dict[str, Any] = {}
             if current_state_period_fallback:
-                current_infrastructure = infrastructure_collected_data
                 (
+                    server_data,
                     infrastructure_collected_data,
-                    infrastructure_filter_stats,
-                ) = self._filter_current_infrastructure_for_period(
-                    current_infrastructure,
-                    period,
-                )
-                server_data, server_filter_stats = (
-                    self._filter_current_servers_for_period(
-                        server_data,
-                        current_infrastructure,
-                        period,
-                    )
-                )
-                historical_filter_stats = {
-                    "infrastructure": infrastructure_filter_stats,
-                    "servers": server_filter_stats,
-                }
-                infrastructure_warnings.append({
-                    "collector": "InfrastructureCollector",
-                    "stage": "historical_presence_inference",
-                    "target_type": "infrastructure",
-                    "severity": "warning",
-                    "code": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
-                    "message": (
-                        "저장된 기간 스냅샷이 없어 현재 자원 중 보고 종료 "
-                        "이전에 생성된 자원만 목록과 모니터링 대상으로 "
-                        "사용했습니다. 삭제되었거나 변경된 과거 자원은 "
-                        "복원되지 않습니다."
-                    ),
-                })
-                unknown_resource_keys = {
-                    (
-                        str(resource.get("category") or "").upper(),
-                        str(
-                            resource.get("resource_id")
-                            or resource.get("resource_name")
-                            or f"row-{index}"
-                        ),
-                    )
-                    for index, resource in enumerate(
+                    historical_filter_stats,
+                ) = self._apply_current_state_period_fallback(
+                    period=period,
+                    server_data=server_data,
+                    infrastructure_collected_data=(
                         infrastructure_collected_data
-                    )
-                    if (
-                        isinstance(resource.get("details"), dict)
-                        and resource["details"].get(
-                            "historical_presence_confidence"
-                        ) == "UNKNOWN"
-                    )
-                }
-                unknown_resource_keys.update(
-                    (
-                        "SERVER",
-                        str(
-                            server.get("server_id")
-                            or server.get("server_name")
-                            or f"row-{index}"
-                        ),
-                    )
-                    for index, server in enumerate(server_data)
-                    if server.get("historical_presence_confidence")
-                    == "UNKNOWN"
+                    ),
+                    infrastructure_warnings=infrastructure_warnings,
                 )
-                unknown_create_time_count = len(unknown_resource_keys)
-                historical_filter_stats["unknown_create_time_count"] = (
-                    unknown_create_time_count
-                )
-                if unknown_create_time_count:
-                    infrastructure_warnings.append({
-                        "collector": "InfrastructureCollector",
-                        "stage": "historical_presence_inference",
-                        "target_type": "infrastructure",
-                        "severity": "warning",
-                        "code": "RESOURCE_CREATE_TIME_UNAVAILABLE",
-                        "unknown_create_time_count": (
-                            unknown_create_time_count
-                        ),
-                        "message": (
-                            "생성 시각을 확인할 수 없는 현재 자원은 누락을 "
-                            "방지하기 위해 포함했으며 과거 존재 여부는 "
-                            "확정할 수 없습니다."
-                        ),
-                    })
-
             observation_metadata = (
                 {
                     "reference_at": infrastructure_completed_at,
@@ -1192,234 +1816,127 @@ class ReportRunner:
                 **observation_metadata,
             }
 
-            completed_at = collection_metadata["infrastructure"].get(
-                "completed_at"
+            (
+                server_data,
+                server_raw_data,
+                infrastructure_collected_data,
+            ) = self._reselect_snapshot_after_period_boundary(
+                period=period,
+                customer_snapshot=customer_snapshot,
+                collection_resource_categories=(
+                    collection_resource_categories
+                ),
+                live_snapshot_in_period=live_snapshot_in_period,
+                collection_metadata=collection_metadata,
+                server_data=server_data,
+                server_raw_data=server_raw_data,
+                infrastructure_collected_data=(
+                    infrastructure_collected_data
+                ),
+                infrastructure_warnings=infrastructure_warnings,
             )
-            if (
-                live_snapshot_in_period
-                and not self._period_contains_timestamp(period, completed_at)
-            ):
-                boundary_snapshot, boundary_lookup_warning = (
-                    self._load_period_infrastructure_snapshot(
-                        period,
-                        customer_snapshot,
-                        completed_at,
-                    )
-                )
-                infrastructure_warnings.append({
-                    "collector": "InfrastructureCollector",
-                    "stage": "period_boundary_validation",
-                    "target_type": "infrastructure",
-                    "severity": "warning",
-                    "code": "LIVE_SNAPSHOT_OUTSIDE_PERIOD",
-                    "message": (
-                        "인프라 수집이 보고 기간 종료 경계를 넘어 완료되어 "
-                        "해당 실시간 결과를 보고서에서 제외했습니다."
-                    ),
-                })
-                if boundary_lookup_warning:
-                    infrastructure_warnings.append(
-                        boundary_lookup_warning
-                    )
-                if boundary_snapshot is not None:
-                    server_data = self._dict_records(
-                        boundary_snapshot.get("servers")
-                    )
-                    infrastructure_collected_data = self._dict_records(
-                        boundary_snapshot.get("infrastructure")
-                    )
-                    boundary_metadata = boundary_snapshot.get(
-                        "collection_metadata"
-                    )
-                    if not isinstance(boundary_metadata, dict):
-                        boundary_metadata = {}
-                    boundary_infrastructure_metadata = (
-                        boundary_metadata.get("infrastructure")
-                    )
-                    if not isinstance(
-                        boundary_infrastructure_metadata,
-                        dict,
-                    ):
-                        boundary_infrastructure_metadata = {}
-                    boundary_reference = boundary_snapshot.get(
-                        "_snapshot_reference"
-                    )
-                    if not isinstance(boundary_reference, dict):
-                        boundary_reference = {}
-                    boundary_observed_at = (
-                        boundary_infrastructure_metadata.get(
-                            "completed_at"
-                        )
-                        or boundary_infrastructure_metadata.get(
-                            "started_at"
-                        )
-                        or boundary_reference.get("observed_at")
-                    )
-                    boundary_reference_at = (
-                        boundary_reference.get("reference_at")
-                        or completed_at
-                    )
-                    boundary_window = self._snapshot_eligibility_window(
-                        period,
-                        boundary_reference_at,
-                    )
-                    try:
-                        parsed_boundary_observed_at = (
-                            self._parse_kst_datetime(
-                                str(boundary_observed_at)
-                            )
-                        )
-                    except (TypeError, ValueError):
-                        parsed_boundary_observed_at = None
-                    collection_metadata["infrastructure"] = {
-                        **boundary_infrastructure_metadata,
-                        "completed_at": boundary_observed_at,
-                        "source": "STORED_REPORT_SNAPSHOT",
-                        "time_basis": "REPORT_PERIOD",
-                        "source_report_run_id": boundary_reference.get(
-                            "report_run_id"
-                        ),
-                        **self._snapshot_window_metadata(
-                            boundary_window,
-                            parsed_boundary_observed_at,
-                        ),
-                    }
-                    boundary_observed_at = collection_metadata[
-                        "infrastructure"
-                    ].get("completed_at")
-                    if not self._period_contains_timestamp(
-                        period,
-                        boundary_observed_at,
-                    ):
-                        server_data = []
-                        infrastructure_collected_data = []
-                        server_raw_data = {}
-                        collection_metadata["infrastructure"] = {
-                            "source": "UNAVAILABLE",
-                            "time_basis": "REPORT_PERIOD",
-                            "period_start": period.get("start_dt"),
-                            "period_end": period.get("end_dt"),
-                            "inventory_completeness": "UNAVAILABLE",
-                            "collection_issue_count": 1,
-                        }
-                        infrastructure_warnings.append({
-                            "collector": "InfrastructureSnapshotRepository",
-                            "stage": "period_boundary_fallback_validation",
-                            "target_type": "infrastructure",
-                            "severity": "warning",
-                            "code": "SNAPSHOT_OUTSIDE_REPORT_PERIOD",
-                            "message": (
-                                "경계 대체 스냅샷의 관측 시각이 보고 기간 "
-                                "밖이어서 사용하지 않았습니다."
-                            ),
-                        })
-                    else:
-                        boundary_categories = (
-                            boundary_infrastructure_metadata.get(
-                                "collected_categories"
-                            )
-                            or boundary_infrastructure_metadata.get(
-                                "resource_categories"
-                            )
-                        )
-                        missing_boundary_categories = []
-                        coverage_unknown = not isinstance(
-                            boundary_categories,
-                            list,
-                        )
-                        if not coverage_unknown:
-                            missing_boundary_categories = sorted(
-                                collection_resource_categories
-                                - {
-                                    str(category).upper()
-                                    for category in boundary_categories
-                                }
-                            )
-                        original_boundary_issue_count = (
-                            boundary_infrastructure_metadata.get(
-                                "collection_issue_count"
-                            )
-                        )
-                        try:
-                            original_boundary_issue_count = max(
-                                0,
-                                int(original_boundary_issue_count or 0),
-                            )
-                        except (TypeError, ValueError):
-                            original_boundary_issue_count = 1
-                        original_boundary_completeness = str(
-                            boundary_infrastructure_metadata.get(
-                                "inventory_completeness"
-                            )
-                            or "UNKNOWN"
-                        ).upper()
-                        coverage_issue_count = int(
-                            coverage_unknown
-                            or bool(missing_boundary_categories)
-                        )
-                        if coverage_unknown or missing_boundary_categories:
-                            infrastructure_warnings.append({
-                                "collector": (
-                                    "InfrastructureSnapshotRepository"
-                                ),
-                                "stage": (
-                                    "period_boundary_fallback_coverage"
-                                ),
-                                "target_type": "infrastructure",
-                                "severity": "warning",
-                                "code": (
-                                    "SNAPSHOT_CATEGORY_COVERAGE_UNKNOWN"
-                                    if coverage_unknown
-                                    else (
-                                        "SNAPSHOT_CATEGORY_COVERAGE_"
-                                        "INCOMPLETE"
-                                    )
-                                ),
-                                "missing_categories": (
-                                    missing_boundary_categories
-                                ),
-                                "message": (
-                                    "경계 대체 스냅샷이 현재 선택 범주의 "
-                                    "전체 수집 범위를 충족하지 않습니다."
-                                ),
-                            })
-                        collection_metadata["infrastructure"].update({
-                            "inventory_completeness": (
-                                "PARTIAL"
-                                if (
-                                    coverage_issue_count
-                                    or original_boundary_issue_count
-                                    or original_boundary_completeness
-                                    not in {
-                                        "COMPLETE_FOR_SELECTED_SCOPE",
-                                        "COMPLETE_FOR_SNAPSHOT_SCOPE",
-                                    }
-                                )
-                                else "COMPLETE_FOR_SNAPSHOT_SCOPE"
-                            ),
-                            "collection_issue_count": (
-                                original_boundary_issue_count
-                                + coverage_issue_count
-                            ),
-                        })
-                else:
-                    server_data = []
-                    infrastructure_collected_data = []
-                    server_raw_data = {}
-                    collection_metadata["infrastructure"] = {
-                        "source": "UNAVAILABLE",
-                        "time_basis": "REPORT_PERIOD",
-                        "period_start": period.get("start_dt"),
-                        "period_end": period.get("end_dt"),
-                        "inventory_completeness": "UNAVAILABLE",
-                        "collection_issue_count": 1,
-                        **self._snapshot_window_metadata(
-                            self._snapshot_eligibility_window(
-                                period,
-                                completed_at,
-                            )
-                        ),
-                    }
+
+        resource_result.collection_metadata = collection_metadata
+        resource_result.servers = server_data
+        resource_result.server_errors = server_errors
+        resource_result.server_raw_data = server_raw_data
+        resource_result.infrastructure = infrastructure_collected_data
+        resource_result.infrastructure_errors = infrastructure_errors
+        resource_result.infrastructure_warnings = infrastructure_warnings
+        return resource_result
+
+    def run(
+        self,
+        target_month: Optional[str] = None,
+        target_day: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
+    ) -> ReportResult:
+        period = self.get_period(
+            target_month=target_month,
+            target_day=target_day,
+            start_date=start_date,
+            end_date=end_date,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+        )
+        billing_context = self._billing_period_context(period)
+        period.update(billing_context)
+
+        self.print_period_summary(period)
+        collection_plan = build_collection_plan(
+            self._selected_report_options()
+        )
+        report_options = collection_plan.report_options
+        report_options_snapshot = collection_plan.report_options_snapshot
+        customer_snapshot = (
+            getattr(self, "customer", None).to_dict()
+            if getattr(self, "customer", None) is not None
+            else {}
+        )
+        selected_resource_categories = (
+            collection_plan.selected_resource_categories
+        )
+        selected_monitoring_categories = (
+            collection_plan.selected_monitoring_categories
+        )
+        diagram_enabled = collection_plan.diagram_enabled
+        monitoring_enabled = collection_plan.monitoring_enabled
+        monitored_infrastructure_categories = (
+            collection_plan.monitored_infrastructure_categories
+        )
+        collection_resource_categories = (
+            collection_plan.collection_resource_categories
+        )
+        snapshot_decision = self._resolve_snapshot_decision(
+            period=period,
+            collection_plan=collection_plan,
+            customer_snapshot=customer_snapshot,
+        )
+        initial_warnings = (
+            [snapshot_decision.lookup_warning]
+            if snapshot_decision.lookup_warning
+            else []
+        )
+        if snapshot_decision.period_snapshot is not None:
+            resource_result = self._stored_snapshot_result(
+                period=period,
+                snapshot=snapshot_decision.period_snapshot,
+                observation_check_at=(
+                    snapshot_decision.observation_check_at
+                ),
+                requested_categories=collection_resource_categories,
+                initial_warnings=initial_warnings,
+            )
+        elif (
+            collection_plan.needs_resource_snapshot
+            and not snapshot_decision.live_snapshot_in_period
+        ):
+            resource_result = self._unavailable_snapshot_result(
+                period=period,
+                decision=snapshot_decision,
+                initial_warnings=initial_warnings,
+            )
+        else:
+            resource_result = ResourceCollectionResult(
+                infrastructure_warnings=initial_warnings
+            )
+
+        resource_result = self._collect_live_resource_state(
+            period=period,
+            collection_plan=collection_plan,
+            snapshot_decision=snapshot_decision,
+            customer_snapshot=customer_snapshot,
+            resource_result=resource_result,
+        )
+        collection_metadata = resource_result.collection_metadata
+        server_data = resource_result.servers
+        server_errors = resource_result.server_errors
+        infrastructure_collected_data = resource_result.infrastructure
+        infrastructure_errors = resource_result.infrastructure_errors
+        infrastructure_warnings = resource_result.infrastructure_warnings
 
         infrastructure_data = [
             item for item in infrastructure_collected_data
@@ -1438,247 +1955,43 @@ class ReportRunner:
             else []
         )
 
-        insight_data: List[Dict[str, Any]] = []
-        insight_metric_errors: List[Dict[str, Any]] = []
-        if (
-            monitoring_enabled
-            and "SERVER" in selected_monitoring_categories
-        ):
-            insight_data, insight_metric_errors = self.collect_insight_metrics(
-                server_data=server_data,
-                period=period,
-            )
-
-        infrastructure_metric_data: List[Dict[str, Any]] = []
-        infrastructure_metric_errors: List[Dict[str, Any]] = []
-        infrastructure_metric_warnings: List[Dict[str, Any]] = []
-        if monitored_infrastructure_categories:
-            monitoring_resource_categories = set(
+        observability = self._collect_observability(
+            period=period,
+            report_options=report_options,
+            server_data=server_data,
+            infrastructure_data=infrastructure_collected_data,
+            monitoring_enabled=monitoring_enabled,
+            selected_monitoring_categories=selected_monitoring_categories,
+            monitored_infrastructure_categories=(
                 monitored_infrastructure_categories
-            )
-            if "LOAD_BALANCER" in monitoring_resource_categories:
-                monitoring_resource_categories.add("TARGET_GROUP")
-            monitoring_infrastructure = [
-                item for item in infrastructure_collected_data
-                if str(item.get("category") or "").upper()
-                in monitoring_resource_categories
-            ]
-            (
-                infrastructure_metric_data,
-                infrastructure_metric_errors,
-                infrastructure_metric_warnings,
-            ) = self.collect_infrastructure_metrics(
-                infrastructure=monitoring_infrastructure,
-                start_time=period["start_time"],
-                end_time=period["end_time"],
-                categories=monitored_infrastructure_categories,
-            )
-
-        insight_events: List[Dict[str, Any]] = []
-        insight_grouped_events: Dict[str, List[Dict[str, Any]]] = {}
-        insight_event_errors: List[Dict[str, Any]] = []
-        if report_options.section_enabled("insight_events"):
-            (
-                insight_events,
-                insight_grouped_events,
-                insight_event_errors,
-            ) = self.collect_insight_events(period=period)
-
-        activity_data: Dict[str, Any] = {}
-        activity_errors: List[Dict[str, Any]] = []
-        if report_options.section_enabled("activity_history"):
-            activity_collector = ActivityTracerEventCollector(
-                api_factory=self.api_factory
-            )
-            activity_data = activity_collector.collect(
-                start_time=period["start_time"],
-                end_time=period["end_time"],
-            )
-            activity_errors = list(
-                getattr(activity_collector, "last_errors", [])
-            )
-
-        all_insight_errors = self._merge_error_lists(
-            insight_metric_errors,
-            insight_event_errors,
-        )
-        all_collection_errors = self._merge_error_lists(
-            server_errors,
-            infrastructure_errors,
-            all_insight_errors,
-            infrastructure_metric_errors,
-            activity_errors,
-        )
-        all_collection_warnings = self._merge_error_lists(
-            infrastructure_warnings,
-            infrastructure_metric_warnings,
-        )
-
-        # Billing이 실패하더라도 먼저 완료된 수집 결과는 보존한다.
-        self.print_server_metric_summary(
-            insight_data,
-            file_suffix=period["file_suffix"],
-        )
-        self.print_insight_event_summary(insight_events)
-        self.print_insight_error_summary(
-            all_insight_errors,
-            file_suffix=period["file_suffix"],
-        )
-        self.save_json_file(
-            data={
-                "events": insight_events,
-                "grouped_events": insight_grouped_events,
-                "errors": insight_event_errors,
-            },
-            output_dir=self.output_dir,
-            filename=f"cloud_insight_events_{period['file_suffix']}.json",
-        )
-
-        self.save_json_file(
-            data=activity_data,
-            output_dir=self.output_dir,
-            filename=f"activity_tracer_events_{period['file_suffix']}.json",
-        )
-
-        self.save_json_file(
-            data=activity_errors,
-            output_dir=self.output_dir,
-            filename=f"activity_tracer_errors_{period['file_suffix']}.json",
-        )
-
-        self.save_json_file(
-            data=all_collection_errors,
-            output_dir=self.output_dir,
-            filename=f"collection_errors_{period['file_suffix']}.json",
-        )
-
-        self.save_json_file(
-            data=infrastructure_data,
-            output_dir=self.output_dir,
-            filename=(
-                f"infrastructure_inventory_{period['file_suffix']}.json"
             ),
+            base_errors=[server_errors, infrastructure_errors],
+            base_warnings=[infrastructure_warnings],
         )
-        self.save_json_file(
-            data=infrastructure_metric_data,
-            output_dir=self.output_dir,
-            filename=(
-                f"infrastructure_metrics_{period['file_suffix']}.json"
-            ),
+        insight_data = observability.server_metrics
+        infrastructure_metric_data = observability.infrastructure_metrics
+        insight_events = observability.insight_events
+        insight_grouped_events = observability.grouped_insight_events
+        activity_data = observability.activity_events
+        all_collection_errors = observability.errors
+        all_collection_warnings = observability.warnings
+
+        self._write_prebilling_artifacts(
+            period=period,
+            observability=observability,
+            infrastructure=infrastructure_data,
         )
 
-        billing_result: Dict[str, Any] = {}
-        billing_enabled = (
-            report_options.section_enabled("billing")
-            or report_options.section_enabled("organization_billing")
+        (
+            billing_result,
+            all_collection_errors,
+            all_collection_warnings,
+        ) = self._collect_billing(
+            period=period,
+            report_options=report_options,
+            collection_errors=all_collection_errors,
+            collection_warnings=all_collection_warnings,
         )
-        if billing_enabled:
-            billing_collector = None
-            billing_stage = "collection"
-
-            try:
-                organization_context = (
-                    OrganizationCollector(
-                        api_factory=self.api_factory
-                    ).discover()
-                    if report_options.section_enabled(
-                        "organization_billing"
-                    )
-                    else {"scope": "SELF", "members": []}
-                )
-                billing_collector = BillingCollector(
-                    api_factory=self.api_factory
-                )
-                billing_raw = billing_collector.collect_raw(
-                    use_start_date=period["use_start_date"],
-                    use_end_date=period["usage_query_end_date"],
-                    demand_month=period["billing_month"],
-                    region_code="KR",
-                    pay_currency_code="KRW",
-                    confirmed_demand_month=(
-                        period["confirmed_demand_month"]
-                    ),
-                    month_to_date_start=period["month_to_date_start"],
-                    month_to_date_end=period["month_to_date_end"],
-                    organization_context=organization_context,
-                )
-                billing_errors = list(
-                    getattr(billing_collector, "last_errors", [])
-                )
-                all_collection_errors = self._merge_error_lists(
-                    all_collection_errors,
-                    billing_errors,
-                )
-                all_collection_warnings = self._merge_error_lists(
-                    all_collection_warnings,
-                    getattr(billing_collector, "last_warnings", []),
-                )
-                self.save_json_file(
-                    data=all_collection_errors,
-                    output_dir=self.output_dir,
-                    filename=(
-                        f"collection_errors_{period['file_suffix']}.json"
-                    ),
-                )
-                self.save_json_file(
-                    data=billing_raw,
-                    output_dir=self.output_dir,
-                    filename=f"billing_raw_{period['file_suffix']}.json",
-                )
-
-                billing_stage = "normalization"
-                billing_result = BillingNormalizer().normalize(
-                    raw_data=billing_raw,
-                    current_month=period["billing_month"],
-                    billing_month=period["billing_month"],
-                    use_end_date=period["use_end_date"],
-                    comparison_enabled=bool(
-                        period.get("is_closed_month", False)
-                    ),
-                    report_period=period,
-                    calculated_at=period["calculated_at"],
-                )
-                self.save_json_file(
-                    data=billing_result,
-                    output_dir=self.output_dir,
-                    filename=(
-                        f"billing_result_{period['file_suffix']}.json"
-                    ),
-                )
-            except Exception as exc:
-                billing_failure = {
-                    "collector": (
-                        "BillingCollector"
-                        if billing_stage == "collection"
-                        else "BillingNormalizer"
-                    ),
-                    "stage": billing_stage,
-                    "target_type": "billing",
-                    "api": "platform",
-                    "exception_type": type(exc).__name__,
-                    "message": safe_exception_message(exc),
-                }
-                all_collection_errors = self._merge_error_lists(
-                    all_collection_errors,
-                    getattr(billing_collector, "last_errors", []),
-                    [billing_failure],
-                )
-                self.save_json_file(
-                    data=all_collection_errors,
-                    output_dir=self.output_dir,
-                    filename=(
-                        f"collection_errors_{period['file_suffix']}.json"
-                    ),
-                )
-                raise
-
-            self.print_network_usage_summary(
-                billing_result.get("network_usage_summary", [])
-            )
-            self.print_billing_summary(billing_result, period=period)
-            self.print_usage_summary(
-                billing_result.get("usage_summary", [])
-            )
 
         infrastructure_topology: Dict[str, Any] = {}
         if diagram_enabled:
@@ -1711,38 +2024,10 @@ class ReportRunner:
             collection_warnings=all_collection_warnings,
             generated_at=self._now_kst_iso(),
         )
-        report_json_path = self.save_json_file(
-            data=report.to_dict(),
-            output_dir=self.output_dir,
-            filename=f"ncp_report_{period['file_suffix']}.json",
+        self._persist_report_artifacts(
+            report,
+            file_suffix=period["file_suffix"],
         )
-        report_html_path = Path(self.output_dir) / (
-            f"ncp_report_{period['file_suffix']}.html"
-        )
-        HtmlReportRenderer().write(
-            report=report,
-            path=report_html_path,
-        )
-        repository = getattr(self, "report_repository", None)
-        if repository is not None:
-            try:
-                repository.save_report(
-                    report,
-                    artifacts={
-                        "PUBLIC_JSON": report_json_path,
-                        "HTML": report_html_path,
-                    },
-                )
-            except Exception:
-                if getattr(
-                    getattr(repository, "settings", None),
-                    "required",
-                    True,
-                ):
-                    raise
-                logging.getLogger(__name__).exception(
-                    "보고서는 생성했지만 선택적 DB 저장에 실패했습니다."
-                )
         return report
 
     def print_period_summary(self, period: Dict[str, Any]) -> None:

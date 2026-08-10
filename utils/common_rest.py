@@ -9,8 +9,9 @@ import logging
 import numbers
 import time
 from collections.abc import Mapping
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
 import requests
 
 from ncp_api.auth import NCPAuth
@@ -223,7 +224,7 @@ class NCPBaseClient:
         secret_key: str,
         base_url: str,
         timeout: int = API_TIMEOUT,
-        retry_count: int = API_RETRY_COUNT
+        retry_count: int = API_RETRY_COUNT,
     ):
         """
         API 클라이언트를 초기화합니다.
@@ -243,11 +244,10 @@ class NCPBaseClient:
             raise ValueError("base_url must not contain a query string or fragment")
 
         self.auth = NCPAuth(access_key, secret_key)
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.retry_count = retry_count
         self.session = requests.Session()
-    
 
     def _prepare_params(self, params: Optional[Union[Dict, List]]) -> str:
         """
@@ -258,15 +258,15 @@ class NCPBaseClient:
         - 이미 만들어진 key 예: vpcNoList.1, sortList.1.sortedBy 는 그대로 유지
         """
         if not params:
-            return ''
+            return ""
 
         processed_params = {}
 
         # 최상위 params가 list인 경우는 거의 없지만, 지원하려면 JSON으로 전달
         if isinstance(params, list):
-            return urlencode({
-                "items": json.dumps(params, ensure_ascii=False)
-            })
+            return urlencode(
+                {"items": json.dumps(params, ensure_ascii=False)}
+            )
 
         if isinstance(params, dict):
             for key, value in params.items():
@@ -281,16 +281,15 @@ class NCPBaseClient:
                     processed_params[key] = str(value)
 
             return urlencode(processed_params)
-        return ''
+        return ""
 
     def _prepare_headers(
         self,
         method: str,
         uri: str,
         custom_headers: Optional[Dict[str, str]] = None,
-        query_string: Optional[str] = None
+        query_string: Optional[str] = None,
     ) -> Dict[str, str]:
-        
         """
         요청 헤더를 생성합니다.
 
@@ -314,17 +313,15 @@ class NCPBaseClient:
             }
         """    
 
-        headers = {
-            'Accept': 'application/json'
-        }
+        headers = {"Accept": "application/json"}
         # 기본 JSON 요청 헤더
-        if method.upper() in ['POST', 'PUT', 'PATCH']:
-            headers['Content-Type'] = 'application/json'
+        if method.upper() in ["POST", "PUT", "PATCH"]:
+            headers["Content-Type"] = "application/json"
         # 인증 헤더 생성
         auth_headers = self.auth.get_auth_headers(
             method,
             uri,
-            query_string=query_string
+            query_string=query_string,
         )
         headers.update(auth_headers)
         # API별 커스텀 헤더 override
@@ -333,6 +330,226 @@ class NCPBaseClient:
             headers.update(custom_headers)
 
         return headers
+
+    def _resolve_request_url(self, endpoint: str) -> str:
+        """인증정보를 보낼 수 있는 동일 origin의 요청 URL을 만든다."""
+        endpoint_parts = urlparse(endpoint)
+        is_absolute = bool(endpoint_parts.scheme or endpoint_parts.netloc)
+        if is_absolute:
+            if not endpoint_parts.scheme or not endpoint_parts.netloc:
+                raise ValueError("absolute endpoint must include scheme and host")
+            # NCP 인증 헤더가 외부 호스트로 전달되지 않도록 origin을 고정한다.
+            if _origin(endpoint) != _origin(self.base_url):
+                raise ValueError(
+                    "absolute endpoint origin must match the configured base_url"
+                )
+            return endpoint
+        return f"{self.base_url}/{endpoint.lstrip('/')}"
+
+    def _merge_query_and_signature_uri(
+        self,
+        url: str,
+        params: Optional[Union[Dict, List]],
+    ) -> tuple[str, str]:
+        """전송 URL과 정확히 같은 query를 포함한 서명 URI를 반환한다."""
+        query_string = self._prepare_params(params)
+        parsed_url = urlparse(url)
+        merged_query = "&".join(
+            part for part in (parsed_url.query, query_string) if part
+        )
+        parsed_url = parsed_url._replace(query=merged_query, fragment="")
+        request_url = urlunparse(parsed_url)
+        signature_uri = parsed_url.path
+        if merged_query:
+            signature_uri = f"{signature_uri}?{merged_query}"
+        return request_url, signature_uri
+
+    @staticmethod
+    def _validate_body_modes(
+        data: Optional[Union[Dict, List, str, bytes]],
+        json_data: Optional[Union[Dict, List]],
+        files: Optional[Dict],
+    ) -> bool:
+        has_files = bool(files)
+        if json_data is not None and (data is not None or has_files):
+            raise ValueError("json_data cannot be combined with data or files")
+        if has_files and data is not None and not isinstance(data, dict):
+            raise ValueError("files can only be combined with dict form data")
+        return has_files
+
+    def _build_request_kwargs(
+        self,
+        request_headers: Dict[str, str],
+        *,
+        data: Optional[Union[Dict, List, str, bytes]],
+        json_data: Optional[Union[Dict, List]],
+        files: Optional[Dict],
+        timeout: Optional[int],
+        has_files: bool,
+    ) -> dict[str, Any]:
+        request_timeout = timeout if timeout is not None else self.timeout
+        _validate_positive_number(request_timeout, "timeout")
+        request_kwargs: dict[str, Any] = {
+            "headers": request_headers,
+            "timeout": request_timeout,
+            # NCP 인증 헤더가 Location의 다른 origin으로 전달되지 않도록
+            # requests의 자동 redirect를 항상 금지한다.
+            "allow_redirects": False,
+        }
+
+        if json_data is not None:
+            request_kwargs["json"] = json_data
+            return request_kwargs
+
+        if has_files:
+            # multipart boundary는 requests가 생성하므로 기본 Content-Type을 제거한다.
+            for header_name in list(request_headers):
+                if header_name.lower() == "content-type":
+                    del request_headers[header_name]
+            request_kwargs["files"] = files
+            if data is not None:
+                request_kwargs["data"] = data
+            return request_kwargs
+
+        if data is None:
+            return request_kwargs
+
+        content_type = next(
+            (
+                value.lower()
+                for key, value in request_headers.items()
+                if key.lower() == "content-type"
+            ),
+            "",
+        )
+        sends_raw_data = (
+            "application/x-www-form-urlencoded" in content_type
+            or "application/octet-stream" in content_type
+            or "application/xml" in content_type
+            or "text/xml" in content_type
+            or content_type.startswith("text/")
+        )
+        if sends_raw_data or not isinstance(data, (dict, list)):
+            request_kwargs["data"] = data
+        else:
+            request_kwargs["json"] = data
+        return request_kwargs
+
+    @staticmethod
+    def _log_request(
+        method: str,
+        url: str,
+        request_headers: Dict[str, str],
+        *,
+        params: Optional[Union[Dict, List]],
+        data: Optional[Union[Dict, List, str, bytes]],
+        json_data: Optional[Union[Dict, List]],
+        files: Optional[Dict],
+        has_files: bool,
+    ) -> None:
+        logger.info(
+            "[API Request] %s %s",
+            method,
+            _safe_url(url, include_query=False),
+        )
+        logger.debug("  - URL: %s", _safe_url(url, include_query=True))
+        logger.debug("  - Headers: %s", _safe_json(request_headers))
+
+        if json_data is not None:
+            logger.debug("  - Request Body (JSON): %s", _safe_json(json_data))
+        elif data is not None:
+            logger.debug("  - Request Body (Data): %s", _safe_json(data))
+
+        if has_files:
+            logger.debug(
+                "  - Request File Fields: %s",
+                [
+                    _REDACTED if _is_sensitive_key(key) else key
+                    for key in files
+                ],
+            )
+
+        if params:
+            logger.debug("  - Query Params: %s", _safe_json(params))
+
+    def _send_with_retry(
+        self,
+        method: str,
+        url: str,
+        request_kwargs: dict[str, Any],
+        *,
+        retry_safe: bool,
+    ) -> requests.Response:
+        # 읽기 전용 POST처럼 호출자가 멱등성을 보장한 경우에만 retry-safe를 쓴다.
+        can_retry = method in _RETRYABLE_METHODS or retry_safe
+        max_attempts = self.retry_count if can_retry else 1
+        last_exception: Optional[requests.RequestException] = None
+
+        for attempt in range(max_attempts):
+            try:
+                response = self.session.request(method, url, **request_kwargs)
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    raise requests.HTTPError(
+                        "redirect responses are not allowed",
+                        response=response,
+                    )
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                last_exception = exc
+                status_code = (
+                    exc.response.status_code
+                    if exc.response is not None
+                    else None
+                )
+                is_transient_http_error = (
+                    status_code == 429
+                    or (
+                        status_code is not None
+                        and 500 <= status_code <= 599
+                    )
+                )
+                is_connection_error = isinstance(
+                    exc,
+                    (requests.ConnectionError, requests.Timeout),
+                )
+                should_retry = (
+                    can_retry
+                    and (is_transient_http_error or is_connection_error)
+                    and attempt < max_attempts - 1
+                )
+
+                if should_retry:
+                    wait_time = 2 ** attempt
+                    logger.warning(
+                        "Transient request failure "
+                        "(method=%s, status=%s, attempt=%s/%s)",
+                        method,
+                        status_code
+                        if status_code is not None
+                        else type(exc).__name__,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    logger.info("Retrying in %s seconds...", wait_time)
+                    time.sleep(wait_time)
+                else:
+                    logger.error(
+                        "Request failed "
+                        "(method=%s, status=%s, attempts=%s)",
+                        method,
+                        status_code
+                        if status_code is not None
+                        else type(exc).__name__,
+                        attempt + 1,
+                    )
+                    raise
+
+        # retry_count는 생성 시 1 이상으로 검증되므로 방어적 경로이다.
+        if last_exception is None:
+            raise RuntimeError("request failed before an attempt was made")
+        raise last_exception
+
     def _make_request(
         self,
         method: str,
@@ -354,196 +571,108 @@ class NCPBaseClient:
         """
 
         method = method.upper()
-        endpoint_parts = urlparse(endpoint)
-        is_absolute = bool(endpoint_parts.scheme or endpoint_parts.netloc)
-        if is_absolute:
-            if not endpoint_parts.scheme or not endpoint_parts.netloc:
-                raise ValueError("absolute endpoint must include scheme and host")
-            if _origin(endpoint) != _origin(self.base_url):
-                raise ValueError(
-                    "absolute endpoint origin must match the configured base_url"
-                )
-            url = endpoint
-        else:
-            endpoint = endpoint.lstrip('/')
-            url = f"{self.base_url}/{endpoint}"
-
-        has_files = bool(files)
-        if json_data is not None and (data is not None or has_files):
-            raise ValueError("json_data cannot be combined with data or files")
-        if has_files and data is not None and not isinstance(data, dict):
-            raise ValueError("files can only be combined with dict form data")
-
-        # 파라미터 처리
-        query_string = self._prepare_params(params)
-        parsed_url = urlparse(url)
-        merged_query = "&".join(
-            part for part in (parsed_url.query, query_string) if part
-        )
-        parsed_url = parsed_url._replace(query=merged_query, fragment="")
-        url = urlunparse(parsed_url)
-
-        # URI 추출 및 실제 전송 query와 동일한 문자열로 서명
-        uri = parsed_url.path
-        if merged_query:
-            uri = f"{uri}?{merged_query}"
-
-        # 헤더 준비
+        url = self._resolve_request_url(endpoint)
+        has_files = self._validate_body_modes(data, json_data, files)
+        url, signature_uri = self._merge_query_and_signature_uri(url, params)
         request_headers = self._prepare_headers(
             method,
-            uri,
+            signature_uri,
             custom_headers=headers,
             query_string=None,
         )
+        request_kwargs = self._build_request_kwargs(
+            request_headers,
+            data=data,
+            json_data=json_data,
+            files=files,
+            timeout=timeout,
+            has_files=has_files,
+        )
+        self._log_request(
+            method,
+            url,
+            request_headers,
+            params=params,
+            data=data,
+            json_data=json_data,
+            files=files,
+            has_files=has_files,
+        )
+        return self._send_with_retry(
+            method,
+            url,
+            request_kwargs,
+            retry_safe=retry_safe,
+        )
 
-        request_timeout = timeout if timeout is not None else self.timeout
-        _validate_positive_number(request_timeout, "timeout")
+    @staticmethod
+    def _log_response(response: requests.Response) -> None:
+        logger.info("[API Response] Status: %s", response.status_code)
+        logger.debug(
+            "  - Response Headers: %s",
+            _safe_json(dict(response.headers)),
+        )
+        logger.debug(
+            "  - Response URL: %s",
+            _safe_url(response.url or "", include_query=True),
+        )
 
-        request_kwargs = {
-            'headers': request_headers,
-            'timeout': request_timeout,
-            # NCP 전용 인증 헤더가 다른 origin의 Location으로 전달되지 않게
-            # 자동 redirect를 금지합니다.
-            'allow_redirects': False,
-        }
+    @staticmethod
+    def _decode_response(response: requests.Response) -> Any:
+        if not response.text.strip():
+            logger.info("  - Empty response body")
+            return {
+                "status_code": response.status_code,
+                "empty": True,
+            }
 
-        # ============================================================
-        # 요청 Body 처리
-        # ============================================================
+        content_type = response.headers.get("Content-Type", "").lower()
+        is_json = "application/json" in content_type or "+json" in content_type
+        is_xml = (
+            "application/xml" in content_type
+            or "text/xml" in content_type
+            or "+xml" in content_type
+        )
+        is_text = content_type.startswith("text/") and not is_xml
 
-        # 1. 명시적 JSON 요청
-        if json_data is not None:
-            request_kwargs['json'] = json_data
-
-        # 2. 파일 업로드 요청
-        elif has_files:
-            # requests가 multipart boundary를 자동 생성해야 하므로 제거
-            for header_name in list(request_headers):
-                if header_name.lower() == 'content-type':
-                    del request_headers[header_name]
-            request_kwargs['files'] = files
-            if data is not None:
-                request_kwargs['data'] = data
-
-        # 3. 일반 data 요청
-        elif data is not None:
-            content_type = next(
-                (
-                    value.lower()
-                    for key, value in request_headers.items()
-                    if key.lower() == 'content-type'
-                ),
-                '',
-            )
-
-            # form-urlencoded
-            if 'application/x-www-form-urlencoded' in content_type:
-                request_kwargs['data'] = data
-
-            # binary body
-            elif 'application/octet-stream' in content_type:
-                request_kwargs['data'] = data
-
-            # XML / text / raw body
-            elif (
-                'application/xml' in content_type
-                or 'text/xml' in content_type
-                or content_type.startswith('text/')
-            ):
-                request_kwargs['data'] = data
-
-            # 기본값: dict/list는 JSON으로 전송
-            elif isinstance(data, (dict, list)):
-                request_kwargs['json'] = data
-
-            # str/bytes는 그대로 전송
-            else:
-                request_kwargs['data'] = data
-
-        # ============================================================
-        # 로깅
-        # ============================================================
-
-        logger.info("[API Request] %s %s", method, _safe_url(url, include_query=False))
-        logger.debug("  - URL: %s", _safe_url(url, include_query=True))
-        logger.debug("  - Headers: %s", _safe_json(request_headers))
-
-        if json_data is not None:
-            logger.debug("  - Request Body (JSON): %s", _safe_json(json_data))
-        elif data is not None:
-            logger.debug("  - Request Body (Data): %s", _safe_json(data))
-
-        if has_files:
+        if is_text or is_xml:
+            logger.info("  - Response Type: %s", "XML" if is_xml else "Text")
             logger.debug(
-                "  - Request File Fields: %s",
-                [_REDACTED if _is_sensitive_key(key) else key for key in files],
+                "  - Response Body: <text length=%s>",
+                len(response.text),
             )
+            return {
+                "text": response.text,
+                "status_code": response.status_code,
+            }
 
-        if params:
-            logger.debug("  - Query Params: %s", _safe_json(params))
-
-        # ============================================================
-        # 요청 실행
-        # ============================================================
-
-        can_retry = method in _RETRYABLE_METHODS or retry_safe
-        max_attempts = self.retry_count if can_retry else 1
-        last_exception: Optional[requests.RequestException] = None
-
-        for attempt in range(max_attempts):
+        if is_json:
+            json_response = response.json()
+        else:
+            # Content-Type이 없거나 일반 바이너리인 기존 API와 호환하기 위해
+            # JSON을 먼저 시도하고 실패하면 텍스트 envelope를 반환한다.
             try:
-                response = self.session.request(method, url, **request_kwargs)
-                if response.status_code in _REDIRECT_STATUS_CODES:
-                    raise requests.HTTPError(
-                        "redirect responses are not allowed",
-                        response=response,
-                    )
-                response.raise_for_status()
-                return response
-
-            except requests.RequestException as e:
-                last_exception = e
-                status_code = e.response.status_code if e.response is not None else None
-                is_transient_http_error = (
-                    status_code == 429
-                    or (status_code is not None and 500 <= status_code <= 599)
+                json_response = response.json()
+            except requests.exceptions.JSONDecodeError:
+                logger.info("  - Response Type: Text")
+                logger.debug(
+                    "  - Response Body: <text length=%s>",
+                    len(response.text),
                 )
-                is_connection_error = isinstance(
-                    e,
-                    (requests.ConnectionError, requests.Timeout),
-                )
-                should_retry = (
-                    can_retry
-                    and (is_transient_http_error or is_connection_error)
-                    and attempt < max_attempts - 1
-                )
+                return {
+                    "text": response.text,
+                    "status_code": response.status_code,
+                }
 
-                if should_retry:
-                    wait_time = 2 ** attempt
-                    logger.warning(
-                        "Transient request failure "
-                        "(method=%s, status=%s, attempt=%s/%s)",
-                        method,
-                        status_code if status_code is not None else type(e).__name__,
-                        attempt + 1,
-                        max_attempts,
-                    )
-                    logger.info("Retrying in %s seconds...", wait_time)
-                    time.sleep(wait_time)
-                else:
-                    logger.error(
-                        "Request failed "
-                        "(method=%s, status=%s, attempts=%s)",
-                        method,
-                        status_code if status_code is not None else type(e).__name__,
-                        attempt + 1,
-                    )
-                    raise
-
-        # retry_count는 생성 시 1 이상으로 검증되므로 방어적 경로입니다.
-        if last_exception is None:
-            raise RuntimeError("request failed before an attempt was made")
-        raise last_exception
+        if isinstance(json_response, list):
+            logger.info("  - Response Type: List (length: %s)", len(json_response))
+        elif isinstance(json_response, dict):
+            logger.info("  - Response Type: Dict")
+            logger.info("  - Response Keys: %s", list(json_response.keys()))
+        else:
+            logger.info("  - Response Type: %s", type(json_response).__name__)
+        logger.debug("  - Response Body: %s", _safe_json(json_response))
+        return json_response
     
     def request(
         self,
@@ -611,61 +740,8 @@ class NCPBaseClient:
             timeout=timeout,
             retry_safe=retry_safe,
         )
-        
-        # 응답 로깅 (상세 디버깅)
-        logger.info("[API Response] Status: %s", response.status_code)
-        logger.debug(
-            "  - Response Headers: %s",
-            _safe_json(dict(response.headers)),
-        )
-        logger.debug(
-            "  - Response URL: %s",
-            _safe_url(response.url or "", include_query=True),
-        )
-        
-        # 빈 body 처리
-        if not response.text.strip():
-            logger.info("  - Empty response body")
-            return {
-                'status_code': response.status_code,
-                'empty': True
-            }
-
-        content_type = response.headers.get("Content-Type", "").lower()
-        is_json = "application/json" in content_type or "+json" in content_type
-        is_xml = (
-            "application/xml" in content_type
-            or "text/xml" in content_type
-            or "+xml" in content_type
-        )
-        is_text = content_type.startswith("text/") and not is_xml
-
-        if is_text or is_xml:
-            logger.info("  - Response Type: %s", "XML" if is_xml else "Text")
-            logger.debug("  - Response Body: <text length=%s>", len(response.text))
-            return {'text': response.text, 'status_code': response.status_code}
-
-        if is_json:
-            json_response = response.json()
-        else:
-            # Content-Type이 없거나 일반 바이너리인 기존 API와의 호환을 위해
-            # 먼저 JSON을 시도하고, 유효하지 않으면 텍스트 envelope를 반환합니다.
-            try:
-                json_response = response.json()
-            except requests.exceptions.JSONDecodeError:
-                logger.info("  - Response Type: Text")
-                logger.debug("  - Response Body: <text length=%s>", len(response.text))
-                return {'text': response.text, 'status_code': response.status_code}
-
-        if isinstance(json_response, list):
-            logger.info("  - Response Type: List (length: %s)", len(json_response))
-        elif isinstance(json_response, dict):
-            logger.info("  - Response Type: Dict")
-            logger.info("  - Response Keys: %s", list(json_response.keys()))
-        else:
-            logger.info("  - Response Type: %s", type(json_response).__name__)
-        logger.debug("  - Response Body: %s", _safe_json(json_response))
-        return json_response
+        self._log_response(response)
+        return self._decode_response(response)
     
     # 편의 메서드들
     def get(
@@ -673,26 +749,32 @@ class NCPBaseClient:
         endpoint: str,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> Any:
         """GET 요청을 실행합니다."""
-        return self.request('GET', endpoint, params=params, headers=headers, timeout=timeout)
+        return self.request(
+            "GET",
+            endpoint,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+        )
     
     def get_binary(
-    self,
+        self,
         endpoint: str,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> bytes:
         """GET 요청을 실행하고 바이너리 응답을 반환합니다."""
 
         response = self._make_request(
-            method='GET',
+            method="GET",
             endpoint=endpoint,
             params=params,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
         )
 
         logger.info(f"[Binary Response] Status: {response.status_code}")
@@ -714,7 +796,8 @@ class NCPBaseClient:
     ) -> Any:
         """POST 요청을 실행합니다."""
         return self.request(
-            'POST', endpoint,
+            "POST",
+            endpoint,
             json_data=json_data,
             data=data,
             params=params,
@@ -731,16 +814,17 @@ class NCPBaseClient:
         data: Optional[Union[Dict, List, str, bytes]] = None,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> Any:
         """PUT 요청을 실행합니다."""
         return self.request(
-            'PUT', endpoint,
+            "PUT",
+            endpoint,
             json_data=json_data,
             data=data,
             params=params,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
         )
     
     def patch(
@@ -750,16 +834,17 @@ class NCPBaseClient:
         data: Optional[Union[Dict, List, str, bytes]] = None,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> Any:
         """PATCH 요청을 실행합니다."""
         return self.request(
-            'PATCH', endpoint,
+            "PATCH",
+            endpoint,
             json_data=json_data,
             data=data,
             params=params,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
         )
     
     def delete(
@@ -767,28 +852,46 @@ class NCPBaseClient:
         endpoint: str,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> Any:
         """DELETE 요청을 실행합니다."""
-        return self.request('DELETE', endpoint, params=params, headers=headers, timeout=timeout)
+        return self.request(
+            "DELETE",
+            endpoint,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+        )
     
     def head(
         self,
         endpoint: str,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> requests.Response:
         """HEAD 요청을 실행합니다."""
-        return self._make_request('HEAD', endpoint, params=params, headers=headers, timeout=timeout)
+        return self._make_request(
+            "HEAD",
+            endpoint,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+        )
     
     def options(
         self,
         endpoint: str,
         params: Optional[Union[Dict, List]] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> requests.Response:
         """OPTIONS 요청을 실행합니다."""
-        return self._make_request('OPTIONS', endpoint, params=params, headers=headers, timeout=timeout)
+        return self._make_request(
+            "OPTIONS",
+            endpoint,
+            params=params,
+            headers=headers,
+            timeout=timeout,
+        )
 

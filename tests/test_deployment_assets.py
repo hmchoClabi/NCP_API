@@ -88,8 +88,8 @@ def test_forced_test_customer_deletion_is_audited():
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "140"' in values
-    assert 'REPORT_SCHEMA_VERSION:-140' in (
+    assert 'schemaVersion: "150"' in values
+    assert 'REPORT_SCHEMA_VERSION:-150' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
 
@@ -136,12 +136,56 @@ def test_tenant_report_settings_are_migrated_with_rls():
     assert "VALUES ('140'" in migration
 
 
+def test_tenant_branding_is_size_limited_and_tenant_isolated():
+    migration = (
+        ROOT / "database" / "schema" / "150_tenant_branding.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "control.tenant_branding" in migration
+    assert "octet_length(logo_content) BETWEEN 1 AND 524288" in migration
+    assert "image/svg+xml" not in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "tenant_branding_public_worker_access" in migration
+    assert "tenant_branding_gov_worker_access" in migration
+    assert "SELECT, INSERT, UPDATE, DELETE" in migration
+    assert "VALUES ('150'" in migration
+    verification = (
+        ROOT / "database" / "verify_database.sql"
+    ).read_text(encoding="utf-8")
+    assert "tenant_branding" in verification
+    assert "Expected at least 33 tables" in verification
+
+
 def test_sourcebuild_deployment_waits_for_migration_job():
     script = (
         ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1"
     ).read_text(encoding="utf-8")
 
     assert '"--wait-for-jobs"' in script
+
+
+def test_sourcebuild_runner_uses_dedicated_credentials_and_exact_build_id():
+    script = (
+        ROOT / "deploy" / "scripts" / "run-sourcebuild.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert "NCP_SOURCEBUILD_ACCESS_KEY" in script
+    assert "NCP_SOURCEBUILD_SECRET_KEY" in script
+    assert '"x-ncp-apigw-signature-v2"' in script
+    assert '"$Method $RequestPath`n$Timestamp`n$AccessKey"' in script
+    assert 'RequestPath "/api/v1/project/$ProjectId/build"' in script
+    assert 'RequestPath "/api/v1/project/$Id/history"' in script
+    assert "Find-SourceBuildHistoryEntry" in script
+    assert "Resolve-SourceBuildTag" in script
+    assert "failedPhase" in script
+    assert "SourceBuild timed out" in script
+    assert "SupportsShouldProcess = $true" in script
+    assert "NCP_ACCESS_KEY" not in script.replace(
+        "NCP_SOURCEBUILD_ACCESS_KEY", ""
+    )
+    assert "NCP_SECRET_KEY" not in script.replace(
+        "NCP_SOURCEBUILD_SECRET_KEY", ""
+    )
 
 
 def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():

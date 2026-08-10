@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from ._event_collection_support import _EventCollectorBase
 from normalizers.insighteventnormalizer import InsightEventNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
@@ -9,16 +10,13 @@ from utils.response_validation import validate_collection_response
 logger = logging.getLogger(__name__)
 
 
-class InsightEventCollector:
+class InsightEventCollector(_EventCollectorBase):
     EVENT_PAGE_SIZE = 100
     MAX_PAGES = 10_000
+    NORMALIZER_ERROR_API = "get_search_event"
 
     def __init__(self, api_factory: Any):
-        self.api_factory = api_factory
-        self.normalizer = InsightEventNormalizer()
-        self.last_errors: List[Dict[str, Any]] = []
-        self.last_events: List[Dict[str, Any]] = []
-        self.last_grouped_events: Dict[str, List[Dict[str, Any]]] = {}
+        super().__init__(api_factory, InsightEventNormalizer())
 
     def collect(
         self,
@@ -28,9 +26,7 @@ class InsightEventCollector:
         group_by: str = "resource",
     ) -> Dict[str, List[Dict[str, Any]]]:
         logger.info("Cloud Insight 이벤트 수집을 시작합니다.")
-        self.last_errors = []
-        self.last_events = []
-        self.last_grouped_events = {}
+        self._reset_event_state()
 
         try:
             raw_events = self.collect_raw(
@@ -39,19 +35,14 @@ class InsightEventCollector:
                 cw_key=cw_key,
             )
 
-            normalized_events = self.normalizer.normalize(raw_events)
-            self._extend_normalizer_errors()
-
-            grouped_events = self.normalizer.group_events(
-                events=normalized_events,
-                group_by=group_by,
+            grouped_events = self._normalize_and_group_events(
+                raw_events,
+                group_by,
             )
-            self.last_events = normalized_events
-            self.last_grouped_events = grouped_events
 
             logger.info(
                 "Cloud Insight 이벤트 수집 완료: %s건",
-                len(normalized_events),
+                len(self.last_events),
             )
 
             return grouped_events
@@ -96,6 +87,8 @@ class InsightEventCollector:
         fetched_count = 0
         page_no = 1
 
+        # Insight는 1번 페이지부터 시작하고 totalRecords로 종료를 판단한다.
+        # cw_key는 API 인수가 아니므로 응답의 prodKey를 로컬에서 필터링한다.
         while page_no <= self.MAX_PAGES:
             params = {
                 "start_time": start_time,
@@ -312,45 +305,3 @@ class InsightEventCollector:
                 return value
 
         return default
-
-    def _extend_normalizer_errors(self) -> None:
-        for error in getattr(self.normalizer, "last_errors", []):
-            normalized_error = dict(error)
-            normalized_error.setdefault(
-                "collector",
-                self.__class__.__name__,
-            )
-            normalized_error.setdefault("target_type", "event")
-            normalized_error.setdefault("api", "get_search_event")
-            self.last_errors.append(normalized_error)
-
-    def _record_error(
-        self,
-        stage: str,
-        api: str,
-        exc: Optional[Exception] = None,
-        page_no: Optional[int] = None,
-        message: Optional[str] = None,
-    ) -> None:
-        error: Dict[str, Any] = {
-            "collector": self.__class__.__name__,
-            "stage": stage,
-            "target_type": "event",
-            "api": api,
-            "message": (
-                message
-                or (
-                    safe_exception_message(exc)
-                    if exc
-                    else "알 수 없는 오류"
-                )
-            ),
-        }
-
-        if page_no is not None:
-            error["page_no"] = page_no
-
-        if exc is not None:
-            error["exception_type"] = type(exc).__name__
-
-        self.last_errors.append(error)

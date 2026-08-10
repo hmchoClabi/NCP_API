@@ -1,3 +1,5 @@
+import base64
+import io
 import unittest
 from datetime import datetime, timezone
 
@@ -18,6 +20,8 @@ class FakePortalRepository:
         self.deleted_reports = []
         self.created_msp_users = []
         self.updated_report_settings = []
+        self.updated_logos = []
+        self.deleted_logos = []
 
     def session_user(self, session_token):
         if not session_token:
@@ -63,6 +67,12 @@ class FakePortalRepository:
         self.updated_report_settings.append((tenant_id, options, actor_id))
         return options
 
+    def update_tenant_logo(self, tenant_id, logo, actor_id):
+        self.updated_logos.append((tenant_id, logo, actor_id))
+
+    def delete_tenant_logo(self, tenant_id, actor_id):
+        self.deleted_logos.append((tenant_id, actor_id))
+
     def tenant_detail(self, tenant_id):
         if tenant_id != "tenant-1":
             return None
@@ -74,6 +84,7 @@ class FakePortalRepository:
             "environment": "public",
             "status": "ACTIVE",
             "metadata": {},
+            "branding": {},
             "accounts": [{
                 "id": "account-1",
                 "account_code": "primary",
@@ -305,6 +316,91 @@ class WebAppTests(unittest.TestCase):
     def test_all_portal_templates_compile(self):
         for template_name in self.app.jinja_env.list_templates():
             self.app.jinja_env.get_template(template_name)
+
+    def test_route_contract_preserves_endpoint_rules_and_methods(self):
+        routes = {
+            rule.endpoint: (
+                rule.rule,
+                tuple(sorted(rule.methods - {"HEAD", "OPTIONS"})),
+            )
+            for rule in self.app.url_map.iter_rules()
+            if rule.endpoint != "static"
+        }
+
+        self.assertEqual(
+            routes,
+            {
+                "health_live": ("/health/live", ("GET",)),
+                "health_ready": ("/health/ready", ("GET",)),
+                "login": ("/login", ("GET", "POST")),
+                "logout": ("/logout", ("POST",)),
+                "index": ("/", ("GET",)),
+                "msp_dashboard": ("/msp", ("GET",)),
+                "msp_customers": ("/msp/customers/<environment>", ("GET",)),
+                "msp_schedules": ("/msp/schedules", ("GET",)),
+                "msp_users": ("/msp/users", ("GET",)),
+                "create_portal_user": ("/msp/users", ("POST",)),
+                "create_msp_user": ("/msp/users/platform", ("POST",)),
+                "assign_portal_user": ("/msp/users/memberships", ("POST",)),
+                "set_schedule_enabled": (
+                    "/msp/schedules/<schedule_id>/enabled",
+                    ("POST",),
+                ),
+                "bulk_schedules": ("/msp/schedules/bulk", ("POST",)),
+                "create_customer": ("/msp/customers/<environment>", ("POST",)),
+                "msp_customer": ("/msp/customer/<tenant_id>", ("GET",)),
+                "update_customer_report_settings": (
+                    "/msp/customer/<tenant_id>/report-settings",
+                    ("POST",),
+                ),
+                "update_customer_logo": (
+                    "/msp/customer/<tenant_id>/logo",
+                    ("POST",),
+                ),
+                "delete_customer_logo": (
+                    "/msp/customer/<tenant_id>/logo/delete",
+                    ("POST",),
+                ),
+                "register_credential": (
+                    "/msp/customer/<tenant_id>/credentials",
+                    ("POST",),
+                ),
+                "delete_credential": (
+                    "/msp/customer/<tenant_id>/credentials/<account_id>/delete",
+                    ("POST",),
+                ),
+                "delete_customer": (
+                    "/msp/customer/<tenant_id>/delete",
+                    ("POST",),
+                ),
+                "reactivate_customer": (
+                    "/msp/customer/<tenant_id>/reactivate",
+                    ("POST",),
+                ),
+                "anonymize_customer": (
+                    "/msp/customer/<tenant_id>/anonymize",
+                    ("POST",),
+                ),
+                "permanently_delete_customer": (
+                    "/msp/customer/<tenant_id>/permanent-delete",
+                    ("POST",),
+                ),
+                "enqueue_report": (
+                    "/accounts/<account_id>/report-jobs",
+                    ("POST",),
+                ),
+                "save_schedule": (
+                    "/accounts/<account_id>/schedules",
+                    ("POST",),
+                ),
+                "customer_portal": ("/portal", ("GET",)),
+                "report_detail": ("/reports/<report_id>", ("GET",)),
+                "delete_report": ("/reports/<report_id>/delete", ("POST",)),
+                "report_history": ("/history", ("GET",)),
+                "notifications": ("/notifications", ("GET",)),
+                "report_content": ("/reports/<report_id>/content", ("GET",)),
+            },
+        )
 
     def test_customer_report_lookup_is_scoped_to_membership(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -588,6 +684,60 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertTrue(options["diagram"]["show_resource_id"])
         self.assertFalse(options["diagram"]["show_public_ip"])
 
+    def test_msp_admin_can_upload_valid_customer_logo(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
+            "AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/logo",
+            data={
+                "csrf_token": "csrf-token",
+                "logo": (io.BytesIO(png), "customer.png", "image/png"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        tenant_id, logo, actor_id = self.repository.updated_logos[0]
+        self.assertEqual((tenant_id, actor_id), ("tenant-1", "user-1"))
+        self.assertEqual(logo.content_type, "image/png")
+        self.assertEqual((logo.width, logo.height), (1, 1))
+        self.assertTrue(logo.data_uri.startswith("data:image/png;base64,"))
+
+    def test_svg_customer_logo_is_rejected(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/logo",
+            data={
+                "csrf_token": "csrf-token",
+                "logo": (
+                    io.BytesIO(b"<svg><script>alert(1)</script></svg>"),
+                    "customer.png",
+                    "image/png",
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.updated_logos, [])
+
+    def test_msp_admin_can_delete_customer_logo(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/logo/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.deleted_logos,
+            [("tenant-1", "user-1")],
+        )
+
     def test_customer_viewer_cannot_update_report_settings(self):
         original_session_user = self.repository.session_user
 
@@ -607,6 +757,32 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.repository.updated_report_settings, [])
+
+    def test_customer_viewer_cannot_manage_customer_logo(self):
+        original_session_user = self.repository.session_user
+
+        def customer_viewer(session_token):
+            user = original_session_user(session_token)
+            if user:
+                user["platform_roles"] = []
+            return user
+
+        self.repository.session_user = customer_viewer
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        upload = self.client.post(
+            "/msp/customer/tenant-1/logo",
+            data={"csrf_token": "csrf-token"},
+        )
+        delete = self.client.post(
+            "/msp/customer/tenant-1/logo/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(upload.status_code, 403)
+        self.assertEqual(delete.status_code, 403)
+        self.assertEqual(self.repository.updated_logos, [])
+        self.assertEqual(self.repository.deleted_logos, [])
 
     def test_msp_account_can_delete_report(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

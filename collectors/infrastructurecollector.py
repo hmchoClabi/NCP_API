@@ -67,11 +67,11 @@ class InfrastructureCollector:
         server_raw_data: Optional[dict] = None,
         categories: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Collect only billable/operational infrastructure resources.
+        """과금·운영 대상 인프라만 수집한다.
 
-        Server inventory is supplied by ``ServerCollector``. When its raw
-        block-storage response is supplied, it is reused so the VServer API is
-        not called twice during one report run.
+        서버 인벤토리는 ``ServerCollector``의 결과를 사용한다. 원본 블록
+        스토리지 응답이 있으면 한 번의 보고서 실행에서 VServer API를 중복
+        호출하지 않도록 그대로 재사용한다.
         """
 
         logger.info("대표 인프라 인벤토리 수집을 시작합니다.")
@@ -82,6 +82,53 @@ class InfrastructureCollector:
             return []
         resources: List[Dict[str, Any]] = []
 
+        self._collect_compute_resources(
+            resources,
+            servers=servers,
+            server_raw_data=server_raw_data,
+            selected_categories=selected_categories,
+        )
+        self._collect_network_resources(resources, selected_categories)
+        self._collect_platform_resources(resources, selected_categories)
+        self._collect_data_resources(resources, selected_categories)
+        resources = self._enrich_resource_manager_resources(
+            resources,
+            selected_categories,
+        )
+
+        result = self.normalizer.finalize(resources)
+        if selected_categories is not None:
+            result = [
+                resource
+                for resource in result
+                if (
+                    resource.get("category") in selected_categories
+                    or (
+                        resource.get("category") == "TARGET_GROUP"
+                        and "LOAD_BALANCER" in selected_categories
+                    )
+                )
+            ]
+        logger.info(
+            "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 "
+            "(오류 %s, 경고 %s)",
+            len(result),
+            len(self.last_errors),
+            len(self.last_warnings),
+        )
+        return result
+
+    def _collect_compute_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        *,
+        servers: list,
+        server_raw_data: Optional[dict],
+        selected_categories: Optional[frozenset[str]],
+    ) -> None:
+        """서버와 블록 스토리지를 기존 원본 응답을 우선 사용해 수집한다."""
+
+        # ServerCollector의 원본 응답이 있으면 같은 VServer API를 다시 호출하지 않는다.
         network_interfaces: Optional[List[Dict[str, Any]]] = []
         if self._category_enabled(selected_categories, "SERVER"):
             network_interfaces = self._server_network_interfaces(
@@ -132,6 +179,15 @@ class InfrastructureCollector:
                 ),
             )
 
+    def _collect_network_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        selected_categories: Optional[frozenset[str]],
+    ) -> None:
+        """VPC와 명시적 네트워크 관계 자원을 기존 호출 순서대로 수집한다."""
+
+        # Subnet API만 공개 인수가 page이고 실제 요청 키는 pageNo로 변환된다.
+        # Public IP 계열은 기존 공급자 페이지 기준에 맞춰 0부터 시작한다.
         if self._category_enabled(selected_categories, "VPC"):
             vpcs = self._collect_wrapped_service(
                 api_key="vpc",
@@ -238,6 +294,14 @@ class InfrastructureCollector:
                 ),
             )
 
+    def _collect_platform_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        selected_categories: Optional[frozenset[str]],
+    ) -> None:
+        """이미지·인증서·레지스트리 등 보조 플랫폼 자원을 수집한다."""
+
+        # 서비스마다 REST 페이지 표식(last/next)과 NCP pageNo 기준이 다르다.
         if self._category_enabled(
             selected_categories,
             "BLOCK_STORAGE_SNAPSHOT",
@@ -343,6 +407,15 @@ class InfrastructureCollector:
                 ),
             )
 
+    def _collect_data_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        selected_categories: Optional[frozenset[str]],
+    ) -> None:
+        """로드밸런서, NAS, DB, NKS, CDN 자원을 순서대로 수집한다."""
+
+        # NAS는 VPC와 Classic API를 모두 조회하며 platform 값을 분리해 보존한다.
+        # Cloud DB와 CDN 목록 API는 기존 공급자 계약대로 0번 페이지부터 조회한다.
         if self._category_enabled(selected_categories, "LOAD_BALANCER"):
             load_balancers = self._collect_paged_service(
                 api_key="loadbalancer",
@@ -529,10 +602,15 @@ class InfrastructureCollector:
                     ),
                 )
 
-        # Resource Manager is queried once for every non-empty inventory run.
-        # Direct service APIs remain the inventory source; Resource Manager is
-        # used to enrich their creation timestamps and only supplies inventory
-        # for categories that do not have a direct collector.
+    def _enrich_resource_manager_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        selected_categories: frozenset[str],
+    ) -> List[Dict[str, Any]]:
+        """Resource Manager 정보로 생성 시각과 전용 카테고리를 보강한다."""
+
+        # 직접 서비스 API를 원본으로 유지하고 Resource Manager는 한 번만 조회한다.
+        # 생성 시각을 보강하며, 직접 수집기가 없는 카테고리에만 인벤토리를 제공한다.
         resource_manager_items = self._collect_resource_manager()
         resources = self.normalizer.enrich_resource_manager_creation_times(
             resources,
@@ -559,27 +637,8 @@ class InfrastructureCollector:
                 ],
             )
 
-        result = self.normalizer.finalize(resources)
-        if selected_categories is not None:
-            result = [
-                resource
-                for resource in result
-                if (
-                    resource.get("category") in selected_categories
-                    or (
-                        resource.get("category") == "TARGET_GROUP"
-                        and "LOAD_BALANCER" in selected_categories
-                    )
-                )
-            ]
-        logger.info(
-            "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 "
-            "(오류 %s, 경고 %s)",
-            len(result),
-            len(self.last_errors),
-            len(self.last_warnings),
-        )
-        return result
+        return resources
+
 
     def _server_storages(
         self,

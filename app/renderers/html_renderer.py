@@ -8,21 +8,29 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from app.infrastructure_topology import (
-    InfrastructureTopologyBuilder,
     REPRESENTATIVE_CATEGORY_LABELS,
     TopologyDisplayOptions,
 )
+from app.renderers.html_styles import HTML_REPORT_STYLES
+from app.renderers.html_view_models import (
+    BillingDisplayData,
+    EventDiagnosticSectionHtml,
+    InfrastructureSectionHtml,
+    ReportDisplayData,
+    ReportSectionHtml,
+)
+from app.renderers.topology_renderer import TopologyRenderer
+from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
     RESOURCE_CATEGORY_LABELS,
-    ReportOptions,
 )
 from app.report_models import ReportResult
 from utils.event_sort import sort_event_records
 
 
 class HtmlReportRenderer:
-    """Render a standalone, responsive HTML report without web dependencies."""
+    """웹 프레임워크 의존성 없이 독립형 반응형 HTML 보고서를 만든다."""
 
     KST = ZoneInfo("Asia/Seoul")
     MAX_CHART_POINTS_PER_SEGMENT = 600
@@ -43,38 +51,9 @@ class HtmlReportRenderer:
     INFRASTRUCTURE_CATEGORIES = tuple(
         REPRESENTATIVE_CATEGORY_LABELS.items()
     )
-    TOPOLOGY_LAYER_ORDER = {
-        "PUBLIC_IP": 0,
-        "GLOBAL_EDGE": 0,
-        "GLOBAL_DNS": 0,
-        "GLOBAL_TRAFFIC_MANAGER": 0,
-        "API_GATEWAY": 0,
-        "VPC": 0,
-        "VPC_PEERING": 1,
-        "VIRTUAL_PRIVATE_GATEWAY": 1,
-        "IPSEC_VPN": 1,
-        "CLOUD_CONNECT": 1,
-        "SUBNET": 1,
-        "NAT_GATEWAY": 2,
-        "AUTO_SCALING": 2,
-        "LOAD_BALANCER": 2,
-        "KUBERNETES": 2,
-        "SERVER": 2,
-        "CLOUD_DB": 2,
-        "SEARCH_ENGINE": 2,
-        "DATA_STREAMING": 2,
-        "CLOUD_HADOOP": 2,
-        "NETWORK_INTERFACE": 3,
-        "TARGET_GROUP": 3,
-        "BLOCK_STORAGE": 3,
-        "NAS": 3,
-        "OBJECT_STORAGE": 3,
-        "BLOCK_STORAGE_SNAPSHOT": 4,
-        "BACKUP": 4,
-        "ARCHIVE_STORAGE": 4,
-    }
-    TOPOLOGY_NODE_WIDTH = 230
-    TOPOLOGY_NODE_HEIGHT = 196
+    TOPOLOGY_LAYER_ORDER = TopologyRenderer.TOPOLOGY_LAYER_ORDER
+    TOPOLOGY_NODE_WIDTH = TopologyRenderer.TOPOLOGY_NODE_WIDTH
+    TOPOLOGY_NODE_HEIGHT = TopologyRenderer.TOPOLOGY_NODE_HEIGHT
 
     def __init__(
         self,
@@ -88,8 +67,22 @@ class HtmlReportRenderer:
             else None
         )
         self._topology_max_nodes_override = topology_max_nodes
+        self._topology_renderer = TopologyRenderer(self)
 
     def render(self, report: ReportResult) -> str:
+        display = self._prepare_display_data(report)
+        sections = self._render_report_sections(report, display)
+        return self._render_document(report, display, sections)
+
+    def _prepare_display_data(
+        self,
+        report: ReportResult,
+    ) -> ReportDisplayData:
+        """보고서 원본과 섹션 옵션을 HTML 표시 모델로 정규화한다.
+
+        각 section option은 여기서 한 번만 판정한다. 이후 조립 단계는 비활성
+        섹션을 빈 문자열로 유지해 기존 문서 순서와 공개 렌더링 경계를 보존한다.
+        """
         period = report.period
         report_options = report.selected_report_options
         customer_name = str(report.customer.get("name") or "").strip()
@@ -98,7 +91,68 @@ class HtmlReportRenderer:
             if customer_name
             else "NCP 이용 보고서"
         )
-        billing = report.billing or {}
+        billing_display = self._prepare_billing_display(
+            period,
+            report.billing or {},
+        )
+        activity_events = self._flatten_grouped(report.activity_events)
+        infrastructure = report.display_infrastructure
+        load_balancer_target_groups = (
+            report.display_load_balancer_target_groups
+        )
+        topology_options, _ = self._topology_options(report)
+        infrastructure_topology = report.display_infrastructure_topology
+
+        inventory_enabled = report_options.section_enabled(
+            "infrastructure_inventory"
+        )
+        diagram_enabled = (
+            report_options.section_enabled("infrastructure_diagram")
+            and topology_options.enabled
+        )
+        monitoring_enabled = report_options.section_enabled("monitoring")
+        billing_enabled = report_options.section_enabled("billing")
+        organization_billing_enabled = report_options.section_enabled(
+            "organization_billing"
+        )
+        collection_metadata = self._mapping(report.collection_metadata)
+        infrastructure_metadata = self._mapping(
+            collection_metadata.get("infrastructure")
+        )
+        customer_logo_data_uri = self._safe_customer_logo_data_uri(
+            report.customer.get("logo_data_uri")
+        )
+        return ReportDisplayData(
+            period=period,
+            report_options=report_options,
+            report_title=report_title,
+            customer_name=customer_name,
+            customer_logo_data_uri=customer_logo_data_uri,
+            customer_initials=self._customer_initials(customer_name),
+            billing=billing_display,
+            activity_events=activity_events,
+            infrastructure=infrastructure,
+            load_balancer_target_groups=load_balancer_target_groups,
+            topology_options=topology_options,
+            infrastructure_topology=infrastructure_topology,
+            inventory_enabled=inventory_enabled,
+            diagram_enabled=diagram_enabled,
+            monitoring_enabled=monitoring_enabled,
+            billing_enabled=billing_enabled,
+            organization_billing_enabled=organization_billing_enabled,
+            infrastructure_metadata=infrastructure_metadata,
+        )
+
+    def _prepare_billing_display(
+        self,
+        period: Dict[str, Any],
+        billing: Dict[str, Any],
+    ) -> BillingDisplayData:
+        """확정 월은 청구액, 진행 중인 기간은 추정액을 표시 기준으로 삼는다.
+
+        미마감 기간에서 기간 추정치가 적용 불가하면 월 누적 추정치를 사용하며,
+        금액 basis에 따라 실제 사용액 또는 예상 금액 서비스 집계를 선택한다.
+        """
         billing_summary = billing.get("summary", {})
         invoice_summary = self._mapping(billing.get("invoice_summary"))
         period_estimate = self._mapping(billing.get("period_estimate"))
@@ -199,46 +253,47 @@ class HtmlReportRenderer:
         network_summary = self._records(
             billing.get("network_usage_summary")
         )
-        activity_events = self._flatten_grouped(report.activity_events)
-        infrastructure = report.display_infrastructure
-        load_balancer_target_groups = (
-            report.display_load_balancer_target_groups
+        return BillingDisplayData(
+            cost_facts=cost_facts,
+            account_costs=account_costs,
+            service_summary=service_summary,
+            card_title=billing_card_title,
+            card_amount=billing_card_amount,
+            section_title=billing_section_title,
+            section_description=billing_section_description,
+            usage_summary=usage_summary,
+            network_summary=network_summary,
         )
-        topology_options, _ = self._topology_options(report)
-        infrastructure_topology = report.display_infrastructure_topology
 
-        inventory_enabled = report_options.section_enabled(
-            "infrastructure_inventory"
-        )
-        diagram_enabled = (
-            report_options.section_enabled("infrastructure_diagram")
-            and topology_options.enabled
-        )
-        monitoring_enabled = report_options.section_enabled("monitoring")
-        billing_enabled = report_options.section_enabled("billing")
-        organization_billing_enabled = report_options.section_enabled(
-            "organization_billing"
-        )
-        collection_metadata = self._mapping(report.collection_metadata)
-        infrastructure_metadata = self._mapping(
-            collection_metadata.get("infrastructure")
-        )
-        historical_notice_html = ""
+    def _render_historical_notice(
+        self,
+        display: ReportDisplayData,
+    ) -> str:
         if (
-            (inventory_enabled or monitoring_enabled)
-            and infrastructure_metadata.get("time_basis")
+            (display.inventory_enabled or display.monitoring_enabled)
+            and display.infrastructure_metadata.get("time_basis")
             == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
         ):
-            historical_notice_html = self._historical_inventory_notice(
-                infrastructure_metadata
+            return self._historical_inventory_notice(
+                display.infrastructure_metadata
             )
+        return ""
 
-        summary_html = ""
+    def _render_summary_section(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+    ) -> str:
+        report_options = display.report_options
         if report_options.section_enabled("executive_summary"):
             summary_cards = []
-            if inventory_enabled or diagram_enabled:
+            if display.inventory_enabled or display.diagram_enabled:
                 summary_cards.append(
-                    self._summary_card("대표 인프라", len(infrastructure), "개")
+                    self._summary_card(
+                        "대표 인프라",
+                        len(display.infrastructure),
+                        "개",
+                    )
                 )
             if report_options.section_enabled("insight_events"):
                 summary_cards.append(
@@ -257,46 +312,61 @@ class HtmlReportRenderer:
                         warning=bool(report.collection_errors),
                     )
                 )
-            if billing_enabled or organization_billing_enabled:
+            if (
+                display.billing_enabled
+                or display.organization_billing_enabled
+            ):
                 summary_cards.append(
                     self._summary_card(
-                        billing_card_title,
-                        self._number(billing_card_amount, decimals=0),
+                        display.billing.card_title,
+                        self._number(
+                            display.billing.card_amount,
+                            decimals=0,
+                        ),
                         "원",
                     )
                 )
-            summary_html = (
+            return (
                 '<section class="summary-grid" aria-label="주요 요약">'
                 + "".join(summary_cards)
                 + "</section>"
             )
+        return ""
 
+    def _render_infrastructure_sections(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+    ) -> InfrastructureSectionHtml:
         inventory_html = (
-            self._infrastructure_section(infrastructure)
-            if inventory_enabled else ""
+            self._infrastructure_section(display.infrastructure)
+            if display.inventory_enabled else ""
         )
         target_group_html = ""
-        if inventory_enabled and (
-            load_balancer_target_groups
+        if display.inventory_enabled and (
+            display.load_balancer_target_groups
             or any(
                 str(resource.get("category") or "").upper()
                 == "LOAD_BALANCER"
-                for resource in infrastructure
+                for resource in display.infrastructure
             )
         ):
             target_group_html = self._load_balancer_target_group_section(
-                load_balancer_target_groups,
-                infrastructure_metadata,
+                display.load_balancer_target_groups,
+                display.infrastructure_metadata,
             )
         topology_html = (
             self._infrastructure_topology_section(
-                infrastructure_topology,
-                topology_options,
+                display.infrastructure_topology,
+                display.topology_options,
             )
-            if diagram_enabled else ""
+            if display.diagram_enabled else ""
         )
         server_detail_html = ""
-        if inventory_enabled and report_options.resource_enabled("SERVER"):
+        if (
+            display.inventory_enabled
+            and display.report_options.resource_enabled("SERVER")
+        ):
             server_rows = [
                 {
                     **server,
@@ -329,7 +399,7 @@ class HtmlReportRenderer:
                 (
                     "생성 시각으로 선별한 현재 서버 구성입니다. 상태와 "
                     "IP는 보고서 생성 시점의 값입니다."
-                    if infrastructure_metadata.get("time_basis")
+                    if display.infrastructure_metadata.get("time_basis")
                     == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
                     else "보고서 기준 시점에 저장된 서버 구성입니다."
                 ),
@@ -339,11 +409,21 @@ class HtmlReportRenderer:
                 ),
                 len(server_rows),
             )
+        return InfrastructureSectionHtml(
+            inventory=inventory_html,
+            target_groups=target_group_html,
+            topology=topology_html,
+            server_details=server_detail_html,
+        )
 
-        monitoring_html = ""
-        if monitoring_enabled:
+    def _render_monitoring_sections(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+    ) -> str:
+        if display.monitoring_enabled:
             monitoring_parts = []
-            if report_options.monitoring_enabled("SERVER"):
+            if display.report_options.monitoring_enabled("SERVER"):
                 monitoring_parts.extend((
                     self._section(
                         "서버 메트릭",
@@ -360,38 +440,44 @@ class HtmlReportRenderer:
                 self._infrastructure_metric_section(
                     report.display_infrastructure_metrics,
                     report.period,
-                    infrastructure,
+                    display.infrastructure,
                 )
             )
-            monitoring_html = "".join(monitoring_parts)
+            return "".join(monitoring_parts)
+        return ""
 
+    def _render_billing_sections(
+        self,
+        display: ReportDisplayData,
+    ) -> tuple[str, str]:
         billing_html = ""
-        if billing_enabled:
+        if display.billing_enabled:
+            billing = display.billing
             billing_html = "".join((
                 self._section(
                     "과금 데이터 기준",
                     "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
-                    self._billing_fact_cards(cost_facts),
-                    len(cost_facts),
+                    self._billing_fact_cards(billing.cost_facts),
+                    len(billing.cost_facts),
                 ),
                 self._section(
-                    billing_section_title,
-                    billing_section_description,
+                    billing.section_title,
+                    billing.section_description,
                     self._table(
-                        service_summary,
+                        billing.service_summary,
                         (
                             ("service_name", "서비스"),
                             ("amount", "금액", "number0"),
                             ("row_count", "항목", "number0"),
                         ),
                     ),
-                    len(service_summary),
+                    len(billing.service_summary),
                 ),
                 self._section(
                     "네트워크 사용량",
                     "서비스와 전송 방향별 네트워크 사용량입니다.",
                     self._table(
-                        network_summary,
+                        billing.network_summary,
                         (
                             ("service_name", "서비스"),
                             ("direction", "방향"),
@@ -400,13 +486,13 @@ class HtmlReportRenderer:
                             ("row_count", "건수", "number0"),
                         ),
                     ),
-                    len(network_summary),
+                    len(billing.network_summary),
                 ),
                 self._section(
                     "서비스별 사용량",
                     "서비스 및 과금 항목별 사용량입니다.",
                     self._table(
-                        usage_summary,
+                        billing.usage_summary,
                         (
                             ("service_name", "서비스"),
                             ("item_name", "항목"),
@@ -415,14 +501,21 @@ class HtmlReportRenderer:
                             ("row_count", "건수", "number0"),
                         ),
                     ),
-                    len(usage_summary),
+                    len(billing.usage_summary),
                 ),
             ))
 
         organization_billing_html = (
-            self._organization_cost_sections(account_costs)
-            if organization_billing_enabled else ""
+            self._organization_cost_sections(display.billing.account_costs)
+            if display.organization_billing_enabled else ""
         )
+        return billing_html, organization_billing_html
+
+    def _render_event_diagnostic_sections(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+    ) -> EventDiagnosticSectionHtml:
         insight_events_html = (
             self._section(
                 "Cloud Insight 이벤트",
@@ -430,19 +523,21 @@ class HtmlReportRenderer:
                 self._event_table(report.insight_events),
                 len(report.insight_events),
             )
-            if report_options.section_enabled("insight_events") else ""
+            if display.report_options.section_enabled("insight_events")
+            else ""
         )
         activity_html = (
             self._section(
                 "Cloud Activity Tracer",
                 "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
-                self._activity_table(activity_events),
-                len(activity_events),
+                self._activity_table(display.activity_events),
+                len(display.activity_events),
             )
-            if report_options.section_enabled("activity_history") else ""
+            if display.report_options.section_enabled("activity_history")
+            else ""
         )
         diagnostics_html = ""
-        if report_options.section_enabled("collection_diagnostics"):
+        if display.report_options.section_enabled("collection_diagnostics"):
             diagnostics_html = "".join((
                 self._section(
                     "수집 경고",
@@ -459,6 +554,61 @@ class HtmlReportRenderer:
                     warning=bool(report.collection_errors),
                 ),
             ))
+        return EventDiagnosticSectionHtml(
+            insight_events=insight_events_html,
+            activity=activity_html,
+            diagnostics=diagnostics_html,
+        )
+
+    def _render_report_sections(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+    ) -> ReportSectionHtml:
+        historical_notice = self._render_historical_notice(display)
+        summary = self._render_summary_section(report, display)
+        infrastructure = self._render_infrastructure_sections(
+            report,
+            display,
+        )
+        monitoring = self._render_monitoring_sections(report, display)
+        billing, organization_billing = self._render_billing_sections(display)
+        event_diagnostics = self._render_event_diagnostic_sections(
+            report,
+            display,
+        )
+        return ReportSectionHtml(
+            summary=summary,
+            historical_notice=historical_notice,
+            inventory=infrastructure.inventory,
+            target_groups=infrastructure.target_groups,
+            topology=infrastructure.topology,
+            server_details=infrastructure.server_details,
+            monitoring=monitoring,
+            billing=billing,
+            organization_billing=organization_billing,
+            insight_events=event_diagnostics.insight_events,
+            activity=event_diagnostics.activity,
+            diagnostics=event_diagnostics.diagnostics,
+        )
+
+    def _render_document(
+        self,
+        report: ReportResult,
+        display: ReportDisplayData,
+        sections: ReportSectionHtml,
+    ) -> str:
+        period = display.period
+        report_title = display.report_title
+        logo = (
+            f'<img src="{self._text(display.customer_logo_data_uri)}" '
+            f'alt="{self._text(display.customer_name)} 로고">'
+            if display.customer_logo_data_uri
+            else (
+                f'<span aria-hidden="true">'
+                f'{self._text(display.customer_initials)}</span>'
+            )
+        )
 
         return f"""<!doctype html>
 <html lang="ko">
@@ -472,12 +622,15 @@ class HtmlReportRenderer:
 <body>
   <main class="report-shell">
     <header class="report-header">
-      <div>
-        <p class="eyebrow">NAVER CLOUD PLATFORM</p>
-        <h1>{self._text(report_title)}</h1>
-        <p class="subtitle">{self._text(self._display_period_start(period))}
-          <span aria-hidden="true">→</span>
-          {self._text(self._display_period_end(period))}</p>
+      <div class="report-identity">
+        <div class="customer-logo-plate">{logo}</div>
+        <div class="report-heading">
+          <p class="eyebrow">NAVER CLOUD PLATFORM</p>
+          <h1>{self._text(report_title)}</h1>
+          <p class="subtitle">{self._text(self._display_period_start(period))}
+            <span aria-hidden="true">→</span>
+            {self._text(self._display_period_end(period))}</p>
+        </div>
       </div>
       <div class="report-meta">
         <span>보고서 ID</span>
@@ -487,18 +640,18 @@ class HtmlReportRenderer:
       </div>
     </header>
 
-    {summary_html}
-    {historical_notice_html}
-    {inventory_html}
-    {target_group_html}
-    {topology_html}
-    {server_detail_html}
-    {monitoring_html}
-    {billing_html}
-    {organization_billing_html}
-    {insight_events_html}
-    {activity_html}
-    {diagnostics_html}
+    {sections.summary}
+    {sections.historical_notice}
+    {sections.inventory}
+    {sections.target_groups}
+    {sections.topology}
+    {sections.server_details}
+    {sections.monitoring}
+    {sections.billing}
+    {sections.organization_billing}
+    {sections.insight_events}
+    {sections.activity}
+    {sections.diagnostics}
 
     <footer>
       <p>이 보고서는 구조화된 NCP 수집 결과로부터 생성되었습니다.</p>
@@ -507,6 +660,27 @@ class HtmlReportRenderer:
 </body>
 </html>
 """
+
+    @staticmethod
+    def _safe_customer_logo_data_uri(value: Any) -> str | None:
+        try:
+            return normalize_customer_logo_data_uri(value)
+        except ValueError:
+            # 변조되었거나 과거 형식인 스냅샷은 active content 대신 문자 로고로 대체한다.
+            return None
+
+    @staticmethod
+    def _customer_initials(customer_name: str) -> str:
+        words = [
+            "".join(character for character in word if character.isalnum())
+            for word in customer_name.split()
+        ]
+        words = [word for word in words if word]
+        if len(words) >= 2:
+            return "".join(word[0] for word in words[:2]).upper()
+        if words:
+            return words[0][:2].upper()
+        return "NR"
 
     def write(self, report: ReportResult, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -835,171 +1009,27 @@ class HtmlReportRenderer:
             parsed = parsed.replace(tzinfo=self.KST)
         return parsed.astimezone(self.KST).strftime("%Y-%m-%d %H:%M KST")
 
+    def _topology_helper(self) -> TopologyRenderer:
+        helper = getattr(self, "_topology_renderer", None)
+        if helper is None:
+            helper = TopologyRenderer(self)
+            self._topology_renderer = helper
+        return helper
+
     def _topology_options(
         self,
         report: ReportResult,
     ) -> tuple[TopologyDisplayOptions, int]:
-        raw_options = getattr(report, "report_options", None)
-        if not raw_options:
-            customer = report.customer if isinstance(report.customer, dict) else {}
-            raw_options = customer.get("report_options")
-        diagram = ReportOptions.from_value(raw_options).to_dict()["diagram"]
-        if self._topology_options_override is not None:
-            diagram.update(self._topology_options_override)
-        max_nodes = diagram.get(
-            "max_nodes",
-            InfrastructureTopologyBuilder.DEFAULT_MAX_NODES,
-        )
-        if self._topology_max_nodes_override is not None:
-            max_nodes = self._topology_max_nodes_override
-        return TopologyDisplayOptions.from_mapping(diagram), max_nodes
+        return self._topology_helper()._topology_options(report)
 
     def _infrastructure_topology_section(
         self,
         topology: Dict[str, Any],
         options: TopologyDisplayOptions,
     ) -> str:
-        nodes = self._records(topology.get("nodes"))
-        edges = self._records(topology.get("edges"))
-        summary = self._mapping(topology.get("summary"))
-        unmapped_ids = {
-            str(node_id)
-            for node_id in topology.get("unmapped_node_ids", [])
-            if node_id is not None
-        }
-        mapped_nodes = [
-            node for node in nodes
-            if str(node.get("node_id")) not in unmapped_ids
-        ]
-        unmapped_nodes = [
-            node for node in nodes
-            if str(node.get("node_id")) in unmapped_ids
-        ]
-        confidence = str(summary.get("confidence") or "UNMAPPED")
-        time_basis = str(summary.get("time_basis") or "REPORT_PERIOD")
-        svg = self._topology_svg(mapped_nodes, edges, options)
-        if not svg:
-            if confidence == "UNAVAILABLE":
-                svg = (
-                    '<p class="empty-state">보고 기간 안에 실제 수집된 '
-                    "인프라 스냅샷이 없어 현재 구성을 대신 그리지 않았습니다.</p>"
-                )
-            else:
-                svg = (
-                    '<p class="empty-state">명시적인 리소스 ID 관계가 없어 '
-                    "연결선을 그리지 않았습니다.</p>"
-                )
-
-        accuracy_class = " verified" if confidence == "VERIFIED" else " warning"
-        relationship_confidence = str(
-            summary.get("relationship_confidence") or "UNAVAILABLE"
-        )
-        relationship_coverage = str(
-            summary.get("relationship_coverage") or "UNKNOWN"
-        )
-        inventory_completeness = str(
-            summary.get("inventory_completeness") or "UNKNOWN"
-        )
-        edge_count = int(summary.get("verified_edge_count") or 0)
-        total_edge_count = int(
-            summary.get("total_verified_edge_count") or edge_count
-        )
-        edge_text = (
-            f"{edge_count:,}/{total_edge_count:,}개"
-            if edge_count != total_edge_count else f"{edge_count:,}개"
-        )
-        truncated_text = (
-            f" · 잘림 {int(summary.get('omitted_node_count') or 0):,}개"
-            if summary.get("truncated") else " · 잘림 없음"
-        )
-        accuracy = f"""
-      <div class="topology-accuracy{accuracy_class}">
-        <strong>정확성 {self._text(confidence)}</strong>
-        <span>검증된 관계 {self._text(edge_text)}</span>
-        <span>미매핑 자원 {self._number(summary.get('unmapped_resource_count'), 0)}개</span>
-        <span>미해결 참조 {self._number(summary.get('unresolved_reference_count'), 0)}개</span>
-        <span>수집 시각 {self._text(summary.get('collected_at'))}</span>
-        <span>시간 기준 {self._text(summary.get('time_basis') or 'COLLECTION_TIME')}</span>
-        <span>스냅샷 출처 {self._text(summary.get('snapshot_source') or 'NORMALIZED_REPORT')}</span>
-        <span>표시 제한 {self._number(summary.get('max_nodes'), 0)}개{self._text(truncated_text)}</span>
-        <span>관계 근거 {self._text(relationship_confidence)}</span>
-        <span>관계 연결 범위 {self._text(relationship_coverage)}</span>
-        <span>인벤토리 완전성 {self._text(inventory_completeness)}</span>
-        <span>수집 이슈 {self._number(summary.get('collection_issue_count'), 0)}건</span>
-      </div>"""
-
-        warnings = self._records(topology.get("warnings"))
-        warning_html = ""
-        if warnings:
-            warning_html = (
-                '<ul class="topology-warnings">'
-                + "".join(
-                    "<li>"
-                    + self._text(warning.get("message"))
-                    + " <small>source="
-                    + self._text(warning.get("source"))
-                    + " · confidence="
-                    + self._text(warning.get("confidence"))
-                    + "</small></li>"
-                    for warning in warnings
-                )
-                + "</ul>"
-            )
-
-        unmapped_html = ""
-        if options.include_unmapped_resources and unmapped_nodes:
-            unmapped_html = (
-                "<h3 class=\"topology-subheading\">미매핑 그룹</h3>"
-                '<p class="topology-note">이름·IP·CIDR로 연결을 추측하지 '
-                "않았으며 명시 관계가 없는 자원만 모았습니다.</p>"
-                '<div class="topology-unmapped-grid">'
-                + "".join(
-                    self._topology_unmapped_card(node, options)
-                    for node in unmapped_nodes
-                )
-                + "</div>"
-            )
-
-        evidence = self._topology_evidence_table(edges, nodes, options)
-        content = (
-            accuracy
-            + warning_html
-            + '<div class="topology-canvas">'
-            + svg
-            + "</div>"
-            + unmapped_html
-            + "<h3 class=\"topology-subheading\">관계 근거</h3>"
-            + evidence
-        )
-        topology_description = (
-            "보고서 생성 시점의 현재 자원 중 보고 종료 전에 생성된 것으로 "
-            "확인되는 자원을 사용했습니다. 상태·IP·연결 관계는 현재 값이며 "
-            "보고 기간 당시의 정확한 구성은 아닙니다. 관계는 API 또는 "
-            "Resource Manager 응답의 명시적 리소스 ID만 연결합니다."
-            if time_basis == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
-            else (
-                "보고 기간 안에서 가장 늦게 실제 수집된 스냅샷을 기준으로, "
-                "API 또는 Resource Manager 응답이 리소스 ID로 명시한 관계만 "
-                "연결합니다. 이름·도메인·IP·CIDR 일치에 의한 추정 연결은 "
-                "생성하지 않습니다."
-            )
-        )
-        if options.group_by_vpc:
-            topology_description += (
-                " 명시적으로 확인된 VPC·Subnet 포함 관계는 연결선 대신 "
-                "중첩된 경계 상자로 표현합니다."
-            )
-        return self._section(
-            "클라우드 구성도",
-            topology_description,
-            content,
-            int(summary.get("representative_node_count") or 0),
-            warning=bool(
-                confidence != "VERIFIED"
-                or summary.get("unmapped_resource_count")
-                or summary.get("unresolved_reference_count")
-                or summary.get("truncated")
-            ),
+        return self._topology_helper()._infrastructure_topology_section(
+            topology,
+            options,
         )
 
     def _topology_svg(
@@ -1008,149 +1038,7 @@ class HtmlReportRenderer:
         edges: List[Dict[str, Any]],
         options: TopologyDisplayOptions,
     ) -> str:
-        if not nodes or not edges:
-            return ""
-        node_ids = {str(node.get("node_id")) for node in nodes}
-        visible_edges = sorted((
-            edge for edge in edges
-            if (
-                str(edge.get("source_node_id")) in node_ids
-                and str(edge.get("target_node_id")) in node_ids
-            )
-        ), key=self._topology_edge_key)
-        if not visible_edges:
-            return ""
-
-        layout, width, height = self._topology_layout(
-            nodes,
-            visible_edges,
-            options,
-        )
-        boxes = layout["boxes"]
-        consumed_edges = layout["consumed_edges"]
-        boundary_node_ids = {
-            boundary["node_id"] for boundary in layout["boundaries"]
-        }
-
-        boundary_shape_markup = []
-        boundary_label_markup = []
-        for boundary in layout["boundaries"]:
-            node = boundary["node"]
-            x, y, boundary_width, boundary_height = boundary["box"]
-            category = (
-                "vpc"
-                if str(node.get("category") or "") == "VPC"
-                else "subnet"
-            )
-            supporting = node.get("kind") != "representative"
-            css_class = (
-                f" topology-boundary--{category}"
-                + (" topology-boundary--supporting" if supporting else "")
-            )
-            lines = self._topology_node_lines(node, options)
-            title = (
-                f"source={node.get('source') or '-'} · "
-                f"confidence={node.get('confidence') or '-'} · "
-                f"resolution={node.get('resolution') or '-'}"
-            )
-            texts = [
-                f'<text x="{x + 16:.1f}" y="{y + 25:.1f}" '
-                'class="topology-boundary-title">'
-                f"{self._text(node.get('category_label') or node.get('category'))}"
-                "</text>"
-            ]
-            for index, line in enumerate(lines[:8]):
-                texts.append(
-                    f'<text x="{x + 16:.1f}" y="{y + 47 + index * 17:.1f}" '
-                    f'class="topology-boundary-detail">{self._text(line)}</text>'
-                )
-            boundary_shape_markup.append(
-                f'<g class="topology-boundary{css_class}">'
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{boundary_width:.1f}" '
-                f'height="{boundary_height:.1f}" rx="16"><title>'
-                f"{self._text(title)}</title></rect>"
-                + "</g>"
-            )
-            boundary_label_markup.append(
-                '<g class="topology-boundary-label">'
-                + "".join(texts)
-                + "</g>"
-            )
-
-        edge_markup = []
-        for edge in visible_edges:
-            if self._topology_edge_key(edge) in consumed_edges:
-                continue
-            source = boxes.get(str(edge.get("source_node_id")))
-            target = boxes.get(str(edge.get("target_node_id")))
-            if source is None or target is None:
-                continue
-            path, label_x, label_y = self._topology_edge_path(
-                source,
-                target,
-            )
-            label = self._topology_relation_label(edge.get("relationship"))
-            title = (
-                f"{label} · source={edge.get('source') or '-'} · "
-                f"confidence={edge.get('confidence') or 'VERIFIED'}"
-            )
-            edge_markup.append(
-                '<g class="topology-edge">'
-                f'<path d="{path}" marker-end="url(#topology-arrow)">'
-                f"<title>{self._text(title)}</title></path>"
-                f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
-                f'class="topology-edge-label">{self._text(label)}</text>'
-                "</g>"
-            )
-
-        node_markup = []
-        for node in sorted(nodes, key=self._topology_node_sort_key):
-            node_id = str(node.get("node_id"))
-            box = boxes.get(node_id)
-            if box is None or node_id in boundary_node_ids:
-                continue
-            x, y, node_width, node_height = box
-            supporting = node.get("kind") != "representative"
-            css_class = " topology-node--supporting" if supporting else ""
-            lines = self._topology_node_lines(node, options)
-            title = (
-                f"source={node.get('source') or '-'} · "
-                f"confidence={node.get('confidence') or '-'} · "
-                f"resolution={node.get('resolution') or '-'}"
-            )
-            texts = [
-                f'<text x="{x + 14:.1f}" y="{y + 23:.1f}" '
-                'class="topology-node-title">'
-                f"{self._text(node.get('category_label') or node.get('category'))}"
-                "</text>"
-            ]
-            for index, line in enumerate(lines[:8]):
-                texts.append(
-                    f'<text x="{x + 14:.1f}" y="{y + 46 + index * 18:.1f}" '
-                    f'class="topology-node-detail">{self._text(line)}</text>'
-                )
-            node_markup.append(
-                f'<g class="topology-node{css_class}">'
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{node_width}" '
-                f'height="{node_height}" rx="12"><title>'
-                f"{self._text(title)}</title></rect>"
-                + "".join(texts)
-                + "</g>"
-            )
-
-        return (
-            f'<svg class="topology-svg" viewBox="0 0 {width} {height}" '
-            f'width="{width}" height="{height}" '
-            'role="img" aria-label="명시적으로 확인된 클라우드 자원 구성도">'
-            '<defs><marker id="topology-arrow" markerWidth="8" markerHeight="8" '
-            'refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
-            '<path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>'
-            + "".join(boundary_shape_markup)
-            + "".join(edge_markup)
-            + "".join(boundary_label_markup)
-            + "".join(node_markup)
-            + "</svg>"
-        )
+        return self._topology_helper()._topology_svg(nodes, edges, options)
 
     def _topology_layout(
         self,
@@ -1158,52 +1046,11 @@ class HtmlReportRenderer:
         edges: List[Dict[str, Any]],
         options: TopologyDisplayOptions,
     ) -> tuple[Dict[str, Any], int, int]:
-        if options.group_by_vpc:
-            return self._topology_compound_layout(nodes, edges, options)
-
-        layers = defaultdict(list)
-        categories = []
-        for node in nodes:
-            category = str(node.get("category") or "")
-            if category not in categories:
-                categories.append(category)
-            layers[categories.index(category)].append(node)
-
-        ordered_layers = sorted(layers)
-        node_width = self.TOPOLOGY_NODE_WIDTH
-        node_height = self.TOPOLOGY_NODE_HEIGHT
-        horizontal_gap = 82
-        vertical_gap = 32
-        margin = 30
-        boxes: Dict[str, tuple[float, float, float, float]] = {}
-        for column, layer in enumerate(ordered_layers):
-            layer_nodes = sorted(
-                layers[layer],
-                key=self._topology_node_sort_key,
-            )
-            for row, node in enumerate(layer_nodes):
-                boxes[str(node.get("node_id"))] = (
-                    margin + column * (node_width + horizontal_gap),
-                    margin + row * (node_height + vertical_gap),
-                    node_width,
-                    node_height,
-                )
-        max_rows = max((len(value) for value in layers.values()), default=1)
-        width = (
-            margin * 2
-            + len(ordered_layers) * node_width
-            + max(0, len(ordered_layers) - 1) * horizontal_gap
+        return self._topology_helper()._topology_layout(
+            nodes,
+            edges,
+            options,
         )
-        height = (
-            margin * 2
-            + max_rows * node_height
-            + max(0, max_rows - 1) * vertical_gap
-        )
-        return {
-            "boxes": boxes,
-            "boundaries": [],
-            "consumed_edges": set(),
-        }, max(width, 320), max(height, 220)
 
     def _topology_compound_layout(
         self,
@@ -1211,475 +1058,54 @@ class HtmlReportRenderer:
         edges: List[Dict[str, Any]],
         options: TopologyDisplayOptions,
     ) -> tuple[Dict[str, Any], int, int]:
-        """Nest only relationships proven by explicit CONTAINS edges."""
-        node_by_id = {
-            str(node.get("node_id")): node
-            for node in nodes
-            if node.get("node_id") is not None
-        }
-        vpc_ids = {
-            node_id for node_id, node in node_by_id.items()
-            if str(node.get("category") or "") == "VPC"
-        }
-        subnet_ids = {
-            node_id for node_id, node in node_by_id.items()
-            if str(node.get("category") or "") == "SUBNET"
-        }
-        vpc_parents: Dict[str, set[str]] = defaultdict(set)
-        subnet_parents: Dict[str, set[str]] = defaultdict(set)
-        contains_edges: Dict[tuple[str, str], Dict[str, Any]] = {}
-        for edge in edges:
-            if str(edge.get("relationship") or "").upper() != "CONTAINS":
-                continue
-            source_id = str(edge.get("source_node_id") or "")
-            target_id = str(edge.get("target_node_id") or "")
-            source = node_by_id.get(source_id)
-            if source is None or target_id not in node_by_id:
-                continue
-            source_category = str(source.get("category") or "")
-            if source_category == "VPC":
-                vpc_parents[target_id].add(source_id)
-            elif source_category == "SUBNET":
-                subnet_parents[target_id].add(source_id)
-            contains_edges[(source_id, target_id)] = edge
-
-        subnet_to_vpc = {
-            subnet_id: next(iter(parents))
-            for subnet_id, parents in vpc_parents.items()
-            if subnet_id in subnet_ids and len(parents) == 1
-        }
-        subnet_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        direct_vpc_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        assigned_ids: set[str] = set()
-        consumed_edges: set[tuple[str, str, str]] = set()
-
-        for subnet_id, vpc_id in subnet_to_vpc.items():
-            edge = contains_edges.get((vpc_id, subnet_id))
-            if edge is not None:
-                consumed_edges.add(self._topology_edge_key(edge))
-
-        candidates = sorted(
-            (
-                node for node_id, node in node_by_id.items()
-                if node_id not in vpc_ids and node_id not in subnet_ids
-            ),
-            key=self._topology_node_sort_key,
+        return self._topology_helper()._topology_compound_layout(
+            nodes,
+            edges,
+            options,
         )
-        for node in candidates:
-            node_id = str(node.get("node_id"))
-            subnet_parent_ids = subnet_parents.get(node_id, set())
-            vpc_parent_ids = vpc_parents.get(node_id, set())
-            if len(subnet_parent_ids) == 1:
-                subnet_id = next(iter(subnet_parent_ids))
-                subnet_vpc_id = subnet_to_vpc.get(subnet_id)
-                has_conflict = bool(
-                    vpc_parent_ids
-                    and (
-                        subnet_vpc_id is None
-                        or vpc_parent_ids != {subnet_vpc_id}
-                    )
-                )
-                if not has_conflict:
-                    subnet_children[subnet_id].append(node)
-                    assigned_ids.add(node_id)
-                    edge = contains_edges.get((subnet_id, node_id))
-                    if edge is not None:
-                        consumed_edges.add(self._topology_edge_key(edge))
-                    if subnet_vpc_id is not None:
-                        edge = contains_edges.get((subnet_vpc_id, node_id))
-                        if edge is not None:
-                            consumed_edges.add(self._topology_edge_key(edge))
-                    continue
-
-            if len(subnet_parent_ids) > 1:
-                parent_vpcs = {
-                    subnet_to_vpc.get(subnet_id)
-                    for subnet_id in subnet_parent_ids
-                }
-                if None not in parent_vpcs and len(parent_vpcs) == 1:
-                    vpc_id = next(iter(parent_vpcs))
-                    if not vpc_parent_ids or vpc_parent_ids == {vpc_id}:
-                        direct_vpc_children[vpc_id].append(node)
-                        assigned_ids.add(node_id)
-                        edge = contains_edges.get((vpc_id, node_id))
-                        if edge is not None:
-                            consumed_edges.add(self._topology_edge_key(edge))
-                        continue
-
-            if not subnet_parent_ids and len(vpc_parent_ids) == 1:
-                vpc_id = next(iter(vpc_parent_ids))
-                if vpc_id in vpc_ids:
-                    direct_vpc_children[vpc_id].append(node)
-                    assigned_ids.add(node_id)
-                    edge = contains_edges.get((vpc_id, node_id))
-                    if edge is not None:
-                        consumed_edges.add(self._topology_edge_key(edge))
-
-        node_width = self.TOPOLOGY_NODE_WIDTH
-        node_height = self.TOPOLOGY_NODE_HEIGHT
-        inner_gap = 22
-        boundary_padding = 22
-        outer_gap = 34
-        margin = 30
-
-        def grid_layout(
-            items: List[Dict[str, Any]],
-            *,
-            max_columns: int,
-        ) -> tuple[int, int, Dict[str, tuple[float, float, float, float]]]:
-            if not items:
-                return 0, 0, {}
-            columns = min(max_columns, max(1, math.ceil(math.sqrt(len(items)))))
-            rows = math.ceil(len(items) / columns)
-            grid_width = columns * node_width + (columns - 1) * inner_gap
-            grid_height = rows * node_height + (rows - 1) * inner_gap
-            local_boxes = {}
-            ordered_items = sorted(items, key=self._topology_node_sort_key)
-            for index, item in enumerate(ordered_items):
-                local_boxes[str(item.get("node_id"))] = (
-                    (index % columns) * (node_width + inner_gap),
-                    (index // columns) * (node_height + inner_gap),
-                    node_width,
-                    node_height,
-                )
-            return grid_width, grid_height, local_boxes
-
-        def subnet_group(subnet_id: str) -> Dict[str, Any]:
-            subnet = node_by_id[subnet_id]
-            header_height = self._topology_boundary_header_height(
-                subnet,
-                options,
-            )
-            grid_width, grid_height, child_boxes = grid_layout(
-                subnet_children.get(subnet_id, []),
-                max_columns=2,
-            )
-            width = max(280, grid_width + boundary_padding * 2)
-            height = header_height + boundary_padding
-            if child_boxes:
-                height += grid_height + boundary_padding
-            translated = {
-                node_id: (
-                    box[0] + boundary_padding,
-                    box[1] + header_height + boundary_padding,
-                    box[2],
-                    box[3],
-                )
-                for node_id, box in child_boxes.items()
-            }
-            return {
-                "node": subnet,
-                "width": width,
-                "height": height,
-                "child_boxes": translated,
-            }
-
-        subnet_groups = {
-            subnet_id: subnet_group(subnet_id)
-            for subnet_id in subnet_ids
-        }
-
-        def vpc_group(vpc_id: str) -> Dict[str, Any]:
-            vpc = node_by_id[vpc_id]
-            header_height = self._topology_boundary_header_height(vpc, options)
-            child_subnet_ids = sorted(
-                (
-                    subnet_id for subnet_id, parent_id in subnet_to_vpc.items()
-                    if parent_id == vpc_id
-                ),
-                key=lambda node_id: self._topology_node_sort_key(
-                    node_by_id[node_id]
-                ),
-            )
-            subnet_placements = {}
-            content_width = 0
-            content_height = 0
-            rows = [
-                child_subnet_ids[index:index + 2]
-                for index in range(0, len(child_subnet_ids), 2)
-            ]
-            current_y = header_height + boundary_padding
-            for row in rows:
-                current_x = boundary_padding
-                row_height = max(subnet_groups[node_id]["height"] for node_id in row)
-                for subnet_id in row:
-                    group = subnet_groups[subnet_id]
-                    subnet_placements[subnet_id] = (current_x, current_y)
-                    current_x += group["width"] + inner_gap
-                row_width = current_x - inner_gap + boundary_padding
-                content_width = max(content_width, row_width)
-                current_y += row_height + inner_gap
-                content_height = current_y
-
-            direct_items = direct_vpc_children.get(vpc_id, [])
-            direct_width, direct_height, direct_boxes = grid_layout(
-                direct_items,
-                max_columns=3,
-            )
-            direct_offset_y = current_y
-            if direct_boxes:
-                if rows:
-                    direct_offset_y += 14
-                direct_offset_y += 24
-                content_width = max(
-                    content_width,
-                    direct_width + boundary_padding * 2,
-                )
-                content_height = direct_offset_y + direct_height + boundary_padding
-            elif rows:
-                content_height = current_y - inner_gap + boundary_padding
-            else:
-                content_height = header_height + boundary_padding * 2
-
-            width = max(330, content_width)
-            boxes = {
-                node_id: (
-                    box[0] + boundary_padding,
-                    box[1] + direct_offset_y,
-                    box[2],
-                    box[3],
-                )
-                for node_id, box in direct_boxes.items()
-            }
-            return {
-                "node": vpc,
-                "width": width,
-                "height": content_height,
-                "subnet_placements": subnet_placements,
-                "child_boxes": boxes,
-            }
-
-        vpc_groups = {vpc_id: vpc_group(vpc_id) for vpc_id in vpc_ids}
-        boxes: Dict[str, tuple[float, float, float, float]] = {}
-        boundaries: List[Dict[str, Any]] = []
-        cursor_y = margin
-        max_width = 0
-
-        def place_subnet(subnet_id: str, x: float, y: float) -> None:
-            group = subnet_groups[subnet_id]
-            box = (x, y, group["width"], group["height"])
-            boxes[subnet_id] = box
-            boundaries.append({
-                "node_id": subnet_id,
-                "node": group["node"],
-                "box": box,
-                "level": 1,
-            })
-            for child_id, child_box in group["child_boxes"].items():
-                boxes[child_id] = (
-                    child_box[0] + x,
-                    child_box[1] + y,
-                    child_box[2],
-                    child_box[3],
-                )
-
-        for vpc_id in sorted(
-            vpc_ids,
-            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
-        ):
-            group = vpc_groups[vpc_id]
-            x = margin
-            y = cursor_y
-            vpc_box = (x, y, group["width"], group["height"])
-            boxes[vpc_id] = vpc_box
-            boundaries.append({
-                "node_id": vpc_id,
-                "node": group["node"],
-                "box": vpc_box,
-                "level": 0,
-            })
-            for subnet_id, position in group["subnet_placements"].items():
-                place_subnet(subnet_id, x + position[0], y + position[1])
-            for child_id, child_box in group["child_boxes"].items():
-                boxes[child_id] = (
-                    child_box[0] + x,
-                    child_box[1] + y,
-                    child_box[2],
-                    child_box[3],
-                )
-            cursor_y += group["height"] + outer_gap
-            max_width = max(max_width, group["width"])
-
-        orphan_subnet_ids = sorted(
-            subnet_ids - set(subnet_to_vpc),
-            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
-        )
-        for subnet_id in orphan_subnet_ids:
-            group = subnet_groups[subnet_id]
-            place_subnet(subnet_id, margin, cursor_y)
-            cursor_y += group["height"] + outer_gap
-            max_width = max(max_width, group["width"])
-
-        external_nodes = [
-            node for node_id, node in node_by_id.items()
-            if (
-                node_id not in vpc_ids
-                and node_id not in subnet_ids
-                and node_id not in assigned_ids
-            )
-        ]
-        if external_nodes:
-            layers = defaultdict(list)
-            for node in external_nodes:
-                category = str(node.get("category") or "")
-                layers[self.TOPOLOGY_LAYER_ORDER.get(category, 2)].append(node)
-            for column, layer in enumerate(sorted(layers)):
-                layer_nodes = sorted(
-                    layers[layer],
-                    key=self._topology_node_sort_key,
-                )
-                for row, node in enumerate(layer_nodes):
-                    boxes[str(node.get("node_id"))] = (
-                        margin + column * (node_width + 82),
-                        cursor_y + row * (node_height + 32),
-                        node_width,
-                        node_height,
-                    )
-            external_width = (
-                len(layers) * node_width + max(0, len(layers) - 1) * 82
-            )
-            external_rows = max((len(value) for value in layers.values()), default=1)
-            external_height = (
-                external_rows * node_height + max(0, external_rows - 1) * 32
-            )
-            max_width = max(max_width, external_width)
-            cursor_y += external_height + outer_gap
-
-        boundaries.sort(key=lambda boundary: boundary["level"])
-        width = max(320, int(math.ceil(max_width + margin * 2)))
-        height = max(220, int(math.ceil(cursor_y - outer_gap + margin)))
-        return {
-            "boxes": boxes,
-            "boundaries": boundaries,
-            "consumed_edges": consumed_edges,
-        }, width, height
 
     def _topology_boundary_header_height(
         self,
         node: Mapping[str, Any],
         options: TopologyDisplayOptions,
     ) -> int:
-        line_count = min(8, len(self._topology_node_lines(node, options)))
-        return max(62, 47 + line_count * 17)
-
-    @staticmethod
-    def _topology_node_sort_key(node: Mapping[str, Any]) -> tuple[str, str, str]:
-        return (
-            str(node.get("category") or ""),
-            str(node.get("name") or "").casefold(),
-            str(node.get("resource_id") or node.get("node_id") or ""),
+        return self._topology_helper()._topology_boundary_header_height(
+            node,
+            options,
         )
 
     @staticmethod
-    def _topology_edge_key(edge: Mapping[str, Any]) -> tuple[str, str, str]:
-        return (
-            str(edge.get("source_node_id") or ""),
-            str(edge.get("target_node_id") or ""),
-            str(edge.get("relationship") or "").upper(),
-        )
+    def _topology_node_sort_key(
+        node: Mapping[str, Any],
+    ) -> tuple[str, str, str]:
+        return TopologyRenderer._topology_node_sort_key(node)
+
+    @staticmethod
+    def _topology_edge_key(
+        edge: Mapping[str, Any],
+    ) -> tuple[str, str, str]:
+        return TopologyRenderer._topology_edge_key(edge)
 
     @staticmethod
     def _topology_edge_path(
         source: tuple[float, float, float, float],
         target: tuple[float, float, float, float],
     ) -> tuple[str, float, float]:
-        sx, sy, sw, sh = source
-        tx, ty, tw, th = target
-        source_center_x = sx + sw / 2
-        source_center_y = sy + sh / 2
-        target_center_x = tx + tw / 2
-        target_center_y = ty + th / 2
-        delta_x = target_center_x - source_center_x
-        delta_y = target_center_y - source_center_y
-        horizontal = abs(delta_x) / max(sw + tw, 1) >= abs(delta_y) / max(sh + th, 1)
-
-        if horizontal:
-            if delta_x >= 0:
-                start_x, start_y = sx + sw, source_center_y
-                end_x, end_y = tx, target_center_y
-            else:
-                start_x, start_y = sx, source_center_y
-                end_x, end_y = tx + tw, target_center_y
-            bend = max(34, abs(end_x - start_x) / 2)
-            direction = 1 if end_x >= start_x else -1
-            path = (
-                f"M {start_x:.1f} {start_y:.1f} "
-                f"C {start_x + direction * bend:.1f} {start_y:.1f}, "
-                f"{end_x - direction * bend:.1f} {end_y:.1f}, "
-                f"{end_x:.1f} {end_y:.1f}"
-            )
-        else:
-            if delta_y >= 0:
-                start_x, start_y = source_center_x, sy + sh
-                end_x, end_y = target_center_x, ty
-            else:
-                start_x, start_y = source_center_x, sy
-                end_x, end_y = target_center_x, ty + th
-            bend = max(34, abs(end_y - start_y) / 2)
-            direction = 1 if end_y >= start_y else -1
-            path = (
-                f"M {start_x:.1f} {start_y:.1f} "
-                f"C {start_x:.1f} {start_y + direction * bend:.1f}, "
-                f"{end_x:.1f} {end_y - direction * bend:.1f}, "
-                f"{end_x:.1f} {end_y:.1f}"
-            )
-        return path, (start_x + end_x) / 2, (start_y + end_y) / 2 - 5
+        return TopologyRenderer._topology_edge_path(source, target)
 
     def _topology_node_lines(
         self,
         node: Mapping[str, Any],
         options: TopologyDisplayOptions,
     ) -> List[str]:
-        lines = []
-        if node.get("resolution") == "UNRESOLVED":
-            lines.append("REFERENCE_ONLY / UNRESOLVED")
-        if options.show_resource_name and node.get("name"):
-            lines.append(self._topology_short_text(node.get("name")))
-        if options.show_private_ip and node.get("private_ips"):
-            lines.append(
-                "Private IP "
-                + self._topology_value_list(node.get("private_ips"))
-            )
-        if options.show_public_ip and node.get("public_ips"):
-            lines.append(
-                "Public IP "
-                + self._topology_value_list(node.get("public_ips"))
-            )
-        if options.show_network_cidr and node.get("network_cidrs"):
-            lines.append(
-                "CIDR " + self._topology_value_list(node.get("network_cidrs"))
-            )
-        if options.show_resource_id and node.get("resource_id"):
-            lines.append(
-                "ID " + self._topology_short_text(node.get("resource_id"), 28)
-            )
-        if options.show_status and node.get("status"):
-            lines.append("상태 " + self._topology_short_text(node.get("status")))
-        if options.show_zone and node.get("zone"):
-            lines.append("Zone " + self._topology_short_text(node.get("zone")))
-        if options.show_platform and node.get("platform"):
-            lines.append(
-                "플랫폼 " + self._topology_short_text(node.get("platform"))
-            )
-        return lines[:8]
+        return self._topology_helper()._topology_node_lines(node, options)
 
     def _topology_unmapped_card(
         self,
         node: Mapping[str, Any],
         options: TopologyDisplayOptions,
     ) -> str:
-        lines = self._topology_node_lines(node, options)
-        details = " · ".join(lines) if lines else "표시 속성 없음"
-        return (
-            '<article class="topology-unmapped-card">'
-            f"<strong>{self._text(node.get('category_label') or node.get('category'))}</strong>"
-            f"<span>{self._text(details)}</span>"
-            "<small>source="
-            + self._text(node.get("source"))
-            + " · confidence="
-            + self._text(node.get("confidence"))
-            + "</small></article>"
-        )
+        return self._topology_helper()._topology_unmapped_card(node, options)
 
     def _topology_evidence_table(
         self,
@@ -1687,34 +1113,10 @@ class HtmlReportRenderer:
         nodes: List[Dict[str, Any]],
         options: TopologyDisplayOptions,
     ) -> str:
-        node_by_id = {
-            str(node.get("node_id")): node
-            for node in nodes
-        }
-        rows = []
-        for edge in edges:
-            source_node = node_by_id.get(str(edge.get("source_node_id")), {})
-            target_node = node_by_id.get(str(edge.get("target_node_id")), {})
-            rows.append({
-                "relation": (
-                    self._topology_node_reference(source_node, options)
-                    + " → "
-                    + self._topology_node_reference(target_node, options)
-                ),
-                "relationship": self._topology_relation_label(
-                    edge.get("relationship")
-                ),
-                "source": edge.get("source"),
-                "confidence": edge.get("confidence"),
-            })
-        return self._table(
-            rows,
-            (
-                ("relation", "연결"),
-                ("relationship", "관계"),
-                ("source", "근거 source"),
-                ("confidence", "신뢰도"),
-            ),
+        return self._topology_helper()._topology_evidence_table(
+            edges,
+            nodes,
+            options,
         )
 
     def _topology_node_reference(
@@ -1722,51 +1124,18 @@ class HtmlReportRenderer:
         node: Mapping[str, Any],
         options: TopologyDisplayOptions,
     ) -> str:
-        category = str(
-            node.get("category_label") or node.get("category") or "리소스"
-        )
-        if options.show_resource_name and node.get("name"):
-            return f"{category}: {node.get('name')}"
-        if options.show_resource_id and node.get("resource_id"):
-            return f"{category}: {node.get('resource_id')}"
-        if node.get("resolution") == "UNRESOLVED":
-            return f"{category}: 미해결 참조"
-        return category
+        return self._topology_helper()._topology_node_reference(node, options)
 
     @staticmethod
     def _topology_relation_label(value: Any) -> str:
-        labels = {
-            "CONTAINS": "포함",
-            "ATTACHED_TO": "연결",
-            "ATTACHED_STORAGE": "스토리지 부착",
-            "ASSIGNED_TO": "할당",
-            "TARGETS": "LB 대상",
-            "HAS_SNAPSHOT": "스냅샷",
-            "PEERS_FROM": "피어링 원본",
-            "PEERS_TO": "피어링 대상",
-            "RELATED_TO": "명시 관계",
-        }
-        normalized = str(value or "RELATED_TO").upper()
-        return labels.get(normalized, normalized.replace("_", " "))
+        return TopologyRenderer._topology_relation_label(value)
 
     def _topology_value_list(self, value: Any) -> str:
-        values = [
-            self._topology_short_text(item, 24)
-            for item in value
-            if item is not None and str(item).strip()
-        ] if isinstance(value, (list, tuple)) else []
-        if not values:
-            return "-"
-        visible = values[:2]
-        suffix = f" 외 {len(values) - 2}개" if len(values) > 2 else ""
-        return ", ".join(visible) + suffix
+        return self._topology_helper()._topology_value_list(value)
 
     @staticmethod
     def _topology_short_text(value: Any, limit: int = 32) -> str:
-        rendered = str(value or "").strip()
-        if len(rendered) <= limit:
-            return rendered
-        return rendered[: max(1, limit - 1)] + "…"
+        return TopologyRenderer._topology_short_text(value, limit)
 
     def _infrastructure_metric_section(
         self,
@@ -3129,376 +2498,4 @@ class HtmlReportRenderer:
         return escape(str(value), quote=True)
 
     def _styles(self) -> str:
-        return """
-:root {
-  color-scheme: light;
-  --ink: #14213d;
-  --muted: #64748b;
-  --line: #dbe4ee;
-  --surface: #ffffff;
-  --canvas: #f3f6fa;
-  --brand: #03c75a;
-  --brand-dark: #008f43;
-  --warning: #b45309;
-  font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  color: var(--ink);
-  background: var(--canvas);
-  line-height: 1.55;
-}
-.report-shell {
-  width: min(1440px, calc(100% - 32px));
-  margin: 32px auto;
-}
-.report-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 32px;
-  padding: 36px;
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #164e3b);
-  border-radius: 20px;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, .16);
-}
-.eyebrow {
-  margin: 0 0 8px;
-  color: #86efac;
-  font-size: .78rem;
-  font-weight: 800;
-  letter-spacing: .14em;
-}
-h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
-.subtitle { margin: 18px 0 0; color: #d1fae5; }
-.report-meta {
-  display: grid;
-  grid-template-columns: auto;
-  align-content: end;
-  min-width: 210px;
-}
-.report-meta span { color: #a7f3d0; font-size: .75rem; }
-.report-meta strong { margin-bottom: 10px; font-size: .88rem; }
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin: 20px 0;
-}
-.summary-card {
-  padding: 22px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-}
-.summary-card span { display: block; color: var(--muted); font-size: .84rem; }
-.summary-card strong { display: block; margin-top: 8px; font-size: 1.75rem; }
-.summary-card small { color: var(--muted); font-size: .8rem; font-weight: 600; }
-.summary-card.warning { border-color: #fed7aa; }
-.summary-card.warning strong { color: var(--warning); }
-.infra-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 18px;
-}
-.infra-summary-card {
-  padding: 14px 16px;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-.infra-summary-card span { display: block; color: var(--muted); font-size: .76rem; }
-.infra-summary-card strong { display: block; margin-top: 3px; font-size: 1.2rem; }
-.topology-accuracy {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px 14px;
-  margin-bottom: 12px;
-  padding: 11px 13px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  font-size: .76rem;
-}
-.topology-accuracy strong { color: var(--ink); }
-.topology-accuracy.verified { border-color: #86efac; background: #f0fdf4; }
-.topology-accuracy.warning { border-color: #fdba74; background: #fff7ed; }
-.topology-warnings {
-  margin: 0 0 12px;
-  padding: 10px 14px 10px 32px;
-  color: #9a3412;
-  background: #fff7ed;
-  border-radius: 10px;
-  font-size: .76rem;
-}
-.topology-warnings small { color: #7c2d12; }
-.topology-canvas {
-  overflow-x: auto;
-  padding: 8px;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.topology-svg {
-  display: block;
-  width: auto;
-  min-width: 100%;
-  max-width: none;
-  height: auto;
-}
-.topology-boundary > rect {
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-.topology-boundary--vpc > rect {
-  fill: #eff6ff;
-  stroke: #2563eb;
-}
-.topology-boundary--subnet > rect {
-  fill: #f8fafc;
-  stroke: #0f766e;
-  stroke-dasharray: 7 4;
-}
-.topology-boundary--supporting > rect {
-  fill: #fff7ed;
-  stroke: #f59e0b;
-  stroke-dasharray: 5 4;
-}
-.topology-boundary-title {
-  fill: #0f172a;
-  font-size: 14px;
-  font-weight: 800;
-}
-.topology-boundary-detail { fill: #475569; font-size: 11px; }
-.topology-node rect {
-  fill: #ffffff;
-  stroke: #94a3b8;
-  stroke-width: 1.5;
-  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, .08));
-}
-.topology-node--supporting rect {
-  fill: #fff7ed;
-  stroke: #f59e0b;
-  stroke-dasharray: 5 4;
-}
-.topology-node-title { fill: #0f172a; font-size: 13px; font-weight: 800; }
-.topology-node-detail { fill: #475569; font-size: 11px; }
-.topology-edge path {
-  fill: none;
-  stroke: #64748b;
-  stroke-width: 1.6;
-}
-.topology-edge-label {
-  fill: #334155;
-  paint-order: stroke;
-  stroke: #f8fafc;
-  stroke-width: 4px;
-  stroke-linejoin: round;
-  font-size: 10px;
-  text-anchor: middle;
-}
-#topology-arrow path { fill: #64748b; }
-.topology-subheading { margin: 18px 0 3px; font-size: .95rem; }
-.topology-note { margin: 0 0 9px; color: var(--muted); font-size: .76rem; }
-.topology-unmapped-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-}
-.topology-unmapped-card {
-  display: grid;
-  gap: 3px;
-  padding: 11px 12px;
-  background: #fff7ed;
-  border: 1px dashed #fdba74;
-  border-radius: 9px;
-  font-size: .75rem;
-}
-.topology-unmapped-card span { color: #475569; }
-.topology-unmapped-card small { color: #9a3412; overflow-wrap: anywhere; }
-.report-section {
-  margin-top: 20px;
-  padding: 26px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-}
-.report-section.warning { border-color: #fed7aa; }
-.historical-basis-notice { background: #fff7ed; }
-.historical-basis-notice .count {
-  color: #9a3412;
-  background: #ffedd5;
-}
-.historical-basis-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.historical-basis-grid div {
-  display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1px solid #fed7aa;
-  border-radius: 10px;
-}
-.historical-basis-grid span { color: #9a3412; font-size: .76rem; }
-.historical-basis-grid strong { color: #431407; font-size: .86rem; }
-.historical-basis-caveat {
-  margin: 14px 0 0;
-  color: #7c2d12;
-  font-size: .82rem;
-  font-weight: 700;
-}
-.section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 18px;
-}
-h2 { margin: 0; font-size: 1.22rem; }
-.section-heading p { margin: 5px 0 0; color: var(--muted); font-size: .88rem; }
-.count {
-  flex: none;
-  padding: 5px 10px;
-  color: var(--brand-dark);
-  background: #dcfce7;
-  border-radius: 999px;
-  font-size: .78rem;
-  font-weight: 800;
-}
-.billing-facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-.billing-fact {
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #f8fafc;
-}
-.billing-fact h3 { margin: 0; font-size: 1rem; }
-.billing-amount { display: block; margin: 8px 0 14px; font-size: 1.45rem; }
-.billing-fact ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.billing-fact li { display: flex; justify-content: space-between; gap: 16px; font-size: .82rem; }
-.billing-fact li span { color: var(--muted); }
-.billing-fact li strong { text-align: right; }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
-th {
-  padding: 11px 12px;
-  color: #475569;
-  background: #f8fafc;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  white-space: nowrap;
-}
-td {
-  padding: 11px 12px;
-  border-bottom: 1px solid #edf2f7;
-  vertical-align: top;
-}
-tbody tr:hover { background: #f8fffb; }
-.numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.chart-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-.chart-card {
-  min-width: 0;
-  padding: 18px;
-  background: #fbfdff;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.chart-heading h3 { margin: 0; font-size: 1rem; }
-.chart-heading p { margin: 3px 0 12px; color: var(--muted); font-size: .78rem; }
-.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.chart-grid-line { stroke: #e2e8f0; stroke-width: 1; }
-.chart-axis-label { fill: #64748b; font-size: 11px; }
-.chart-line {
-  fill: none;
-  stroke-width: 2.4;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.chart-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin-top: 6px;
-}
-.chart-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #475569;
-  font-size: .72rem;
-}
-.chart-legend-item i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-}
-.chart-empty { min-height: 180px; align-content: center; }
-.event-details { min-width: 160px; }
-.event-details summary {
-  color: var(--brand-dark);
-  cursor: pointer;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.event-details dl { margin: 10px 0 0; }
-.event-details dl div {
-  display: grid;
-  grid-template-columns: minmax(90px, .8fr) minmax(140px, 1.4fr);
-  gap: 8px;
-  padding: 5px 0;
-  border-bottom: 1px solid #edf2f7;
-}
-.event-details dt { color: var(--muted); font-size: .74rem; overflow-wrap: anywhere; }
-.event-details dd { margin: 0; font-size: .74rem; overflow-wrap: anywhere; }
-.detail-more { margin: 8px 0 0; color: var(--muted); font-size: .72rem; }
-.empty-state {
-  margin: 0;
-  padding: 28px;
-  color: var(--muted);
-  background: #f8fafc;
-  border-radius: 10px;
-  text-align: center;
-}
-footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: center; }
-@media (max-width: 900px) {
-  .report-header { flex-direction: column; padding: 28px; }
-  .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
-  .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .topology-unmapped-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .chart-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 560px) {
-  .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
-  .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts, .infra-summary-grid, .topology-unmapped-grid, .historical-basis-grid { grid-template-columns: 1fr; gap: 10px; }
-  .section-heading { flex-direction: column; gap: 10px; }
-}
-@media print {
-  @page { size: A4 landscape; margin: 12mm; }
-  body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .report-shell { width: 100%; margin: 0; }
-  .report-header { box-shadow: none; break-after: avoid; }
-  .summary-grid, .report-section { break-inside: avoid; }
-  .metric-trends { break-inside: auto; }
-  .chart-card { break-inside: avoid; }
-  .topology-canvas { overflow: visible; }
-  .topology-svg { width: 100%; min-width: 0; max-width: 100%; }
-  .report-section { padding: 18px; }
-  table { font-size: 8pt; }
-  tr { break-inside: avoid; }
-}
-"""
+        return HTML_REPORT_STYLES

@@ -1,68 +1,15 @@
-from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
-from utils.event_sort import sort_event_records
+from ._event_normalizer_support import _EventNormalizerBase
 
 
-class ActivityTracerEventNormalizer:
+class ActivityTracerEventNormalizer(_EventNormalizerBase):
+    """Activity Tracer 필드·시간·그룹 키를 공통 이벤트 계약으로 변환한다."""
+
     KST = ZoneInfo("Asia/Seoul")
-
-    def __init__(self) -> None:
-        self.last_errors: List[Dict[str, Any]] = []
-
-    def normalize(
-        self,
-        raw_events: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        self.last_errors = []
-        result = []
-
-        if not isinstance(raw_events, list):
-            self._record_error(
-                index=None,
-                message="이벤트 목록이 list 형식이 아닙니다.",
-            )
-            return result
-
-        for index, event in enumerate(raw_events):
-            if not isinstance(event, dict):
-                self._record_error(
-                    index=index,
-                    message="이벤트 항목이 object 형식이 아닙니다.",
-                )
-                continue
-
-            try:
-                result.append(self._normalize_event(event))
-            except Exception as exc:
-                self._record_error(
-                    index=index,
-                    message="이벤트 항목 정규화에 실패했습니다.",
-                    exc=exc,
-                )
-
-        return sort_event_records(result, ("event_time",))
-
-    def group_events(
-        self,
-        events: List[Dict[str, Any]],
-        group_by: str = "resource",
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        result: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-
-            group_key = self._get_group_key(
-                event=event,
-                group_by=group_by,
-            )
-            result[group_key].append(event)
-
-        return dict(result)
+    SORT_FIELDS = ("event_time",)
 
     def _get_group_key(
         self,
@@ -174,23 +121,3 @@ class ActivityTracerEventNormalizer:
             event_dt.strftime("%Y-%m-%d %H:%M:%S")
             + f".{milliseconds:03d} KST"
         )
-
-    def _record_error(
-        self,
-        index: Optional[int],
-        message: str,
-        exc: Optional[Exception] = None,
-    ) -> None:
-        error: Dict[str, Any] = {
-            "normalizer": self.__class__.__name__,
-            "stage": "normalize_event",
-            "message": message,
-        }
-
-        if index is not None:
-            error["item_index"] = index
-
-        if exc is not None:
-            error["exception_type"] = type(exc).__name__
-
-        self.last_errors.append(error)
