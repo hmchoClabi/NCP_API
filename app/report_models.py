@@ -29,6 +29,84 @@ class ReportResult:
     CURRENT_STATE_TOPOLOGY_TIME_BASIS: ClassVar[str] = (
         ReportTopologyPolicy.CURRENT_STATE_TOPOLOGY_TIME_BASIS
     )
+    PUBLIC_TOPOLOGY_NODE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "category",
+        "category_label",
+        "resource_type",
+        "resource_id",
+        "name",
+        "private_ips",
+        "public_ips",
+        "network_cidrs",
+        "status",
+        "zone",
+        "platform",
+        "kind",
+        "reference_kind",
+        "count_as_infrastructure",
+        "confidence",
+        "resolution",
+        "is_mapped",
+        "storage_size_gb",
+        "storage_type",
+        "disk_type",
+        "volume_type",
+        "subnet_usage_type",
+        "placement_hint",
+        "network_interface_count",
+        "attached_disk_count",
+        "attached_disk_capacity_known_count",
+        "attached_disk_total_gb",
+        "public_ip_resource_count",
+    )
+    PUBLIC_TOPOLOGY_EDGE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "relationship",
+        "confidence",
+    )
+    PUBLIC_TOPOLOGY_WARNING_FIELDS: ClassVar[tuple[str, ...]] = (
+        "code",
+        "message",
+        "confidence",
+    )
+    PUBLIC_TOPOLOGY_SUMMARY_FIELDS: ClassVar[tuple[str, ...]] = (
+        "representative_node_count",
+        "supporting_node_count",
+        "verified_edge_count",
+        "total_verified_edge_count",
+        "unmapped_resource_count",
+        "unresolved_reference_count",
+        "collected_at",
+        "max_nodes",
+        "truncated",
+        "omitted_node_count",
+        "confidence",
+        "relationship_confidence",
+        "relationship_coverage",
+        "inventory_completeness",
+        "collection_issue_count",
+        "presentation_policy_version",
+        "presentation_policy_mode",
+        "time_basis",
+        "snapshot_source",
+        "period_start",
+        "period_end",
+        "reference_at",
+        "eligible_start",
+        "eligible_end",
+        "snapshot_age_seconds",
+    )
+    PUBLIC_TOPOLOGY_PRESENTATION_FIELDS: ClassVar[tuple[str, ...]] = (
+        "embedded_node_count",
+        "embedded_block_storage_count",
+        "embedded_network_interface_count",
+        "embedded_public_ip_count",
+        "excluded_category_node_count",
+        "excluded_nat_subnet_count",
+        "excluded_orphan_reference_count",
+        "retained_ambiguous_auxiliary_count",
+        "retained_unverified_nat_subnet_count",
+        "removed_edge_count",
+    )
 
     period: Dict[str, Any]
     customer: Dict[str, Any] = field(default_factory=dict)
@@ -411,11 +489,16 @@ class ReportResult:
         public_nodes = []
         for node in nodes:
             original_id = str(node.get("node_id"))
-            node["node_id"] = node_id_map.get(original_id, "node")
+            public_node = {
+                field_name: node[field_name]
+                for field_name in self.PUBLIC_TOPOLOGY_NODE_FIELDS
+                if field_name in node
+            }
+            public_node["node_id"] = node_id_map.get(original_id, "node")
             for field_name, option_name in field_options.items():
                 if not bool(options.diagram_option(option_name, True)):
-                    node.pop(field_name, None)
-            public_nodes.append(node)
+                    public_node.pop(field_name, None)
+            public_nodes.append(public_node)
 
         public_edges = []
         for edge in topology.get("edges", []):
@@ -425,7 +508,11 @@ class ReportResult:
             target_id = node_id_map.get(str(edge.get("target_node_id")))
             if not source_id or not target_id:
                 continue
-            public_edge = dict(edge)
+            public_edge = {
+                field_name: edge[field_name]
+                for field_name in self.PUBLIC_TOPOLOGY_EDGE_FIELDS
+                if field_name in edge
+            }
             public_edge["source_node_id"] = source_id
             public_edge["target_node_id"] = target_id
             public_edge["edge_id"] = (
@@ -434,15 +521,40 @@ class ReportResult:
             )
             public_edges.append(public_edge)
 
-        public_topology = dict(topology)
-        public_topology["nodes"] = public_nodes
-        public_topology["edges"] = public_edges
+        public_topology = {
+            "nodes": public_nodes,
+            "edges": public_edges,
+            "warnings": [
+                {
+                    field_name: warning[field_name]
+                    for field_name in self.PUBLIC_TOPOLOGY_WARNING_FIELDS
+                    if field_name in warning
+                }
+                for warning in topology.get("warnings", [])
+                if isinstance(warning, Mapping)
+            ],
+        }
         for key in ("unmapped_node_ids", "unresolved_node_ids"):
             public_topology[key] = [
                 node_id_map[str(node_id)]
                 for node_id in topology.get(key, [])
                 if str(node_id) in node_id_map
             ]
+        raw_summary = topology.get("summary")
+        summary = raw_summary if isinstance(raw_summary, Mapping) else {}
+        public_summary = {
+            field_name: summary[field_name]
+            for field_name in self.PUBLIC_TOPOLOGY_SUMMARY_FIELDS
+            if field_name in summary
+        }
+        presentation = summary.get("presentation_policy")
+        if isinstance(presentation, Mapping):
+            public_summary["presentation_policy"] = {
+                field_name: presentation[field_name]
+                for field_name in self.PUBLIC_TOPOLOGY_PRESENTATION_FIELDS
+                if field_name in presentation
+            }
+        public_topology["summary"] = public_summary
         return public_topology
 
     def to_dict(self) -> Dict[str, Any]:
@@ -486,7 +598,11 @@ class ReportResult:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ReportResult":
-        """Rehydrate a persisted normalized snapshot for deterministic rendering."""
+        """저장된 정규화 스냅샷을 현재 표시 정책으로 복원한다.
+
+        원본 수집 데이터는 바꾸지 않고, 구성도 표시 계층만 버전이 명시된
+        멱등 마이그레이션을 적용한다.
+        """
         if not isinstance(payload, Mapping):
             raise ValueError("Report snapshot must be an object.")
         period = payload.get("period")

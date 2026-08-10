@@ -140,72 +140,109 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 .topology-warnings small { color: #7c2d12; }
 .topology-canvas {
   overflow-x: auto;
-  padding: 8px;
-  background: #f8fafc;
+  padding: 14px;
+  background: #f3f6f9;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
 .topology-svg {
   display: block;
   width: auto;
-  min-width: 100%;
+  min-width: 0;
   max-width: none;
   height: auto;
+  margin: 0 auto;
 }
 .topology-boundary > rect {
-  stroke-width: 2;
+  stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 .topology-boundary--vpc > rect {
-  fill: #eff6ff;
-  stroke: #2563eb;
+  fill: #ffffff;
+  stroke: #0ea5e9;
+  stroke-dasharray: 6 4;
+}
+.topology-boundary--zone > rect {
+  fill: #f0f9ff;
+  fill-opacity: .78;
+  stroke: #38bdf8;
+  stroke-width: 1.25;
 }
 .topology-boundary--subnet > rect {
-  fill: #f8fafc;
-  stroke: #0f766e;
-  stroke-dasharray: 7 4;
+  fill: #ffffff;
+  fill-opacity: .42;
+  stroke: #94a3b8;
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
 }
 .topology-boundary--supporting > rect {
   fill: #fff7ed;
   stroke: #f59e0b;
   stroke-dasharray: 5 4;
 }
-.topology-boundary-title {
-  fill: #0f172a;
-  font-size: 14px;
+.topology-vpc-title-tab { fill: #1e293b; }
+.topology-vpc-title {
+  fill: #ffffff;
+  font-size: 12px;
   font-weight: 800;
 }
-.topology-boundary-detail { fill: #475569; font-size: 11px; }
+.topology-zone-title-tab,
+.topology-subnet-title-tab { fill: #3f3f46; }
+.topology-zone-title,
+.topology-subnet-title {
+  fill: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+.topology-boundary-detail { fill: #475569; font-size: 9.5px; }
 .topology-boundary-icon,
 .topology-node-icon {
-  opacity: .86;
+  opacity: .94;
   pointer-events: none;
 }
 .topology-node rect {
-  fill: #ffffff;
-  stroke: #94a3b8;
-  stroke-width: 1.5;
-  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, .08));
+  fill: transparent;
+  stroke: none;
+  filter: none;
 }
 .topology-node--supporting rect {
   fill: #fff7ed;
   stroke: #f59e0b;
+  stroke-width: 1.1;
   stroke-dasharray: 5 4;
 }
-.topology-node-title { fill: #0f172a; font-size: 13px; font-weight: 800; }
-.topology-node-detail { fill: #475569; font-size: 11px; }
+.topology-node--vpc-boundary > rect:first-child {
+  fill: #ffffff;
+  fill-opacity: .94;
+}
+.topology-node-title { fill: #0f172a; font-size: 10.5px; font-weight: 800; }
+.topology-node-name { fill: #334155; font-size: 10px; font-weight: 650; }
+.topology-node-detail { fill: #475569; font-size: 9px; }
+.topology-node-badge-bg {
+  fill: transparent !important;
+  stroke: none !important;
+  filter: none !important;
+}
+.topology-node-badge {
+  fill: #475569;
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+}
 .topology-edge path {
   fill: none;
   stroke: #64748b;
-  stroke-width: 1.6;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .topology-edge-label {
   fill: #334155;
   paint-order: stroke;
-  stroke: #f8fafc;
+  stroke: #f3f6f9;
   stroke-width: 4px;
   stroke-linejoin: round;
-  font-size: 10px;
+  font-size: 8.5px;
   text-anchor: middle;
 }
 #topology-arrow path { fill: #64748b; }

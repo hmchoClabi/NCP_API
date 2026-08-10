@@ -11,7 +11,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Mapping
 from zoneinfo import ZoneInfo
 
-from app.infrastructure_topology import InfrastructureTopologyBuilder
+from app.infrastructure_topology import (
+    InfrastructureTopologyBuilder,
+    apply_topology_presentation_policy,
+)
 from app.report_period import (
     build_snapshot_eligibility_window,
     normalize_period_bounds,
@@ -95,7 +98,9 @@ class ReportTopologyPolicy:
                     != "UNAVAILABLE"
                     and self._report.infrastructure_topology.get("nodes")
                 ):
-                    return self._report.infrastructure_topology
+                    return apply_topology_presentation_policy(
+                        self._report.infrastructure_topology
+                    )
                 # 이전 버전이 저장한 UNAVAILABLE 자리표시자만 현재 상태 fallback으로
                 # 다시 계산한다. 검증된 과거 구성을 현재 값으로 덮어쓰지는 않는다.
             elif (
@@ -118,7 +123,9 @@ class ReportTopologyPolicy:
                     reference_at=reference_at,
                 )
             else:
-                return self._report.infrastructure_topology
+                return apply_topology_presentation_policy(
+                    self._report.infrastructure_topology
+                )
 
         collected_at = (
             infrastructure_metadata.get("completed_at")
@@ -203,7 +210,7 @@ class ReportTopologyPolicy:
             summary["snapshot_source"] = str(
                 infrastructure_metadata.get("source") or "UNAVAILABLE"
             )
-        return topology
+        return apply_topology_presentation_policy(topology)
 
     def _has_period_bounds(self) -> bool:
         return bool(

@@ -1,5 +1,9 @@
 import unittest
 
+from app.infrastructure_topology import (
+    TOPOLOGY_PRESENTATION_POLICY_MODE,
+    TOPOLOGY_PRESENTATION_POLICY_VERSION,
+)
 from app.report_models import ReportResult
 
 
@@ -299,6 +303,20 @@ class ReportResultSnapshotTests(unittest.TestCase):
                     "private_ips": ["10.0.0.10"],
                     "public_ips": ["203.0.113.10"],
                     "network_cidrs": ["10.0.0.0/24"],
+                    "network_interface_count": 1,
+                    "network_interfaces": [{
+                        "resource_id": "nic-secret",
+                        "private_ips": ["10.0.0.11"],
+                    }],
+                    "attached_disk_count": 1,
+                    "attached_disk_total_gb": 100,
+                    "attached_disks": [{
+                        "resource_id": "disk-secret",
+                        "name": "disk-name-secret",
+                        "size_gb": 100,
+                    }],
+                    "public_ip_resource_ids": ["public-ip-secret"],
+                    "unexpected_internal_field": "topology-secret",
                 }],
                 "edges": [],
                 "unmapped_node_ids": ["SERVER:server-secret"],
@@ -320,11 +338,32 @@ class ReportResultSnapshotTests(unittest.TestCase):
         self.assertNotIn("10.0.0.10", public_text)
         self.assertNotIn("203.0.113.10", public_text)
         self.assertNotIn("10.0.0.0/24", public_text)
+        self.assertNotIn("10.0.0.11", public_text)
+        self.assertNotIn("nic-secret", public_text)
+        self.assertNotIn("disk-secret", public_text)
+        self.assertNotIn("disk-name-secret", public_text)
+        self.assertNotIn("public-ip-secret", public_text)
+        self.assertNotIn("topology-secret", public_text)
         self.assertEqual(
             public_snapshot["infrastructure_topology"]["nodes"][0][
                 "node_id"
             ],
             "node-001",
+        )
+        self.assertEqual(
+            public_snapshot["infrastructure_topology"]["nodes"][0][
+                "attached_disk_total_gb"
+            ],
+            100,
+        )
+        public_summary = public_snapshot["infrastructure_topology"]["summary"]
+        self.assertEqual(
+            public_summary["presentation_policy_version"],
+            TOPOLOGY_PRESENTATION_POLICY_VERSION,
+        )
+        self.assertEqual(
+            public_summary["presentation_policy_mode"],
+            TOPOLOGY_PRESENTATION_POLICY_MODE,
         )
         self.assertEqual(
             persistence_snapshot["infrastructure_topology"]["nodes"][0][

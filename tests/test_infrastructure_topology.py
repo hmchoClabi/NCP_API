@@ -150,18 +150,23 @@ class InfrastructureTopologyBuilderTests(unittest.TestCase):
             ("SUBNET:subnet-1", "SERVER:server-1", "CONTAINS"),
             edges,
         )
-        self.assertIn(
-            ("NETWORK_INTERFACE:nic-1", "SERVER:server-1", "ATTACHED_TO"),
-            edges,
+        self.assertFalse(
+            any(
+                endpoint.startswith(
+                    ("NETWORK_INTERFACE:", "BLOCK_STORAGE:", "PUBLIC_IP:")
+                )
+                for edge in edges
+                for endpoint in edge[:2]
+            )
         )
-        self.assertIn(
-            ("SERVER:server-1", "BLOCK_STORAGE:storage-1", "ATTACHED_STORAGE"),
-            edges,
+        server = next(
+            node
+            for node in topology["nodes"]
+            if node["node_id"] == "SERVER:server-1"
         )
-        self.assertIn(
-            ("PUBLIC_IP:public-ip-1", "SERVER:server-1", "ASSIGNED_TO"),
-            edges,
-        )
+        self.assertEqual(server["network_interface_count"], 1)
+        self.assertEqual(server["attached_disk_count"], 1)
+        self.assertEqual(server["public_ip_resource_count"], 1)
         self.assertIn(
             ("LOAD_BALANCER:lb-1", "SERVER:server-1", "TARGETS"),
             edges,
@@ -397,7 +402,7 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
         hidden_section = self._topology_section(hidden_html)
 
         self.assertIn("<svg", hidden_section)
-        self.assertIn('class="topology-boundary-icon"', hidden_section)
+        self.assertIn('class="topology-vpc-title-tab"', hidden_section)
         self.assertIn('class="topology-node-icon"', hidden_section)
         self.assertIn('href="data:image/png;base64,', hidden_section)
         self.assertNotIn("<script", hidden_section)
@@ -457,7 +462,11 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
         self.assertGreater(height, 0)
         self.assertEqual(
             {boundary["node_id"] for boundary in layout["boundaries"]},
-            {"VPC:vpc-sensitive-id", "SUBNET:subnet-sensitive-id"},
+            {
+                "VPC:vpc-sensitive-id",
+                "ZONE:VPC:vpc-sensitive-id:KR-1",
+                "SUBNET:subnet-sensitive-id",
+            },
         )
         self.assertEqual(len(layout["consumed_edges"]), 2)
 

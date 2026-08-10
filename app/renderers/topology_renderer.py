@@ -48,8 +48,10 @@ class TopologyRenderer:
         "BACKUP": 4,
         "ARCHIVE_STORAGE": 4,
     }
-    TOPOLOGY_NODE_WIDTH = 230
-    TOPOLOGY_NODE_HEIGHT = 196
+    # 아이콘 중심 카드가 클라우드 경계보다 시각적으로 우세해지지 않도록
+    # 보고서용 고정 크기를 작게 유지한다.
+    TOPOLOGY_NODE_WIDTH = 184
+    TOPOLOGY_NODE_HEIGHT = 126
 
     def __init__(self, html_renderer: Any) -> None:
         self._html_renderer = html_renderer
@@ -274,6 +276,7 @@ class TopologyRenderer:
         )
         boxes = layout["boxes"]
         consumed_edges = layout["consumed_edges"]
+        vpc_boundary_node_ids = layout.get("vpc_boundary_node_ids", set())
         boundary_node_ids = {
             boundary["node_id"] for boundary in layout["boundaries"]
         }
@@ -283,51 +286,93 @@ class TopologyRenderer:
         for boundary in layout["boundaries"]:
             node = boundary["node"]
             x, y, boundary_width, boundary_height = boundary["box"]
-            category = (
-                "vpc"
-                if str(node.get("category") or "") == "VPC"
-                else "subnet"
+            category = str(
+                boundary.get("category")
+                or node.get("category")
+                or "subnet"
+            ).lower()
+            supporting = (
+                node.get("kind") != "representative"
+                and category != "zone"
             )
-            supporting = node.get("kind") != "representative"
             css_class = (
                 f" topology-boundary--{category}"
                 + (" topology-boundary--supporting" if supporting else "")
             )
-            lines = self._topology_node_lines(node, options)
-            icon = self._topology_icon(
-                node,
-                x=x + 16,
-                y=y + 10,
-                size=24,
-                css_class="topology-boundary-icon",
-            )
-            title_x = x + (48 if icon else 16)
+            lines = self._topology_boundary_lines(node, options)
             title = (
                 f"source={node.get('source') or '-'} · "
                 f"confidence={node.get('confidence') or '-'} · "
                 f"resolution={node.get('resolution') or '-'}"
             )
-            texts = [
-                f'<text x="{title_x:.1f}" y="{y + 27:.1f}" '
-                'class="topology-boundary-title">'
-                f"{self._text(node.get('category_label') or node.get('category'))}"
-                "</text>"
-            ]
-            for index, line in enumerate(lines[:8]):
+            display_name = (
+                self._topology_short_text(node.get("name"), 34)
+                if options.show_resource_name and node.get("name")
+                else ""
+            )
+            if category == "vpc":
+                heading = "VPC" + (f" · {display_name}" if display_name else "")
+                tab_width = min(
+                    max(104, 30 + len(heading) * 7),
+                    max(104, int(boundary_width - 24)),
+                )
+                texts = [
+                    f'<rect x="{x + 12:.1f}" y="{y + 8:.1f}" '
+                    f'width="{tab_width}" height="25" rx="5" '
+                    'class="topology-vpc-title-tab" />',
+                    f'<text x="{x + 23:.1f}" y="{y + 25:.1f}" '
+                    'class="topology-vpc-title">'
+                    f"{self._text(heading)}</text>",
+                ]
+                detail_y = y + 47
+            elif category == "zone":
+                zone_name = self._topology_short_text(node.get("name"), 34)
+                heading = "Zone" + (f" · {zone_name}" if zone_name else "")
+                tab_width = min(
+                    max(94, 30 + len(heading) * 7),
+                    max(94, int(boundary_width - 24)),
+                )
+                texts = [
+                    f'<rect x="{x + 10:.1f}" y="{y + 6:.1f}" '
+                    f'width="{tab_width}" height="22" rx="3" '
+                    'class="topology-zone-title-tab" />',
+                    f'<text x="{x + 20:.1f}" y="{y + 21:.1f}" '
+                    'class="topology-zone-title">'
+                    f"{self._text(heading)}</text>",
+                ]
+                detail_y = y + 38
+            else:
+                heading = "Subnet" + (
+                    f" · {display_name}" if display_name else ""
+                )
+                tab_width = min(
+                    max(104, 30 + len(heading) * 7),
+                    max(104, int(boundary_width - 24)),
+                )
+                texts = [
+                    f'<rect x="{x + 10:.1f}" y="{y + 6:.1f}" '
+                    f'width="{tab_width}" height="22" rx="3" '
+                    'class="topology-subnet-title-tab" />',
+                    f'<text x="{x + 20:.1f}" y="{y + 21:.1f}" '
+                    'class="topology-subnet-title">'
+                    f"{self._text(heading)}</text>",
+                ]
+                detail_y = y + 39
+            for index, line in enumerate(lines[:2]):
                 texts.append(
-                    f'<text x="{x + 16:.1f}" y="{y + 47 + index * 17:.1f}" '
+                    f'<text x="{x + 12:.1f}" '
+                    f'y="{detail_y + index * 14:.1f}" '
                     f'class="topology-boundary-detail">{self._text(line)}</text>'
                 )
             boundary_shape_markup.append(
                 f'<g class="topology-boundary{css_class}">'
                 f'<rect x="{x:.1f}" y="{y:.1f}" width="{boundary_width:.1f}" '
-                f'height="{boundary_height:.1f}" rx="16"><title>'
+                f'height="{boundary_height:.1f}" rx="9"><title>'
                 f"{self._text(title)}</title></rect>"
                 + "</g>"
             )
             boundary_label_markup.append(
                 '<g class="topology-boundary-label">'
-                + icon
                 + "".join(texts)
                 + "</g>"
             )
@@ -366,39 +411,73 @@ class TopologyRenderer:
                 continue
             x, y, node_width, node_height = box
             supporting = node.get("kind") != "representative"
-            css_class = " topology-node--supporting" if supporting else ""
-            lines = self._topology_node_lines(node, options)
+            css_classes = []
+            if supporting:
+                css_classes.append("topology-node--supporting")
+            if node_id in vpc_boundary_node_ids:
+                css_classes.append("topology-node--vpc-boundary")
+            css_class = (
+                " " + " ".join(css_classes)
+                if css_classes else ""
+            )
+            placement_attribute = (
+                ' data-placement="vpc-boundary"'
+                if node_id in vpc_boundary_node_ids else ""
+            )
+            display_name, lines, badges = self._topology_node_card_content(
+                node,
+                options,
+            )
             icon = self._topology_icon(
                 node,
-                x=x + 14,
-                y=y + 9,
-                size=30,
+                x=x + 10,
+                y=y + 8,
+                size=40,
                 css_class="topology-node-icon",
             )
-            title_x = x + (52 if icon else 14)
+            title_x = x + (58 if icon else 12)
             title = (
                 f"source={node.get('source') or '-'} · "
                 f"confidence={node.get('confidence') or '-'} · "
                 f"resolution={node.get('resolution') or '-'}"
             )
             texts = [
-                f'<text x="{title_x:.1f}" y="{y + 27:.1f}" '
+                f'<text x="{title_x:.1f}" y="{y + 20:.1f}" '
                 'class="topology-node-title">'
                 f"{self._text(node.get('category_label') or node.get('category'))}"
                 "</text>"
             ]
-            for index, line in enumerate(lines[:8]):
+            if display_name:
                 texts.append(
-                    f'<text x="{x + 14:.1f}" y="{y + 46 + index * 18:.1f}" '
+                    f'<text x="{title_x:.1f}" y="{y + 38:.1f}" '
+                    f'class="topology-node-name">{self._text(display_name)}</text>'
+                )
+            details_y = y + (54 if display_name else 46)
+            for index, line in enumerate(lines[:4]):
+                texts.append(
+                    f'<text x="{x + 12:.1f}" '
+                    f'y="{details_y + index * 15:.1f}" '
                     f'class="topology-node-detail">{self._text(line)}</text>'
                 )
+            badge_markup = ""
+            if badges:
+                badge_markup = (
+                    f'<rect x="{x + 10:.1f}" y="{y + node_height - 22:.1f}" '
+                    f'width="{node_width - 20:.1f}" height="15" rx="7.5" '
+                    'class="topology-node-badge-bg" />'
+                    f'<text x="{x + node_width / 2:.1f}" '
+                    f'y="{y + node_height - 11:.1f}" '
+                    'class="topology-node-badge">'
+                    f"{self._text(badges)}</text>"
+                )
             node_markup.append(
-                f'<g class="topology-node{css_class}">'
+                f'<g class="topology-node{css_class}"{placement_attribute}>'
                 f'<rect x="{x:.1f}" y="{y:.1f}" width="{node_width}" '
-                f'height="{node_height}" rx="12"><title>'
+                f'height="{node_height}" rx="9"><title>'
                 f"{self._text(title)}</title></rect>"
                 + icon
                 + "".join(texts)
+                + badge_markup
                 + "</g>"
             )
 
@@ -409,7 +488,10 @@ class TopologyRenderer:
             '<defs><marker id="topology-arrow" markerWidth="8" markerHeight="8" '
             'refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
             '<path d="M 0 0 L 8 4 L 0 8 z" /></marker>'
-            + self._topology_icon_definitions(nodes)
+            + self._topology_icon_definitions([
+                node for node in nodes
+                if str(node.get("node_id")) not in boundary_node_ids
+            ])
             + "</defs>"
             + "".join(boundary_shape_markup)
             + "".join(edge_markup)
@@ -466,19 +548,17 @@ class TopologyRenderer:
             return self._topology_compound_layout(nodes, edges, options)
 
         layers = defaultdict(list)
-        categories = []
         for node in nodes:
             category = str(node.get("category") or "")
-            if category not in categories:
-                categories.append(category)
-            layers[categories.index(category)].append(node)
+            layer = self.TOPOLOGY_LAYER_ORDER.get(category, 2)
+            layers[layer].append(node)
 
         ordered_layers = sorted(layers)
         node_width = self.TOPOLOGY_NODE_WIDTH
         node_height = self.TOPOLOGY_NODE_HEIGHT
-        horizontal_gap = 82
-        vertical_gap = 32
-        margin = 30
+        horizontal_gap = 64
+        vertical_gap = 16
+        margin = 24
         boxes: Dict[str, tuple[float, float, float, float]] = {}
         for column, layer in enumerate(ordered_layers):
             layer_nodes = sorted(
@@ -507,6 +587,7 @@ class TopologyRenderer:
             "boxes": boxes,
             "boundaries": [],
             "consumed_edges": set(),
+            "vpc_boundary_node_ids": set(),
         }, max(width, 320), max(height, 220)
 
     def _topology_compound_layout(
@@ -557,9 +638,32 @@ class TopologyRenderer:
             for subnet_id, parents in vpc_parents.items()
             if subnet_id in subnet_ids and len(parents) == 1
         }
+        boundary_nat_to_vpc: Dict[str, str] = {}
+        for node_id, node in sorted(
+            node_by_id.items(),
+            key=lambda item: self._topology_node_sort_key(item[1]),
+        ):
+            if str(node.get("category") or "") != "NAT_GATEWAY":
+                continue
+            direct_vpc_ids = vpc_parents.get(node_id, set()) & vpc_ids
+            subnet_vpc_ids = {
+                subnet_to_vpc[subnet_id]
+                for subnet_id in subnet_parents.get(node_id, set())
+                if subnet_id in subnet_to_vpc
+            }
+            candidate_vpc_ids = direct_vpc_ids | subnet_vpc_ids
+            if len(candidate_vpc_ids) == 1:
+                boundary_nat_to_vpc[node_id] = next(iter(candidate_vpc_ids))
+
+        boundary_vpc_children: Dict[str, List[Dict[str, Any]]] = defaultdict(
+            list
+        )
+        for node_id, vpc_id in boundary_nat_to_vpc.items():
+            boundary_vpc_children[vpc_id].append(node_by_id[node_id])
+
         subnet_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         direct_vpc_children: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        assigned_ids: set[str] = set()
+        assigned_ids: set[str] = set(boundary_nat_to_vpc)
         consumed_edges: set[tuple[str, str, str]] = set()
 
         for subnet_id, vpc_id in subnet_to_vpc.items():
@@ -567,10 +671,32 @@ class TopologyRenderer:
             if edge is not None:
                 consumed_edges.add(self._topology_edge_key(edge))
 
+        # NAT Gateway는 실제 관계 근거를 보존한 채 VPC 경계 배치로 표현한다.
+        # 동일 VPC에 속한 Subnet 관계도 증거 표에는 남고, SVG에서는 경계 배치가
+        # 소속 관계를 대신하므로 중복되는 포함선을 그리지 않는다.
+        for nat_id, vpc_id in boundary_nat_to_vpc.items():
+            parent_ids = set(vpc_parents.get(nat_id, set()))
+            parent_ids.update(subnet_parents.get(nat_id, set()))
+            for parent_id in parent_ids:
+                parent_vpc_id = (
+                    parent_id
+                    if parent_id in vpc_ids
+                    else subnet_to_vpc.get(parent_id)
+                )
+                if parent_vpc_id != vpc_id:
+                    continue
+                edge = contains_edges.get((parent_id, nat_id))
+                if edge is not None:
+                    consumed_edges.add(self._topology_edge_key(edge))
+
         candidates = sorted(
             (
                 node for node_id, node in node_by_id.items()
-                if node_id not in vpc_ids and node_id not in subnet_ids
+                if (
+                    node_id not in vpc_ids
+                    and node_id not in subnet_ids
+                    and node_id not in boundary_nat_to_vpc
+                )
             ),
             key=self._topology_node_sort_key,
         )
@@ -628,10 +754,11 @@ class TopologyRenderer:
 
         node_width = self.TOPOLOGY_NODE_WIDTH
         node_height = self.TOPOLOGY_NODE_HEIGHT
-        inner_gap = 22
-        boundary_padding = 22
-        outer_gap = 34
-        margin = 30
+        horizontal_gap = 14
+        vertical_gap = 14
+        boundary_padding = 14
+        outer_gap = 44
+        margin = 24
 
         def grid_layout(
             items: List[Dict[str, Any]],
@@ -640,20 +767,46 @@ class TopologyRenderer:
         ) -> tuple[int, int, Dict[str, tuple[float, float, float, float]]]:
             if not items:
                 return 0, 0, {}
-            columns = min(max_columns, max(1, math.ceil(math.sqrt(len(items)))))
-            rows = math.ceil(len(items) / columns)
-            grid_width = columns * node_width + (columns - 1) * inner_gap
-            grid_height = rows * node_height + (rows - 1) * inner_gap
-            local_boxes = {}
             ordered_items = sorted(items, key=self._topology_node_sort_key)
+            columns = min(max_columns, len(ordered_items))
+            rows = math.ceil(len(ordered_items) / columns)
+            grid_width = (
+                columns * node_width + (columns - 1) * horizontal_gap
+            )
+            grid_height = rows * node_height + (rows - 1) * vertical_gap
+            local_boxes = {}
             for index, item in enumerate(ordered_items):
                 local_boxes[str(item.get("node_id"))] = (
-                    (index % columns) * (node_width + inner_gap),
-                    (index // columns) * (node_height + inner_gap),
+                    (index % columns) * (node_width + horizontal_gap),
+                    (index // columns) * (node_height + vertical_gap),
                     node_width,
                     node_height,
                 )
             return grid_width, grid_height, local_boxes
+
+        def variable_layout(
+            groups: List[Dict[str, Any]],
+            *,
+            max_columns: int,
+        ) -> tuple[int, int, Dict[str, tuple[float, float]]]:
+            if not groups:
+                return 0, 0, {}
+            placements = {}
+            total_width = 0
+            cursor_y = 0
+            for row_start in range(0, len(groups), max_columns):
+                row = groups[row_start:row_start + max_columns]
+                cursor_x = 0
+                row_height = max(group["height"] for group in row)
+                for group in row:
+                    placements[group["key"]] = (cursor_x, cursor_y)
+                    cursor_x += group["width"] + horizontal_gap
+                total_width = max(
+                    total_width,
+                    cursor_x - horizontal_gap,
+                )
+                cursor_y += row_height + vertical_gap
+            return total_width, cursor_y - vertical_gap, placements
 
         def subnet_group(subnet_id: str) -> Dict[str, Any]:
             subnet = node_by_id[subnet_id]
@@ -663,22 +816,24 @@ class TopologyRenderer:
             )
             grid_width, grid_height, child_boxes = grid_layout(
                 subnet_children.get(subnet_id, []),
-                max_columns=2,
+                max_columns=3,
             )
-            width = max(280, grid_width + boundary_padding * 2)
+            width = max(228, grid_width + boundary_padding * 2)
+            content_offset_y = header_height + 10
             height = header_height + boundary_padding
             if child_boxes:
-                height += grid_height + boundary_padding
+                height = content_offset_y + grid_height + boundary_padding
             translated = {
                 node_id: (
                     box[0] + boundary_padding,
-                    box[1] + header_height + boundary_padding,
+                    box[1] + content_offset_y,
                     box[2],
                     box[3],
                 )
                 for node_id, box in child_boxes.items()
             }
             return {
+                "key": subnet_id,
                 "node": subnet,
                 "width": width,
                 "height": height,
@@ -690,179 +845,365 @@ class TopologyRenderer:
             for subnet_id in subnet_ids
         }
 
+        def zone_group(
+            vpc_id: str,
+            zone_name: str,
+            child_subnet_ids: List[str],
+        ) -> Dict[str, Any]:
+            ordered_subnets = [
+                subnet_groups[subnet_id]
+                for subnet_id in sorted(
+                    child_subnet_ids,
+                    key=lambda item: self._topology_node_sort_key(
+                        node_by_id[item]
+                    ),
+                )
+            ]
+            content_width, content_height, placements = variable_layout(
+                ordered_subnets,
+                max_columns=3,
+            )
+            zone_header_height = 30
+            zone_padding = 12
+            zone_id = f"ZONE:{vpc_id}:{zone_name}"
+            nested_boundaries = []
+            child_boxes = {}
+            for subnet in ordered_subnets:
+                offset_x, offset_y = placements[subnet["key"]]
+                subnet_x = offset_x + zone_padding
+                subnet_y = offset_y + zone_header_height + zone_padding
+                nested_boundaries.append({
+                    "node_id": subnet["key"],
+                    "node": subnet["node"],
+                    "box": (
+                        subnet_x,
+                        subnet_y,
+                        subnet["width"],
+                        subnet["height"],
+                    ),
+                    "category": "subnet",
+                    "level": 2,
+                })
+                for child_id, box in subnet["child_boxes"].items():
+                    child_boxes[child_id] = (
+                        box[0] + subnet_x,
+                        box[1] + subnet_y,
+                        box[2],
+                        box[3],
+                    )
+            return {
+                "key": zone_id,
+                "node": {
+                    "node_id": zone_id,
+                    "category": "ZONE",
+                    "category_label": "Zone",
+                    "name": zone_name,
+                    "kind": "presentation",
+                    "source": "subnet.zone",
+                    "confidence": "VERIFIED",
+                    "resolution": "RESOLVED",
+                },
+                "width": max(260, content_width + zone_padding * 2),
+                "height": (
+                    zone_header_height
+                    + zone_padding
+                    + content_height
+                    + zone_padding
+                ),
+                "nested_boundaries": nested_boundaries,
+                "child_boxes": child_boxes,
+            }
+
+        def subnet_component(subnet_id: str) -> Dict[str, Any]:
+            subnet = subnet_groups[subnet_id]
+            return {
+                "key": subnet_id,
+                "node": subnet["node"],
+                "width": subnet["width"],
+                "height": subnet["height"],
+                "nested_boundaries": [{
+                    "node_id": subnet_id,
+                    "node": subnet["node"],
+                    "box": (0, 0, subnet["width"], subnet["height"]),
+                    "category": "subnet",
+                    "level": 2,
+                }],
+                "child_boxes": dict(subnet["child_boxes"]),
+            }
+
         def vpc_group(vpc_id: str) -> Dict[str, Any]:
             vpc = node_by_id[vpc_id]
             header_height = self._topology_boundary_header_height(vpc, options)
             child_subnet_ids = sorted(
                 (
-                    subnet_id for subnet_id, parent_id in subnet_to_vpc.items()
+                    subnet_id
+                    for subnet_id, parent_id in subnet_to_vpc.items()
                     if parent_id == vpc_id
                 ),
-                key=lambda node_id: self._topology_node_sort_key(
-                    node_by_id[node_id]
+                key=lambda item: self._topology_node_sort_key(
+                    node_by_id[item]
                 ),
             )
-            subnet_placements = {}
-            content_width = 0
-            content_height = 0
-            rows = [
-                child_subnet_ids[index:index + 2]
-                for index in range(0, len(child_subnet_ids), 2)
-            ]
-            current_y = header_height + boundary_padding
-            for row in rows:
-                current_x = boundary_padding
-                row_height = max(subnet_groups[node_id]["height"] for node_id in row)
-                for subnet_id in row:
-                    group = subnet_groups[subnet_id]
-                    subnet_placements[subnet_id] = (current_x, current_y)
-                    current_x += group["width"] + inner_gap
-                row_width = current_x - inner_gap + boundary_padding
-                content_width = max(content_width, row_width)
-                current_y += row_height + inner_gap
-                content_height = current_y
+            zone_to_subnets: Dict[str, List[str]] = defaultdict(list)
+            unzoned_subnets = []
+            for subnet_id in child_subnet_ids:
+                zone_name = str(node_by_id[subnet_id].get("zone") or "").strip()
+                if options.show_zone and zone_name:
+                    zone_to_subnets[zone_name].append(subnet_id)
+                else:
+                    unzoned_subnets.append(subnet_id)
 
-            direct_items = direct_vpc_children.get(vpc_id, [])
-            direct_width, direct_height, direct_boxes = grid_layout(
-                direct_items,
+            components = [
+                zone_group(vpc_id, zone_name, zone_to_subnets[zone_name])
+                for zone_name in sorted(zone_to_subnets, key=str.casefold)
+            ]
+            components.extend(
+                subnet_component(subnet_id)
+                for subnet_id in unzoned_subnets
+            )
+            component_width, component_height, placements = variable_layout(
+                components,
                 max_columns=3,
             )
-            direct_offset_y = current_y
-            if direct_boxes:
-                if rows:
-                    direct_offset_y += 14
-                direct_offset_y += 24
-                content_width = max(
-                    content_width,
-                    direct_width + boundary_padding * 2,
-                )
-                content_height = direct_offset_y + direct_height + boundary_padding
-            elif rows:
-                content_height = current_y - inner_gap + boundary_padding
-            else:
-                content_height = header_height + boundary_padding * 2
+            nested_boundaries = []
+            child_boxes = {}
+            content_offset_y = header_height + boundary_padding
+            for component in components:
+                offset_x, offset_y = placements[component["key"]]
+                offset_x += boundary_padding
+                offset_y += content_offset_y
+                if component["node"].get("category") == "ZONE":
+                    nested_boundaries.append({
+                        "node_id": component["key"],
+                        "node": component["node"],
+                        "box": (
+                            offset_x,
+                            offset_y,
+                            component["width"],
+                            component["height"],
+                        ),
+                        "category": "zone",
+                        "level": 1,
+                    })
+                for boundary in component["nested_boundaries"]:
+                    box = boundary["box"]
+                    nested_boundaries.append({
+                        **boundary,
+                        "box": (
+                            box[0] + offset_x,
+                            box[1] + offset_y,
+                            box[2],
+                            box[3],
+                        ),
+                    })
+                for child_id, box in component["child_boxes"].items():
+                    child_boxes[child_id] = (
+                        box[0] + offset_x,
+                        box[1] + offset_y,
+                        box[2],
+                        box[3],
+                    )
 
-            width = max(330, content_width)
-            boxes = {
-                node_id: (
+            direct_width, direct_height, direct_boxes = grid_layout(
+                direct_vpc_children.get(vpc_id, []),
+                max_columns=4,
+            )
+            direct_offset_y = content_offset_y + component_height
+            if components and direct_boxes:
+                direct_offset_y += vertical_gap
+            for child_id, box in direct_boxes.items():
+                child_boxes[child_id] = (
                     box[0] + boundary_padding,
                     box[1] + direct_offset_y,
                     box[2],
                     box[3],
                 )
-                for node_id, box in direct_boxes.items()
-            }
+
+            content_width = max(component_width, direct_width)
+            content_height = component_height
+            if direct_boxes:
+                content_height = (
+                    direct_offset_y - content_offset_y + direct_height
+                )
+            width = max(320, content_width + boundary_padding * 2)
+            height = (
+                content_offset_y + content_height + boundary_padding
+                if content_height
+                else header_height + boundary_padding * 2
+            )
+
+            boundary_items = sorted(
+                boundary_vpc_children.get(vpc_id, []),
+                key=self._topology_node_sort_key,
+            )
+            outside_extent = 0.0
+            if boundary_items:
+                width = max(
+                    width,
+                    content_width
+                    + boundary_padding * 2
+                    + horizontal_gap
+                    + node_width / 2,
+                )
+                boundary_stack_height = (
+                    len(boundary_items) * node_height
+                    + max(0, len(boundary_items) - 1) * vertical_gap
+                )
+                height = max(
+                    height,
+                    header_height
+                    + boundary_padding
+                    + boundary_stack_height
+                    + boundary_padding,
+                )
+                outside_extent = node_width / 2
+                boundary_x = width - node_width / 2
+                boundary_y = header_height + boundary_padding
+                for index, item in enumerate(boundary_items):
+                    child_boxes[str(item.get("node_id"))] = (
+                        boundary_x,
+                        boundary_y + index * (node_height + vertical_gap),
+                        node_width,
+                        node_height,
+                    )
             return {
                 "node": vpc,
                 "width": width,
-                "height": content_height,
-                "subnet_placements": subnet_placements,
-                "child_boxes": boxes,
+                "height": height,
+                "outside_extent": outside_extent,
+                "nested_boundaries": nested_boundaries,
+                "child_boxes": child_boxes,
             }
 
         vpc_groups = {vpc_id: vpc_group(vpc_id) for vpc_id in vpc_ids}
         boxes: Dict[str, tuple[float, float, float, float]] = {}
         boundaries: List[Dict[str, Any]] = []
-        cursor_y = margin
-        max_width = 0
-
-        def place_subnet(subnet_id: str, x: float, y: float) -> None:
-            group = subnet_groups[subnet_id]
-            box = (x, y, group["width"], group["height"])
-            boxes[subnet_id] = box
-            boundaries.append({
-                "node_id": subnet_id,
-                "node": group["node"],
-                "box": box,
-                "level": 1,
-            })
-            for child_id, child_box in group["child_boxes"].items():
-                boxes[child_id] = (
-                    child_box[0] + x,
-                    child_box[1] + y,
-                    child_box[2],
-                    child_box[3],
-                )
-
-        for vpc_id in sorted(
-            vpc_ids,
-            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
-        ):
-            group = vpc_groups[vpc_id]
-            x = margin
-            y = cursor_y
-            vpc_box = (x, y, group["width"], group["height"])
-            boxes[vpc_id] = vpc_box
-            boundaries.append({
-                "node_id": vpc_id,
-                "node": group["node"],
-                "box": vpc_box,
-                "level": 0,
-            })
-            for subnet_id, position in group["subnet_placements"].items():
-                place_subnet(subnet_id, x + position[0], y + position[1])
-            for child_id, child_box in group["child_boxes"].items():
-                boxes[child_id] = (
-                    child_box[0] + x,
-                    child_box[1] + y,
-                    child_box[2],
-                    child_box[3],
-                )
-            cursor_y += group["height"] + outer_gap
-            max_width = max(max_width, group["width"])
-
-        orphan_subnet_ids = sorted(
-            subnet_ids - set(subnet_to_vpc),
-            key=lambda node_id: self._topology_node_sort_key(node_by_id[node_id]),
-        )
-        for subnet_id in orphan_subnet_ids:
-            group = subnet_groups[subnet_id]
-            place_subnet(subnet_id, margin, cursor_y)
-            cursor_y += group["height"] + outer_gap
-            max_width = max(max_width, group["width"])
+        max_right = margin
+        max_bottom = margin
 
         external_nodes = [
-            node for node_id, node in node_by_id.items()
+            node
+            for node_id, node in node_by_id.items()
             if (
                 node_id not in vpc_ids
                 and node_id not in subnet_ids
                 and node_id not in assigned_ids
             )
         ]
+        cursor_x = margin
         if external_nodes:
             layers = defaultdict(list)
             for node in external_nodes:
                 category = str(node.get("category") or "")
                 layers[self.TOPOLOGY_LAYER_ORDER.get(category, 2)].append(node)
-            for column, layer in enumerate(sorted(layers)):
+            for layer in sorted(layers):
                 layer_nodes = sorted(
                     layers[layer],
                     key=self._topology_node_sort_key,
                 )
                 for row, node in enumerate(layer_nodes):
-                    boxes[str(node.get("node_id"))] = (
-                        margin + column * (node_width + 82),
-                        cursor_y + row * (node_height + 32),
+                    box = (
+                        cursor_x,
+                        margin + row * (node_height + vertical_gap),
                         node_width,
                         node_height,
                     )
-            external_width = (
-                len(layers) * node_width + max(0, len(layers) - 1) * 82
+                    boxes[str(node.get("node_id"))] = box
+                    max_right = max(max_right, box[0] + box[2])
+                    max_bottom = max(max_bottom, box[1] + box[3])
+                cursor_x += node_width + 52
+            cursor_x += outer_gap - 52
+
+        for vpc_id in sorted(
+            vpc_ids,
+            key=lambda item: self._topology_node_sort_key(node_by_id[item]),
+        ):
+            group = vpc_groups[vpc_id]
+            x = cursor_x
+            y = margin
+            vpc_box = (x, y, group["width"], group["height"])
+            boxes[vpc_id] = vpc_box
+            boundaries.append({
+                "node_id": vpc_id,
+                "node": group["node"],
+                "box": vpc_box,
+                "category": "vpc",
+                "level": 0,
+            })
+            for boundary in group["nested_boundaries"]:
+                box = boundary["box"]
+                absolute_box = (
+                    box[0] + x,
+                    box[1] + y,
+                    box[2],
+                    box[3],
+                )
+                boundaries.append({**boundary, "box": absolute_box})
+                boxes[boundary["node_id"]] = absolute_box
+            for child_id, box in group["child_boxes"].items():
+                absolute_box = (
+                    box[0] + x,
+                    box[1] + y,
+                    box[2],
+                    box[3],
+                )
+                boxes[child_id] = absolute_box
+                max_right = max(
+                    max_right,
+                    absolute_box[0] + absolute_box[2],
+                )
+                max_bottom = max(
+                    max_bottom,
+                    absolute_box[1] + absolute_box[3],
+                )
+            max_right = max(
+                max_right,
+                x + group["width"] + group["outside_extent"],
             )
-            external_rows = max((len(value) for value in layers.values()), default=1)
-            external_height = (
-                external_rows * node_height + max(0, external_rows - 1) * 32
+            max_bottom = max(max_bottom, y + group["height"])
+            cursor_x += (
+                group["width"] + group["outside_extent"] + outer_gap
             )
-            max_width = max(max_width, external_width)
-            cursor_y += external_height + outer_gap
+
+        orphan_subnet_ids = sorted(
+            subnet_ids - set(subnet_to_vpc),
+            key=lambda item: self._topology_node_sort_key(node_by_id[item]),
+        )
+        for subnet_id in orphan_subnet_ids:
+            group = subnet_groups[subnet_id]
+            box = (
+                cursor_x,
+                margin,
+                group["width"],
+                group["height"],
+            )
+            boxes[subnet_id] = box
+            boundaries.append({
+                "node_id": subnet_id,
+                "node": group["node"],
+                "box": box,
+                "category": "subnet",
+                "level": 2,
+            })
+            for child_id, child_box in group["child_boxes"].items():
+                boxes[child_id] = (
+                    child_box[0] + cursor_x,
+                    child_box[1] + margin,
+                    child_box[2],
+                    child_box[3],
+                )
+            max_right = max(max_right, cursor_x + group["width"])
+            max_bottom = max(max_bottom, margin + group["height"])
+            cursor_x += group["width"] + outer_gap
 
         boundaries.sort(key=lambda boundary: boundary["level"])
-        width = max(320, int(math.ceil(max_width + margin * 2)))
-        height = max(220, int(math.ceil(cursor_y - outer_gap + margin)))
+        width = max(420, int(math.ceil(max_right + margin)))
+        height = max(220, int(math.ceil(max_bottom + margin)))
         return {
             "boxes": boxes,
             "boundaries": boundaries,
             "consumed_edges": consumed_edges,
+            "vpc_boundary_node_ids": set(boundary_nat_to_vpc),
         }, width, height
 
     def _topology_boundary_header_height(
@@ -870,8 +1211,39 @@ class TopologyRenderer:
         node: Mapping[str, Any],
         options: TopologyDisplayOptions,
     ) -> int:
-        line_count = min(8, len(self._topology_node_lines(node, options)))
-        return max(62, 47 + line_count * 17)
+        category = str(node.get("category") or "").upper()
+        line_count = min(2, len(self._topology_boundary_lines(node, options)))
+        if category == "VPC":
+            return max(44, 42 + line_count * 14)
+        if category == "SUBNET":
+            return max(32, 32 + line_count * 14)
+        return 34
+
+    def _topology_boundary_lines(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> List[str]:
+        """VPC/Subnet 헤더에는 네트워크 식별 정보만 간결하게 표시한다."""
+
+        category = str(node.get("category") or "").upper()
+        if category not in {"VPC", "SUBNET"}:
+            return []
+        summary_parts = []
+        if options.show_network_cidr and node.get("network_cidrs"):
+            summary_parts.append(
+                "CIDR " + self._topology_value_list(node.get("network_cidrs"))
+            )
+        if category == "SUBNET" and options.show_zone and node.get("zone"):
+            summary_parts.append(
+                "Zone " + self._topology_short_text(node.get("zone"), 18)
+            )
+        lines = [" · ".join(summary_parts)] if summary_parts else []
+        if options.show_resource_id and node.get("resource_id"):
+            lines.append(
+                "ID " + self._topology_short_text(node.get("resource_id"), 34)
+            )
+        return lines[:2]
 
     @staticmethod
     def _topology_node_sort_key(node: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -911,13 +1283,10 @@ class TopologyRenderer:
             else:
                 start_x, start_y = sx, source_center_y
                 end_x, end_y = tx + tw, target_center_y
-            bend = max(34, abs(end_x - start_x) / 2)
-            direction = 1 if end_x >= start_x else -1
+            middle_x = (start_x + end_x) / 2
             path = (
                 f"M {start_x:.1f} {start_y:.1f} "
-                f"C {start_x + direction * bend:.1f} {start_y:.1f}, "
-                f"{end_x - direction * bend:.1f} {end_y:.1f}, "
-                f"{end_x:.1f} {end_y:.1f}"
+                f"H {middle_x:.1f} V {end_y:.1f} H {end_x:.1f}"
             )
         else:
             if delta_y >= 0:
@@ -926,15 +1295,68 @@ class TopologyRenderer:
             else:
                 start_x, start_y = source_center_x, sy
                 end_x, end_y = target_center_x, ty + th
-            bend = max(34, abs(end_y - start_y) / 2)
-            direction = 1 if end_y >= start_y else -1
+            middle_y = (start_y + end_y) / 2
             path = (
                 f"M {start_x:.1f} {start_y:.1f} "
-                f"C {start_x:.1f} {start_y + direction * bend:.1f}, "
-                f"{end_x:.1f} {end_y - direction * bend:.1f}, "
-                f"{end_x:.1f} {end_y:.1f}"
+                f"V {middle_y:.1f} H {end_x:.1f} V {end_y:.1f}"
             )
         return path, (start_x + end_x) / 2, (start_y + end_y) / 2 - 5
+
+    def _topology_node_card_content(
+        self,
+        node: Mapping[str, Any],
+        options: TopologyDisplayOptions,
+    ) -> tuple[str, List[str], str]:
+        """아이콘 카드에 이름, 핵심 속성, 보조 배지를 분리해 반환한다."""
+
+        display_name = (
+            self._topology_short_text(node.get("name"), 25)
+            if options.show_resource_name and node.get("name")
+            else ""
+        )
+        details = []
+        if node.get("resolution") == "UNRESOLVED":
+            details.append("REFERENCE_ONLY / UNRESOLVED")
+
+        private_ips = self._topology_node_values(
+            node,
+            ("private_ips", "private_ip", "all_private_ips"),
+        )
+        public_ips = self._topology_node_values(
+            node,
+            ("public_ips", "public_ip"),
+        )
+        if options.show_private_ip and private_ips:
+            details.append("Private " + self._topology_value_list(private_ips))
+        if options.show_public_ip and public_ips:
+            details.append("Public " + self._topology_value_list(public_ips))
+        if str(node.get("category") or "") == "SERVER":
+            disk_summary = self._topology_server_disk_summary(node)
+            if disk_summary:
+                details.append(disk_summary)
+        if options.show_network_cidr and node.get("network_cidrs"):
+            details.append(
+                "CIDR " + self._topology_value_list(node.get("network_cidrs"))
+            )
+
+        identifier = ""
+        if options.show_resource_id and node.get("resource_id"):
+            identifier = (
+                "ID " + self._topology_short_text(node.get("resource_id"), 27)
+            )
+        if identifier:
+            details = details[:3] + [identifier]
+        else:
+            details = details[:4]
+
+        badges = []
+        if options.show_status and node.get("status"):
+            badges.append(self._topology_short_text(node.get("status"), 12))
+        if options.show_zone and node.get("zone"):
+            badges.append(self._topology_short_text(node.get("zone"), 12))
+        if options.show_platform and node.get("platform"):
+            badges.append(self._topology_short_text(node.get("platform"), 12))
+        return display_name, details, " · ".join(badges)
 
     def _topology_node_lines(
         self,
@@ -946,16 +1368,28 @@ class TopologyRenderer:
             lines.append("REFERENCE_ONLY / UNRESOLVED")
         if options.show_resource_name and node.get("name"):
             lines.append(self._topology_short_text(node.get("name")))
-        if options.show_private_ip and node.get("private_ips"):
+        private_ips = self._topology_node_values(
+            node,
+            ("private_ips", "private_ip", "all_private_ips"),
+        )
+        public_ips = self._topology_node_values(
+            node,
+            ("public_ips", "public_ip"),
+        )
+        if options.show_private_ip and private_ips:
             lines.append(
                 "Private IP "
-                + self._topology_value_list(node.get("private_ips"))
+                + self._topology_value_list(private_ips)
             )
-        if options.show_public_ip and node.get("public_ips"):
+        if options.show_public_ip and public_ips:
             lines.append(
                 "Public IP "
-                + self._topology_value_list(node.get("public_ips"))
+                + self._topology_value_list(public_ips)
             )
+        if str(node.get("category") or "") == "SERVER":
+            disk_summary = self._topology_server_disk_summary(node)
+            if disk_summary:
+                lines.append(disk_summary)
         if options.show_network_cidr and node.get("network_cidrs"):
             lines.append(
                 "CIDR " + self._topology_value_list(node.get("network_cidrs"))
@@ -973,6 +1407,141 @@ class TopologyRenderer:
                 "플랫폼 " + self._topology_short_text(node.get("platform"))
             )
         return lines[:8]
+
+    @classmethod
+    def _topology_node_values(
+        cls,
+        node: Mapping[str, Any],
+        field_names: tuple[str, ...],
+    ) -> List[Any]:
+        """허용한 필드만 읽어 렌더링용 값 목록으로 정규화한다."""
+
+        values = []
+        for container in cls._topology_node_containers(node):
+            for field_name in field_names:
+                value = container.get(field_name)
+                candidates = (
+                    value
+                    if isinstance(value, (list, tuple))
+                    else [value]
+                )
+                for candidate in candidates:
+                    if candidate is None or isinstance(candidate, Mapping):
+                        continue
+                    if candidate not in values:
+                        values.append(candidate)
+        return values
+
+    @classmethod
+    def _topology_server_disk_summary(
+        cls,
+        node: Mapping[str, Any],
+    ) -> str:
+        """서버에 병합된 디스크의 개수와 합계 용량만 표시한다."""
+
+        count = cls._topology_nonnegative_number(
+            cls._topology_node_field(node, "attached_disk_count")
+        )
+        total_gb = cls._topology_nonnegative_number(
+            cls._topology_node_field(node, "attached_disk_total_gb")
+        )
+        known_capacity_count = cls._topology_nonnegative_number(
+            cls._topology_node_field(
+                node,
+                "attached_disk_capacity_known_count",
+            )
+        )
+        confirmed_capacity_gb = None
+        attached_disks = cls._topology_node_field(node, "attached_disks")
+        if isinstance(attached_disks, (list, tuple)):
+            if count is None:
+                count = float(len(attached_disks))
+            if total_gb is None:
+                sizes = [
+                    cls._topology_nonnegative_number(
+                        cls._topology_node_field(
+                            disk,
+                            "size_gb",
+                            "storage_size_gb",
+                            "block_storage_size_gb",
+                        )
+                    )
+                    for disk in attached_disks
+                    if isinstance(disk, Mapping)
+                ]
+                valid_sizes = [size for size in sizes if size is not None]
+                all_capacities_known = bool(
+                    sizes
+                    and len(sizes) == len(attached_disks)
+                    and len(valid_sizes) == len(sizes)
+                    and count == float(len(sizes))
+                    and (
+                        known_capacity_count is None
+                        or known_capacity_count == float(len(sizes))
+                    )
+                )
+                if all_capacities_known:
+                    total_gb = sum(valid_sizes)
+                elif valid_sizes:
+                    confirmed_capacity_gb = sum(valid_sizes)
+                    if known_capacity_count is None:
+                        known_capacity_count = float(len(valid_sizes))
+
+        if not count and total_gb is None and confirmed_capacity_gb is None:
+            return ""
+        parts = []
+        if count is not None:
+            parts.append(f"디스크 {int(count):,}개")
+        if total_gb is not None:
+            rendered_total = f"{total_gb:,.2f}".rstrip("0").rstrip(".")
+            parts.append(f"합계 {rendered_total} GB")
+        elif confirmed_capacity_gb is not None:
+            rendered_total = (
+                f"{confirmed_capacity_gb:,.2f}".rstrip("0").rstrip(".")
+            )
+            known_label = (
+                f" ({int(known_capacity_count):,}개 확인)"
+                if known_capacity_count is not None
+                else ""
+            )
+            parts.append(f"확인 용량 {rendered_total} GB{known_label}")
+        return " · ".join(parts)
+
+    @staticmethod
+    def _topology_node_containers(
+        node: Mapping[str, Any],
+    ) -> List[Mapping[str, Any]]:
+        containers = [node]
+        for field_name in ("metadata", "raw", "details"):
+            value = node.get(field_name)
+            if isinstance(value, Mapping):
+                containers.append(value)
+        return containers
+
+    @classmethod
+    def _topology_node_field(
+        cls,
+        node: Mapping[str, Any],
+        *field_names: str,
+    ) -> Any:
+        for container in cls._topology_node_containers(node):
+            for field_name in field_names:
+                value = container.get(field_name)
+                if value is not None:
+                    return value
+        return None
+
+    @staticmethod
+    def _topology_nonnegative_number(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            number = float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number) or number < 0:
+            return None
+        return number
 
     def _topology_unmapped_card(
         self,

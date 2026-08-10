@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, fields
 from hashlib import sha256
 from ipaddress import ip_address, ip_network
+from math import isfinite
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from app.report_options import (
@@ -15,6 +17,24 @@ from app.report_options import (
 REPRESENTATIVE_CATEGORY_LABELS = dict(RESOURCE_CATEGORY_LABELS)
 REPRESENTATIVE_CATEGORIES = tuple(RESOURCE_CATEGORY_OPTIONS)
 SUPPORTING_CATEGORIES = frozenset({"NETWORK_INTERFACE", "TARGET_GROUP"})
+OMITTED_TOPOLOGY_CATEGORIES = frozenset({
+    "BLOCK_STORAGE_SNAPSHOT",
+    "CERTIFICATE",
+    "CLOUD_FUNCTIONS",
+    "SERVER_IMAGE",
+    "VIRTUAL_PRIVATE_GATEWAY",
+})
+SERVER_EMBEDDED_CATEGORIES = frozenset({
+    "BLOCK_STORAGE",
+    "NETWORK_INTERFACE",
+    "PUBLIC_IP",
+})
+TOPOLOGY_PRESENTATION_POLICY_VERSION = 1
+TOPOLOGY_PRESENTATION_POLICY_MODE = "IDEMPOTENT_MIGRATION"
+PRESENTATION_RELATIONSHIP_GAP_FIELDS = frozenset({
+    "retained_ambiguous_auxiliary_count",
+    "retained_unverified_nat_subnet_count",
+})
 
 
 @dataclass
@@ -30,6 +50,7 @@ class _TopologyGraph:
         default_factory=dict
     )
     warnings: List[Dict[str, Any]] = field(default_factory=list)
+    presentation: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -98,6 +119,11 @@ class InfrastructureTopologyBuilder:
         "NIC": "NETWORK_INTERFACE",
         "TARGETGROUP": "TARGET_GROUP",
         "SNAPSHOT": "BLOCK_STORAGE_SNAPSHOT",
+        "CLOUD_FUNCTION": "CLOUD_FUNCTIONS",
+        "FUNCTION": "CLOUD_FUNCTIONS",
+        "FUNCTIONS": "CLOUD_FUNCTIONS",
+        "VGW": "VIRTUAL_PRIVATE_GATEWAY",
+        "VPC_GATEWAY": "VIRTUAL_PRIVATE_GATEWAY",
     }
     ID_FIELDS = {
         "SERVER": ("server_instance_no", "server_id"),
@@ -174,6 +200,7 @@ class InfrastructureTopologyBuilder:
         resource_items = self._mapping_items(resources)
         graph = self._build_resource_graph(resource_items, allowed_categories)
         self._connect_resource_graph(graph, allowed_references)
+        graph.presentation = self._apply_presentation_policy(graph)
         full_edges = list(graph.edges.values())
         self._mark_mapped_nodes(graph.nodes, full_edges)
         selection = self._select_topology(graph.nodes, full_edges, limit)
@@ -187,6 +214,12 @@ class InfrastructureTopologyBuilder:
             inventory_completeness,
             collection_issue_count,
         )
+        if any(
+            graph.presentation.get(field_name)
+            for field_name in PRESENTATION_RELATIONSHIP_GAP_FIELDS
+        ):
+            relationship_coverage = "PARTIAL"
+            confidence = "PARTIAL"
         self._append_topology_warnings(graph.warnings, selection, limit)
         selection.nodes.sort(key=self._node_sort_key)
         selection.edges.sort(key=self._edge_sort_key)
@@ -199,6 +232,7 @@ class InfrastructureTopologyBuilder:
             relationship_coverage=relationship_coverage,
             inventory_completeness=normalized_completeness,
             collection_issue_count=normalized_issue_count,
+            presentation=graph.presentation,
         )
 
     def _select_topology(
@@ -334,6 +368,7 @@ class InfrastructureTopologyBuilder:
         relationship_coverage: str,
         inventory_completeness: str,
         collection_issue_count: int,
+        presentation: Mapping[str, int],
     ) -> Dict[str, Any]:
         selected_ids = {node["node_id"] for node in selection.nodes}
         return {
@@ -372,6 +407,11 @@ class InfrastructureTopologyBuilder:
                 "relationship_coverage": relationship_coverage,
                 "inventory_completeness": inventory_completeness,
                 "collection_issue_count": collection_issue_count,
+                "presentation_policy_version": (
+                    TOPOLOGY_PRESENTATION_POLICY_VERSION
+                ),
+                "presentation_policy_mode": TOPOLOGY_PRESENTATION_POLICY_MODE,
+                "presentation_policy": dict(presentation),
             },
         }
 
@@ -441,6 +481,10 @@ class InfrastructureTopologyBuilder:
                 resource,
                 details,
             )
+            if identity_collision:
+                # 같은 category/ID가 여러 원본 자원을 가리키면 표시 단계에서
+                # 임의로 하나로 합치지 않도록 충돌 사실을 보존한다.
+                candidate["identity_collision"] = True
             node = graph.nodes.get(node_id)
             if node is None:
                 graph.nodes[node_id] = candidate
@@ -478,6 +522,573 @@ class InfrastructureTopologyBuilder:
                 allowed_references,
             )
 
+    def _apply_presentation_policy(
+        self,
+        graph: _TopologyGraph,
+    ) -> Dict[str, int]:
+        """보고서 구성도에서 보조 자원을 안전하게 축약한다.
+
+        자원 이름이나 IP가 비슷하다는 이유로 관계를 만들지 않는다. 수집기가
+        남긴 명시적 자원 ID edge만 사용하며, 서버 ID가 충돌하거나 여러 서버로
+        연결된 보조 자원은 독립 노드로 유지한다.
+        """
+        metadata = {
+            "embedded_node_count": 0,
+            "embedded_block_storage_count": 0,
+            "embedded_network_interface_count": 0,
+            "embedded_public_ip_count": 0,
+            "excluded_category_node_count": 0,
+            "excluded_nat_subnet_count": 0,
+            "excluded_orphan_reference_count": 0,
+            "retained_ambiguous_auxiliary_count": 0,
+            "retained_unverified_nat_subnet_count": 0,
+            "removed_edge_count": 0,
+        }
+
+        excluded_ids = {
+            node_id
+            for node_id, node in graph.nodes.items()
+            if str(node.get("category") or "")
+            in OMITTED_TOPOLOGY_CATEGORIES
+        }
+        metadata["excluded_category_node_count"] = len(excluded_ids)
+        metadata["removed_edge_count"] += self._remove_nodes(
+            graph,
+            excluded_ids,
+        )
+
+        for node in graph.nodes.values():
+            if node.get("category") == "NAT_GATEWAY":
+                # 실제 위치를 단정하지 않고 렌더러에 VPC 경계 배치 의도만 전달한다.
+                node["placement_hint"] = "VPC_BOUNDARY"
+
+        edges_by_source, edges_by_target = self._edge_endpoint_index(
+            graph.edges.values()
+        )
+        (
+            nat_subnet_ids,
+            retained_unverified_nat_subnet_count,
+        ) = self._collapsible_nat_subnet_ids(
+            graph,
+            edges_by_source,
+            edges_by_target,
+        )
+        self._bridge_nat_subnet_relations(
+            graph,
+            nat_subnet_ids,
+            edges_by_source,
+            edges_by_target,
+        )
+        metadata["excluded_nat_subnet_count"] = len(nat_subnet_ids)
+        metadata["retained_unverified_nat_subnet_count"] = (
+            retained_unverified_nat_subnet_count
+        )
+        metadata["removed_edge_count"] += self._remove_nodes(
+            graph,
+            nat_subnet_ids,
+        )
+
+        edges_by_source, edges_by_target = self._edge_endpoint_index(
+            graph.edges.values()
+        )
+        embedded_ids, ambiguous_count = self._embed_server_auxiliaries(
+            graph,
+            edges_by_source,
+            edges_by_target,
+        )
+        for node_id in embedded_ids:
+            category = str(graph.nodes[node_id].get("category") or "")
+            metadata["embedded_node_count"] += 1
+            counter = {
+                "BLOCK_STORAGE": "embedded_block_storage_count",
+                "NETWORK_INTERFACE": "embedded_network_interface_count",
+                "PUBLIC_IP": "embedded_public_ip_count",
+            }.get(category)
+            if counter:
+                metadata[counter] += 1
+        metadata["retained_ambiguous_auxiliary_count"] = ambiguous_count
+        metadata["removed_edge_count"] += self._remove_nodes(
+            graph,
+            embedded_ids,
+        )
+        orphan_ids = self._orphan_supporting_node_ids(graph)
+        metadata["excluded_orphan_reference_count"] = len(orphan_ids)
+        metadata["removed_edge_count"] += self._remove_nodes(
+            graph,
+            orphan_ids,
+        )
+
+        if ambiguous_count and not any(
+            warning.get("code") == "AUXILIARY_RESOURCE_NOT_EMBEDDED"
+            for warning in graph.warnings
+        ):
+            graph.warnings.append({
+                "code": "AUXILIARY_RESOURCE_NOT_EMBEDDED",
+                "message": (
+                    "서버와의 명시적 1:1 관계를 확인할 수 없는 보조 자원 "
+                    f"{ambiguous_count}개는 서버 노드에 병합하지 않았습니다."
+                ),
+                "source": "explicit_resource_id_relation",
+                "confidence": "PARTIAL",
+            })
+        if retained_unverified_nat_subnet_count and not any(
+            warning.get("code") == "NAT_SUBNET_NOT_COLLAPSED"
+            for warning in graph.warnings
+        ):
+            graph.warnings.append({
+                "code": "NAT_SUBNET_NOT_COLLAPSED",
+                "message": (
+                    "NAT 전용으로 보이지만 명시적인 NAT Gateway 소속과 "
+                    "단일 VPC 상위 관계를 모두 확인하지 못한 Subnet "
+                    f"{retained_unverified_nat_subnet_count}개를 유지했습니다."
+                ),
+                "source": "explicit_resource_id_relation",
+                "confidence": "PARTIAL",
+            })
+        return metadata
+
+    def _collapsible_nat_subnet_ids(
+        self,
+        graph: _TopologyGraph,
+        edges_by_source: Mapping[str, Sequence[Mapping[str, Any]]],
+        edges_by_target: Mapping[str, Sequence[Mapping[str, Any]]],
+    ) -> tuple[set[str], int]:
+        """NAT 전용임을 명시적으로 확인한 subnet만 숨긴다."""
+        result: set[str] = set()
+        retained_unverified_count = 0
+        for subnet_id, subnet in graph.nodes.items():
+            if subnet.get("category") != "SUBNET":
+                continue
+            child_edges = [
+                edge
+                for edge in edges_by_source.get(subnet_id, ())
+                if edge.get("relationship") == "CONTAINS"
+            ]
+            has_general_workload = any(
+                graph.nodes.get(str(edge.get("target_node_id")), {}).get(
+                    "category"
+                )
+                != "NAT_GATEWAY"
+                for edge in child_edges
+            )
+            if has_general_workload:
+                continue
+
+            usage_type = self._relation_token(
+                subnet.get("subnet_usage_type")
+            )
+            usage_is_nat = usage_type in {"NATGW", "NAT_GATEWAY"}
+            nat_child_edges = [
+                edge
+                for edge in child_edges
+                if graph.nodes.get(
+                    str(edge.get("target_node_id")), {}
+                ).get("category") == "NAT_GATEWAY"
+            ]
+            nat_memberships = [
+                edge
+                for edge in nat_child_edges
+                if self._is_nat_subnet_membership(edge)
+            ]
+            vpc_parent_ids = {
+                str(edge.get("source_node_id"))
+                for edge in edges_by_target.get(subnet_id, ())
+                if (
+                    edge.get("relationship") == "CONTAINS"
+                    and graph.nodes.get(
+                        str(edge.get("source_node_id")), {}
+                    ).get("category")
+                    == "VPC"
+                )
+            }
+            looks_like_nat_subnet = usage_is_nat or bool(nat_child_edges)
+            if not looks_like_nat_subnet:
+                continue
+            if nat_memberships and len(vpc_parent_ids) == 1:
+                result.add(subnet_id)
+                continue
+
+            # API 일부 실패나 충돌 상태에서 subnet만 지우면 실제 구성보다
+            # 단정적인 그림이 되므로 원본 노드를 남기고 품질을 낮춘다.
+            subnet["confidence"] = "PARTIAL"
+            retained_unverified_count += 1
+        return result, retained_unverified_count
+
+    def _bridge_nat_subnet_relations(
+        self,
+        graph: _TopologyGraph,
+        subnet_ids: set[str],
+        edges_by_source: Mapping[str, Sequence[Mapping[str, Any]]],
+        edges_by_target: Mapping[str, Sequence[Mapping[str, Any]]],
+    ) -> None:
+        """숨길 NAT subnet의 검증된 VPC 관계를 NAT Gateway로 승계한다."""
+        for subnet_id in subnet_ids:
+            vpc_edges = [
+                edge
+                for edge in edges_by_target.get(subnet_id, ())
+                if (
+                    edge.get("relationship") == "CONTAINS"
+                    and graph.nodes.get(
+                        str(edge.get("source_node_id")), {}
+                    ).get("category")
+                    == "VPC"
+                )
+            ]
+            nat_edges = [
+                edge
+                for edge in edges_by_source.get(subnet_id, ())
+                if (
+                    edge.get("relationship") == "CONTAINS"
+                    and graph.nodes.get(
+                        str(edge.get("target_node_id")), {}
+                    ).get("category")
+                    == "NAT_GATEWAY"
+                    and self._is_nat_subnet_membership(edge)
+                )
+            ]
+            for vpc_edge in vpc_edges:
+                vpc = graph.nodes.get(str(vpc_edge.get("source_node_id")))
+                if vpc is None:
+                    continue
+                for nat_edge in nat_edges:
+                    nat = graph.nodes.get(str(nat_edge.get("target_node_id")))
+                    if nat is None:
+                        continue
+                    evidence = self._unique_strings(
+                        self._edge_sources(vpc_edge)
+                        + self._edge_sources(nat_edge)
+                    )
+                    self._store_edge(
+                        graph.edges,
+                        vpc,
+                        nat,
+                        "CONTAINS",
+                        " | ".join(evidence)
+                        or "explicit_resource_id_relation",
+                    )
+
+    def _embed_server_auxiliaries(
+        self,
+        graph: _TopologyGraph,
+        edges_by_source: Mapping[str, Sequence[Mapping[str, Any]]],
+        edges_by_target: Mapping[str, Sequence[Mapping[str, Any]]],
+    ) -> tuple[set[str], int]:
+        embedded_ids: set[str] = set()
+        ambiguous_count = 0
+        ambiguous_identity_ids = self._ambiguous_auxiliary_node_ids(graph)
+        expected_relationships = {
+            "BLOCK_STORAGE": {"ATTACHED_STORAGE", "ATTACHED_TO"},
+            "NETWORK_INTERFACE": {"ATTACHED_TO", "USES"},
+            "PUBLIC_IP": {"ASSIGNED_TO"},
+        }
+        for auxiliary_id, auxiliary in graph.nodes.items():
+            category = str(auxiliary.get("category") or "")
+            if category not in SERVER_EMBEDDED_CATEGORIES:
+                continue
+            if auxiliary_id in ambiguous_identity_ids:
+                auxiliary["confidence"] = "PARTIAL"
+                ambiguous_count += 1
+                continue
+            server_ids = set()
+            incident_edges = (
+                *edges_by_source.get(auxiliary_id, ()),
+                *edges_by_target.get(auxiliary_id, ()),
+            )
+            for edge in incident_edges:
+                if edge.get("relationship") not in expected_relationships[category]:
+                    continue
+                source_id = str(edge.get("source_node_id") or "")
+                target_id = str(edge.get("target_node_id") or "")
+                other_id = None
+                if source_id == auxiliary_id:
+                    other_id = target_id
+                elif target_id == auxiliary_id:
+                    other_id = source_id
+                if (
+                    other_id
+                    and graph.nodes.get(other_id, {}).get("category") == "SERVER"
+                ):
+                    server_ids.add(other_id)
+            if not server_ids:
+                continue
+            if (
+                category == "PUBLIC_IP"
+                and self._has_non_server_public_ip_assignment(
+                    auxiliary_id,
+                    graph,
+                    incident_edges,
+                )
+            ):
+                ambiguous_count += 1
+                continue
+            if len(server_ids) != 1:
+                ambiguous_count += 1
+                continue
+            server = graph.nodes[next(iter(server_ids))]
+            if not self._resolved_server_node(server):
+                ambiguous_count += 1
+                continue
+            self._embed_auxiliary(server, auxiliary)
+            embedded_ids.add(auxiliary_id)
+        return embedded_ids, ambiguous_count
+
+    @staticmethod
+    def _ambiguous_auxiliary_node_ids(graph: _TopologyGraph) -> set[str]:
+        """동일 category/ID가 여러 노드를 뜻하는 보조 자원을 찾는다."""
+
+        nodes_by_identity: Dict[tuple[str, str], List[str]] = {}
+        ambiguous_ids = {
+            node_id
+            for node_id, node in graph.nodes.items()
+            if (
+                node.get("category") in SERVER_EMBEDDED_CATEGORIES
+                and node.get("identity_collision") is True
+            )
+        }
+        for node_id, node in graph.nodes.items():
+            category = str(node.get("category") or "")
+            resource_id = str(node.get("resource_id") or "").strip()
+            if category not in SERVER_EMBEDDED_CATEGORIES or not resource_id:
+                continue
+            nodes_by_identity.setdefault((category, resource_id), []).append(
+                node_id
+            )
+        for node_ids in nodes_by_identity.values():
+            if len(node_ids) > 1:
+                ambiguous_ids.update(node_ids)
+        return ambiguous_ids
+
+    @staticmethod
+    def _has_non_server_public_ip_assignment(
+        public_ip_id: str,
+        graph: _TopologyGraph,
+        edges: Sequence[Mapping[str, Any]],
+    ) -> bool:
+        for edge in edges:
+            if edge.get("relationship") not in {"ASSIGNED_TO", "USES"}:
+                continue
+            source_id = str(edge.get("source_node_id") or "")
+            target_id = str(edge.get("target_node_id") or "")
+            if source_id == public_ip_id:
+                other_id = target_id
+            elif target_id == public_ip_id:
+                other_id = source_id
+            else:
+                continue
+            if graph.nodes.get(other_id, {}).get("category") != "SERVER":
+                return True
+        return False
+
+    @staticmethod
+    def _orphan_supporting_node_ids(graph: _TopologyGraph) -> set[str]:
+        connected_ids = {
+            str(edge.get(field) or "")
+            for edge in graph.edges.values()
+            for field in ("source_node_id", "target_node_id")
+        }
+        return {
+            node_id
+            for node_id, node in graph.nodes.items()
+            if node.get("kind") == "supporting" and node_id not in connected_ids
+        }
+
+    def _embed_auxiliary(
+        self,
+        server: Dict[str, Any],
+        auxiliary: Mapping[str, Any],
+    ) -> None:
+        category = str(auxiliary.get("category") or "")
+        if category == "BLOCK_STORAGE":
+            disks = server.setdefault("attached_disks", [])
+            disk = {
+                "resource_id": auxiliary.get("resource_id"),
+                "name": auxiliary.get("name"),
+                "size_gb": auxiliary.get("storage_size_gb"),
+                "storage_type": auxiliary.get("storage_type"),
+                "disk_type": auxiliary.get("disk_type"),
+                "volume_type": auxiliary.get("volume_type"),
+            }
+            self._append_unique_resource(disks, disk, auxiliary)
+            disks.sort(key=self._embedded_resource_sort_key)
+            server["attached_disk_count"] = len(disks)
+            known_sizes = [
+                self._nonnegative_number(disk_item.get("size_gb"))
+                for disk_item in disks
+            ]
+            server["attached_disk_capacity_known_count"] = sum(
+                value is not None for value in known_sizes
+            )
+            server["attached_disk_total_gb"] = (
+                self._sum_numbers(known_sizes)
+                if known_sizes and all(value is not None for value in known_sizes)
+                else None
+            )
+            return
+
+        if category == "NETWORK_INTERFACE":
+            interfaces = server.setdefault("network_interfaces", [])
+            interface = {
+                "resource_id": auxiliary.get("resource_id"),
+                "private_ips": list(auxiliary.get("private_ips") or []),
+                "public_ips": list(auxiliary.get("public_ips") or []),
+            }
+            self._append_unique_resource(interfaces, interface, auxiliary)
+            interfaces.sort(key=self._embedded_resource_sort_key)
+            server["network_interface_count"] = len(interfaces)
+            self._merge_network_values(server, auxiliary)
+            return
+
+        if category == "PUBLIC_IP":
+            public_ip_ids = server.setdefault("public_ip_resource_ids", [])
+            resource_id = self._string(auxiliary.get("resource_id"))
+            if resource_id and resource_id not in public_ip_ids:
+                public_ip_ids.append(resource_id)
+                public_ip_ids.sort()
+            server["public_ip_resource_count"] = len(public_ip_ids)
+            self._merge_network_values(server, auxiliary)
+
+    @staticmethod
+    def _append_unique_resource(
+        resources: List[Dict[str, Any]],
+        candidate: Dict[str, Any],
+        source_node: Mapping[str, Any],
+    ) -> None:
+        identity = (
+            str(candidate.get("resource_id") or ""),
+            str(source_node.get("node_id") or ""),
+        )
+        for existing in resources:
+            existing_identity = (
+                str(existing.get("resource_id") or ""),
+                str(existing.get("node_id") or ""),
+            )
+            if (
+                existing_identity == identity
+                or (
+                    identity[0]
+                    and existing_identity[0] == identity[0]
+                )
+            ):
+                return
+        candidate["node_id"] = source_node.get("node_id")
+        resources.append(candidate)
+
+    @staticmethod
+    def _embedded_resource_sort_key(
+        resource: Mapping[str, Any],
+    ) -> tuple[str, str]:
+        return (
+            str(resource.get("name") or "").casefold(),
+            str(resource.get("resource_id") or resource.get("node_id") or ""),
+        )
+
+    @staticmethod
+    def _resolved_server_node(node: Mapping[str, Any]) -> bool:
+        resolution = str(node.get("resolution") or "").upper()
+        if resolution:
+            return resolution == "RESOLVED"
+        return bool(
+            node.get("kind") == "representative" and node.get("resource_id")
+        )
+
+    def _merge_network_values(
+        self,
+        server: Dict[str, Any],
+        auxiliary: Mapping[str, Any],
+    ) -> None:
+        for field in ("private_ips", "public_ips"):
+            values = server.setdefault(field, [])
+            for value in auxiliary.get(field) or []:
+                if value not in values:
+                    values.append(value)
+            values.sort(key=self._network_value_sort_key)
+
+    @staticmethod
+    def _network_value_sort_key(value: Any) -> tuple[Any, ...]:
+        """IP는 주소값으로, 비정상 legacy 값은 문자열로 안정 정렬한다."""
+
+        rendered = str(value).strip()
+        try:
+            address = ip_address(rendered)
+        except ValueError:
+            return 1, rendered.casefold(), rendered
+        return 0, address.version, int(address)
+
+    @staticmethod
+    def _remove_nodes(graph: _TopologyGraph, node_ids: set[str]) -> int:
+        if not node_ids:
+            return 0
+        for node_id in node_ids:
+            graph.nodes.pop(node_id, None)
+        removed_edges = 0
+        retained_edges = {}
+        for key, edge in graph.edges.items():
+            if (
+                edge.get("source_node_id") in node_ids
+                or edge.get("target_node_id") in node_ids
+            ):
+                removed_edges += 1
+                continue
+            retained_edges[key] = edge
+        graph.edges = retained_edges
+        return removed_edges
+
+    @staticmethod
+    def _edge_sources(edge: Mapping[str, Any]) -> List[str]:
+        sources = edge.get("sources")
+        if isinstance(sources, (list, tuple)):
+            return [str(source) for source in sources if str(source).strip()]
+        source = str(edge.get("source") or "").strip()
+        return [source] if source else []
+
+    @staticmethod
+    def _edge_endpoint_index(
+        edges: Iterable[Mapping[str, Any]],
+    ) -> tuple[
+        Dict[str, List[Mapping[str, Any]]],
+        Dict[str, List[Mapping[str, Any]]],
+    ]:
+        """간선을 출발점과 도착점별로 한 번만 색인한다."""
+        edges_by_source: Dict[str, List[Mapping[str, Any]]] = {}
+        edges_by_target: Dict[str, List[Mapping[str, Any]]] = {}
+        for edge in edges:
+            source_id = str(edge.get("source_node_id") or "")
+            target_id = str(edge.get("target_node_id") or "")
+            if source_id:
+                edges_by_source.setdefault(source_id, []).append(edge)
+            if target_id:
+                edges_by_target.setdefault(target_id, []).append(edge)
+        return edges_by_source, edges_by_target
+
+    @classmethod
+    def _is_nat_subnet_membership(cls, edge: Mapping[str, Any]) -> bool:
+        valid_sources = {
+            "subnetno",
+            "details.subnet_no",
+            "natgateway.subnetno",
+        }
+        return any(
+            source.strip().lower() in valid_sources
+            for source in cls._edge_sources(edge)
+        )
+
+    @staticmethod
+    def _nonnegative_number(value: Any) -> Optional[float | int]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not isfinite(number) or number < 0:
+            return None
+        return int(number) if number.is_integer() else number
+
+    @staticmethod
+    def _sum_numbers(values: Iterable[Optional[float | int]]) -> float | int:
+        total = sum(float(value) for value in values if value is not None)
+        return int(total) if total.is_integer() else round(total, 6)
+
     @staticmethod
     def _mark_mapped_nodes(
         nodes: Dict[str, Dict[str, Any]],
@@ -489,7 +1100,10 @@ class InfrastructureTopologyBuilder:
             degree[edge["target_node_id"]] += 1
         for node_id, node in nodes.items():
             node["is_mapped"] = degree.get(node_id, 0) > 0
-            if not node["is_mapped"] and node["kind"] == "representative":
+            if (
+                not node["is_mapped"]
+                and node.get("kind", "representative") == "representative"
+            ):
                 node["confidence"] = "UNMAPPED"
 
     def _add_explicit_relations(
@@ -879,7 +1493,7 @@ class InfrastructureTopologyBuilder:
         elif network_type in self.PRIVATE_NETWORK_TYPES:
             private_ips = self._unique_strings(private_ips + generic_ips)
 
-        return {
+        node = {
             "node_id": node_id,
             "category": category,
             "category_label": self._string(resource.get("category_label"))
@@ -908,6 +1522,33 @@ class InfrastructureTopologyBuilder:
             "resolution": "RESOLVED",
             "is_mapped": False,
         }
+        if category == "SERVER":
+            node.update({
+                "network_interfaces": [],
+                "network_interface_count": 0,
+                "attached_disks": [],
+                "attached_disk_count": 0,
+                "attached_disk_capacity_known_count": 0,
+                "attached_disk_total_gb": None,
+                "public_ip_resource_ids": [],
+                "public_ip_resource_count": 0,
+            })
+        elif category == "BLOCK_STORAGE":
+            node.update({
+                "storage_size_gb": self._nonnegative_number(
+                    details.get("size_gb")
+                ),
+                "storage_type": self._string(details.get("storage_type")),
+                "disk_type": self._string(details.get("disk_type")),
+                "volume_type": self._string(details.get("volume_type")),
+            })
+        elif category == "SUBNET":
+            node["subnet_usage_type"] = self._relation_token(
+                details.get("usage_type")
+            ) or None
+        elif category == "NAT_GATEWAY":
+            node["placement_hint"] = "VPC_BOUNDARY"
+        return node
 
     def _resource_id(
         self,
@@ -938,8 +1579,8 @@ class InfrastructureTopologyBuilder:
                         result.append(value)
         return result
 
-    @staticmethod
-    def _valid_ip_values(values: Iterable[str]) -> List[str]:
+    @classmethod
+    def _valid_ip_values(cls, values: Iterable[str]) -> List[str]:
         result = []
         for value in values:
             try:
@@ -948,6 +1589,7 @@ class InfrastructureTopologyBuilder:
                 continue
             if normalized not in result:
                 result.append(normalized)
+        result.sort(key=cls._network_value_sort_key)
         return result
 
     @staticmethod
@@ -1050,6 +1692,12 @@ class InfrastructureTopologyBuilder:
             "zone",
             "platform",
             "source",
+            "storage_size_gb",
+            "storage_type",
+            "disk_type",
+            "volume_type",
+            "subnet_usage_type",
+            "placement_hint",
         ):
             if not existing.get(field) and candidate.get(field):
                 existing[field] = candidate[field]
@@ -1136,9 +1784,238 @@ class InfrastructureTopologyBuilder:
         return rendered[:500] if rendered else None
 
 
+def apply_topology_presentation_policy(value: Any) -> Dict[str, Any]:
+    """저장 시점이 오래된 구성도에도 현재 표시 정책을 동일하게 적용한다.
+
+    입력 객체를 변경하지 않으며, 이미 정책이 적용된 payload에 다시 호출해도
+    자원 수와 메타데이터가 중복 증가하지 않는다.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    result = deepcopy(dict(value))
+    raw_nodes = result.get("nodes")
+    raw_edges = result.get("edges")
+    if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+        return result
+
+    graph = _TopologyGraph()
+    builder = InfrastructureTopologyBuilder()
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, Mapping):
+            continue
+        node = dict(raw_node)
+        node_id = str(node.get("node_id") or "").strip()
+        if not node_id or node_id in graph.nodes:
+            continue
+        category = builder._category(node.get("category"))
+        node["category"] = category
+        representative = category in REPRESENTATIVE_CATEGORY_LABELS
+        node.setdefault("kind", "representative" if representative else "supporting")
+        node.setdefault("count_as_infrastructure", representative)
+        node.setdefault(
+            "resolution",
+            "RESOLVED" if node.get("resource_id") else "UNRESOLVED",
+        )
+        node.setdefault("confidence", "VERIFIED")
+        graph.nodes[node_id] = node
+    for raw_edge in raw_edges:
+        if not isinstance(raw_edge, Mapping):
+            continue
+        edge = dict(raw_edge)
+        source_id = str(edge.get("source_node_id") or "").strip()
+        target_id = str(edge.get("target_node_id") or "").strip()
+        relationship = InfrastructureTopologyBuilder._relation_token(
+            edge.get("relationship")
+        )
+        if (
+            not source_id
+            or not target_id
+            or source_id not in graph.nodes
+            or target_id not in graph.nodes
+            or not relationship
+        ):
+            continue
+        edge["source_node_id"] = source_id
+        edge["target_node_id"] = target_id
+        edge["relationship"] = relationship
+        graph.edges[(source_id, target_id, relationship)] = edge
+    raw_warnings = result.get("warnings")
+    graph.warnings = [
+        dict(warning)
+        for warning in raw_warnings
+        if isinstance(warning, Mapping)
+    ] if isinstance(raw_warnings, list) else []
+
+    current_metadata = builder._apply_presentation_policy(graph)
+    visible_edges = list(graph.edges.values())
+    builder._mark_mapped_nodes(graph.nodes, visible_edges)
+    visible_nodes = sorted(graph.nodes.values(), key=builder._node_sort_key)
+    visible_edges.sort(key=builder._edge_sort_key)
+    visible_ids = {str(node.get("node_id") or "") for node in visible_nodes}
+    unmapped_ids = [
+        str(node.get("node_id"))
+        for node in visible_nodes
+        if node.get("kind") == "representative" and not node.get("is_mapped")
+    ]
+    unresolved_ids = [
+        str(node.get("node_id"))
+        for node in visible_nodes
+        if node.get("resolution") == "UNRESOLVED"
+    ]
+
+    summary = result.get("summary")
+    summary = dict(summary) if isinstance(summary, Mapping) else {}
+    existing_metadata = summary.get("presentation_policy")
+    combined_metadata = (
+        dict(existing_metadata)
+        if isinstance(existing_metadata, Mapping)
+        else {}
+    )
+    for key, count in current_metadata.items():
+        previous = combined_metadata.get(key, 0)
+        try:
+            previous_count = max(int(previous), 0)
+        except (TypeError, ValueError):
+            previous_count = 0
+        if key in PRESENTATION_RELATIONSHIP_GAP_FIELDS:
+            combined_metadata[key] = max(previous_count, count)
+        else:
+            combined_metadata[key] = previous_count + count
+
+    previous_total = summary.get("total_verified_edge_count")
+    try:
+        total_verified = max(
+            int(previous_total) - current_metadata["removed_edge_count"],
+            len(visible_edges),
+        )
+    except (TypeError, ValueError):
+        total_verified = len(visible_edges)
+    try:
+        omitted_node_count = max(int(summary.get("omitted_node_count") or 0), 0)
+    except (TypeError, ValueError):
+        omitted_node_count = 0
+    try:
+        max_nodes = max(
+            int(summary.get("max_nodes") or builder.DEFAULT_MAX_NODES),
+            1,
+        )
+    except (TypeError, ValueError):
+        max_nodes = builder.DEFAULT_MAX_NODES
+    summary.update({
+        "representative_node_count": sum(
+            1 for node in visible_nodes if node.get("count_as_infrastructure")
+        ),
+        "supporting_node_count": sum(
+            1 for node in visible_nodes if not node.get("count_as_infrastructure")
+        ),
+        "verified_edge_count": len(visible_edges),
+        "total_verified_edge_count": total_verified,
+        "unmapped_resource_count": len(unmapped_ids),
+        "unresolved_reference_count": len(unresolved_ids),
+        "presentation_policy_version": TOPOLOGY_PRESENTATION_POLICY_VERSION,
+        "presentation_policy_mode": TOPOLOGY_PRESENTATION_POLICY_MODE,
+        "presentation_policy": combined_metadata,
+    })
+
+    has_relationship_gap = bool(
+        unmapped_ids
+        or unresolved_ids
+        or any(
+            combined_metadata.get(field_name)
+            for field_name in PRESENTATION_RELATIONSHIP_GAP_FIELDS
+        )
+    )
+    existing_coverage = str(
+        summary.get("relationship_coverage") or ""
+    ).strip().upper()
+    summary["relationship_coverage"] = (
+        existing_coverage
+        if existing_coverage in {"PARTIAL", "UNAVAILABLE"}
+        else "PARTIAL" if has_relationship_gap else "COMPLETE"
+    )
+
+    try:
+        collection_issue_count = max(
+            int(summary.get("collection_issue_count") or 0),
+            0,
+        )
+    except (TypeError, ValueError):
+        collection_issue_count = 0
+    inventory_completeness = str(
+        summary.get("inventory_completeness") or ""
+    ).strip().upper()
+    incomplete_inventory = bool(
+        inventory_completeness
+        and inventory_completeness not in {
+            "COMPLETE",
+            "COMPLETE_FOR_SELECTED_SCOPE",
+            "COMPLETE_FOR_SNAPSHOT_SCOPE",
+        }
+    )
+    existing_confidence = str(
+        summary.get("confidence") or ""
+    ).strip().upper()
+    if existing_confidence == "UNAVAILABLE":
+        summary["confidence"] = "UNAVAILABLE"
+    elif (
+        existing_confidence == "PARTIAL"
+        or has_relationship_gap
+        or omitted_node_count
+        or collection_issue_count
+        or incomplete_inventory
+    ):
+        summary["confidence"] = "PARTIAL"
+    else:
+        summary["confidence"] = "VERIFIED"
+
+    graph.warnings = [
+        warning
+        for warning in graph.warnings
+        if warning.get("code") not in {
+            "UNMAPPED_RESOURCES",
+            "UNRESOLVED_REFERENCES",
+            "TOPOLOGY_TRUNCATED",
+        }
+    ]
+    selection = _TopologySelection(
+        nodes=visible_nodes,
+        edges=visible_edges,
+        unmapped_nodes=[
+            node for node in visible_nodes
+            if str(node.get("node_id") or "") in unmapped_ids
+        ],
+        unresolved_nodes=[
+            node for node in visible_nodes
+            if str(node.get("node_id") or "") in unresolved_ids
+        ],
+        full_edge_count=total_verified,
+        full_unmapped_count=len(unmapped_ids),
+        full_unresolved_count=len(unresolved_ids),
+        omitted_node_count=omitted_node_count,
+    )
+    builder._append_topology_warnings(graph.warnings, selection, max_nodes)
+
+    result["nodes"] = visible_nodes
+    result["edges"] = visible_edges
+    result["unmapped_node_ids"] = [
+        node_id for node_id in unmapped_ids if node_id in visible_ids
+    ]
+    result["unresolved_node_ids"] = [
+        node_id for node_id in unresolved_ids if node_id in visible_ids
+    ]
+    result["warnings"] = graph.warnings
+    result["summary"] = summary
+    return result
+
+
 __all__ = [
+    "apply_topology_presentation_policy",
     "InfrastructureTopologyBuilder",
+    "OMITTED_TOPOLOGY_CATEGORIES",
     "REPRESENTATIVE_CATEGORIES",
     "REPRESENTATIVE_CATEGORY_LABELS",
+    "SERVER_EMBEDDED_CATEGORIES",
+    "TOPOLOGY_PRESENTATION_POLICY_MODE",
+    "TOPOLOGY_PRESENTATION_POLICY_VERSION",
     "TopologyDisplayOptions",
 ]
