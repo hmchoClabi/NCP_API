@@ -228,6 +228,86 @@ class TopologyPresentationPolicyTests(unittest.TestCase):
             },
         )
 
+    def test_empty_subnet_is_excluded_but_populated_subnet_is_retained(self):
+        topology = InfrastructureTopologyBuilder().build([
+            self._resource("VPC", "vpc-1", "main-vpc"),
+            self._resource(
+                "SUBNET",
+                "empty-subnet",
+                "empty",
+                details={"vpc_no": "vpc-1"},
+            ),
+            self._resource(
+                "SUBNET",
+                "app-subnet",
+                "application",
+                details={"vpc_no": "vpc-1"},
+            ),
+            self._resource(
+                "SERVER",
+                "server-1",
+                "app",
+                details={"subnet_no": "app-subnet"},
+            ),
+        ])
+
+        subnet_ids = {
+            node["resource_id"]
+            for node in topology["nodes"]
+            if node["category"] == "SUBNET"
+        }
+        self.assertEqual(subnet_ids, {"app-subnet"})
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
+        self.assertNotIn(
+            "SUBNET:empty-subnet",
+            {
+                str(edge[field])
+                for edge in topology["edges"]
+                for field in ("source_node_id", "target_node_id")
+            },
+        )
+
+    def test_non_contains_relation_does_not_populate_subnet(self):
+        topology = InfrastructureTopologyBuilder().build([
+            self._resource("VPC", "vpc-1", "main-vpc"),
+            self._resource(
+                "SUBNET",
+                "empty-subnet",
+                "empty",
+                details={
+                    "vpc_no": "vpc-1",
+                    "explicit_relations": [{
+                        "type": "ROUTES_TO",
+                        "target_category": "NAT_GATEWAY",
+                        "target_id": "nat-1",
+                        "source_field": "routeList[].targetNo",
+                    }],
+                },
+            ),
+            self._resource(
+                "NAT_GATEWAY",
+                "nat-1",
+                "egress",
+                details={"vpc_no": "vpc-1"},
+            ),
+        ])
+
+        self.assertNotIn(
+            "empty-subnet",
+            {node["resource_id"] for node in topology["nodes"]},
+        )
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
+
     def test_nat_subnet_with_server_workload_is_not_collapsed(self):
         topology = InfrastructureTopologyBuilder().build([
             self._resource("VPC", "vpc-1", "main-vpc"),
@@ -259,7 +339,7 @@ class TopologyPresentationPolicyTests(unittest.TestCase):
             {node["resource_id"] for node in topology["nodes"]},
         )
 
-    def test_nat_subnet_without_explicit_membership_is_retained_as_partial(self):
+    def test_nat_subnet_without_explicit_membership_is_removed_when_empty(self):
         topology = InfrastructureTopologyBuilder().build(
             [
                 self._resource("VPC", "vpc-1", "main-vpc"),
@@ -276,19 +356,24 @@ class TopologyPresentationPolicyTests(unittest.TestCase):
             allowed_reference_categories=("VPC", "SUBNET"),
         )
 
-        subnet = next(
-            node for node in topology["nodes"]
-            if node.get("resource_id") == "nat-subnet"
+        self.assertNotIn(
+            "nat-subnet",
+            {node.get("resource_id") for node in topology["nodes"]},
         )
-        self.assertEqual(subnet["confidence"], "PARTIAL")
         self.assertEqual(topology["summary"]["confidence"], "PARTIAL")
         self.assertEqual(
             topology["summary"]["presentation_policy"][
                 "retained_unverified_nat_subnet_count"
             ],
+            0,
+        )
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
             1,
         )
-        self.assertIn(
+        self.assertNotIn(
             "NAT_SUBNET_NOT_COLLAPSED",
             {warning["code"] for warning in topology["warnings"]},
         )
@@ -354,6 +439,12 @@ class TopologyPresentationPolicyTests(unittest.TestCase):
                 },
             ),
             self._resource("NAT_GATEWAY", "nat-1", "egress"),
+            self._resource(
+                "SERVER",
+                "server-1",
+                "app-server",
+                details={"subnet_no": "app-subnet"},
+            ),
         ])
 
         self.assertIn(
@@ -602,6 +693,59 @@ class TopologyPresentationPolicyTests(unittest.TestCase):
         self.assertEqual(
             topology["summary"]["presentation_policy_mode"],
             TOPOLOGY_PRESENTATION_POLICY_MODE,
+        )
+
+    def test_stored_topology_migrates_empty_subnet_once(self):
+        stored_topology = {
+            "nodes": [
+                {
+                    "node_id": "VPC:vpc-1",
+                    "category": "VPC",
+                    "resource_id": "vpc-1",
+                },
+                {
+                    "node_id": "SUBNET:empty-subnet",
+                    "category": "SUBNET",
+                    "resource_id": "empty-subnet",
+                },
+            ],
+            "edges": [{
+                "source_node_id": "VPC:vpc-1",
+                "target_node_id": "SUBNET:empty-subnet",
+                "relationship": "CONTAINS",
+                "confidence": "VERIFIED",
+            }],
+            "warnings": [],
+            "summary": {
+                "presentation_policy_version": 1,
+                "presentation_policy": {},
+                "confidence": "VERIFIED",
+                "relationship_coverage": "COMPLETE",
+                "inventory_completeness": "COMPLETE",
+                "collection_issue_count": 0,
+            },
+        }
+
+        migrated = apply_topology_presentation_policy(stored_topology)
+
+        self.assertEqual(
+            [node["resource_id"] for node in migrated["nodes"]],
+            ["vpc-1"],
+        )
+        self.assertEqual(migrated["edges"], [])
+        self.assertEqual(
+            migrated["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            migrated["summary"]["presentation_policy_version"],
+            TOPOLOGY_PRESENTATION_POLICY_VERSION,
+        )
+        self.assertEqual(
+            apply_topology_presentation_policy(migrated),
+            migrated,
         )
 
     def test_stored_duplicate_auxiliary_identity_is_retained(self):

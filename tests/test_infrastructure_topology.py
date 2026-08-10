@@ -372,15 +372,21 @@ class InfrastructureTopologyIntegrationTests(unittest.TestCase):
             ["VPC", "SUBNET"],
         )
         self.assertNotIn("alarm-1", str(snapshot))
-        self.assertEqual(topology["summary"]["verified_edge_count"], 1)
-        self.assertEqual(topology["summary"]["unmapped_resource_count"], 0)
+        self.assertEqual(topology["summary"]["verified_edge_count"], 0)
+        self.assertEqual(topology["summary"]["unmapped_resource_count"], 1)
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
         self.assertEqual(
             snapshot["infrastructure_topology"]["summary"]["collected_at"],
             "2026-08-07T16:30:00+09:00",
         )
         restored = ReportResult.from_dict(snapshot)
         self.assertEqual(
-            restored.display_infrastructure_topology,
+            restored.to_dict()["infrastructure_topology"],
             snapshot["infrastructure_topology"],
         )
 

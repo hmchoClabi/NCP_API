@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Sequence
 
 from app.infrastructure_topology import (
     InfrastructureTopologyBuilder,
     TopologyDisplayOptions,
 )
+from app.renderers.topology_edge_router import OrthogonalEdgeRouter
 from app.renderers.topology_icons import TopologyIconLibrary
 from app.report_options import ReportOptions
 
@@ -52,10 +53,10 @@ class TopologyRenderer:
     # 보고서용 고정 크기를 작게 유지한다.
     TOPOLOGY_NODE_WIDTH = 184
     TOPOLOGY_NODE_HEIGHT = 126
-
     def __init__(self, html_renderer: Any) -> None:
         self._html_renderer = html_renderer
         self._icon_library = TopologyIconLibrary()
+        self._edge_router = OrthogonalEdgeRouter()
 
     @property
     def _topology_options_override(self) -> Dict[str, Any] | None:
@@ -378,6 +379,9 @@ class TopologyRenderer:
             )
 
         edge_markup = []
+        used_edge_segments: List[
+            tuple[tuple[float, float], tuple[float, float]]
+        ] = []
         for edge in visible_edges:
             if self._topology_edge_key(edge) in consumed_edges:
                 continue
@@ -385,10 +389,23 @@ class TopologyRenderer:
             target = boxes.get(str(edge.get("target_node_id")))
             if source is None or target is None:
                 continue
-            path, label_x, label_y = self._topology_edge_path(
-                source,
-                target,
+            path, label_x, label_y, route_points = (
+                self._topology_routed_edge_path(
+                    source_id=str(edge.get("source_node_id")),
+                    target_id=str(edge.get("target_node_id")),
+                    boxes=boxes,
+                    boundaries=layout["boundaries"],
+                    options=options,
+                    width=width,
+                    height=height,
+                    used_segments=used_edge_segments,
+                )
             )
+            # 안전한 통로가 없으면 근거 표에는 관계를 남기되, 다른 자원을
+            # 침범할 수 있는 추정선을 SVG에 그리지 않는다.
+            if not path:
+                continue
+            used_edge_segments.extend(self._edge_router.path_segments(route_points))
             label = self._topology_relation_label(edge.get("relationship"))
             title = (
                 f"{label} · source={edge.get('source') or '-'} · "
@@ -398,9 +415,13 @@ class TopologyRenderer:
                 '<g class="topology-edge">'
                 f'<path d="{path}" marker-end="url(#topology-arrow)">'
                 f"<title>{self._text(title)}</title></path>"
-                f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
-                f'class="topology-edge-label">{self._text(label)}</text>'
-                "</g>"
+                + (
+                    f'<text x="{label_x:.1f}" y="{label_y:.1f}" '
+                    f'class="topology-edge-label">{self._text(label)}</text>'
+                    if label_x is not None and label_y is not None
+                    else ""
+                )
+                + "</g>"
             )
 
         node_markup = []
@@ -754,8 +775,9 @@ class TopologyRenderer:
 
         node_width = self.TOPOLOGY_NODE_WIDTH
         node_height = self.TOPOLOGY_NODE_HEIGHT
-        horizontal_gap = 14
-        vertical_gap = 14
+        # 중첩 경계 사이의 빈 공간은 관계선 전용 통로로도 사용한다.
+        horizontal_gap = 24
+        vertical_gap = 24
         boundary_padding = 14
         outer_gap = 44
         margin = 24
@@ -1259,6 +1281,51 @@ class TopologyRenderer:
             str(edge.get("source_node_id") or ""),
             str(edge.get("target_node_id") or ""),
             str(edge.get("relationship") or "").upper(),
+        )
+
+    def _topology_routed_edge_path(
+        self,
+        *,
+        source_id: str,
+        target_id: str,
+        boxes: Mapping[str, tuple[float, float, float, float]],
+        boundaries: Sequence[Mapping[str, Any]],
+        options: TopologyDisplayOptions,
+        width: float,
+        height: float,
+        used_segments: Sequence[
+            tuple[tuple[float, float], tuple[float, float]]
+        ] = (),
+    ) -> tuple[str, float | None, float | None, List[tuple[float, float]]]:
+        """경계 표현 정보를 순수 직교 라우터의 입력으로 변환한다."""
+
+        routing_boundaries = []
+        for boundary in boundaries:
+            box = boundary.get("box")
+            if not isinstance(box, tuple) or len(box) != 4:
+                continue
+            category = str(boundary.get("category") or "").lower()
+            header_height = (
+                30
+                if category == "zone"
+                else self._topology_boundary_header_height(
+                    boundary.get("node") or {},
+                    options,
+                )
+            )
+            routing_boundaries.append({
+                "node_id": str(boundary.get("node_id") or ""),
+                "box": box,
+                "header_height": header_height,
+            })
+        return self._edge_router.route(
+            source_id=source_id,
+            target_id=target_id,
+            boxes=boxes,
+            boundaries=routing_boundaries,
+            width=width,
+            height=height,
+            used_segments=used_segments,
         )
 
     @staticmethod

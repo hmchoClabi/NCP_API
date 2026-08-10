@@ -101,6 +101,7 @@ class ReportResult:
         "embedded_network_interface_count",
         "embedded_public_ip_count",
         "excluded_category_node_count",
+        "excluded_empty_subnet_count",
         "excluded_nat_subnet_count",
         "excluded_orphan_reference_count",
         "retained_ambiguous_auxiliary_count",

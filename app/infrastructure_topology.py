@@ -29,7 +29,7 @@ SERVER_EMBEDDED_CATEGORIES = frozenset({
     "NETWORK_INTERFACE",
     "PUBLIC_IP",
 })
-TOPOLOGY_PRESENTATION_POLICY_VERSION = 1
+TOPOLOGY_PRESENTATION_POLICY_VERSION = 2
 TOPOLOGY_PRESENTATION_POLICY_MODE = "IDEMPOTENT_MIGRATION"
 PRESENTATION_RELATIONSHIP_GAP_FIELDS = frozenset({
     "retained_ambiguous_auxiliary_count",
@@ -538,6 +538,7 @@ class InfrastructureTopologyBuilder:
             "embedded_network_interface_count": 0,
             "embedded_public_ip_count": 0,
             "excluded_category_node_count": 0,
+            "excluded_empty_subnet_count": 0,
             "excluded_nat_subnet_count": 0,
             "excluded_orphan_reference_count": 0,
             "retained_ambiguous_auxiliary_count": 0,
@@ -567,7 +568,7 @@ class InfrastructureTopologyBuilder:
         )
         (
             nat_subnet_ids,
-            retained_unverified_nat_subnet_count,
+            retained_unverified_nat_subnet_ids,
         ) = self._collapsible_nat_subnet_ids(
             graph,
             edges_by_source,
@@ -580,9 +581,6 @@ class InfrastructureTopologyBuilder:
             edges_by_target,
         )
         metadata["excluded_nat_subnet_count"] = len(nat_subnet_ids)
-        metadata["retained_unverified_nat_subnet_count"] = (
-            retained_unverified_nat_subnet_count
-        )
         metadata["removed_edge_count"] += self._remove_nodes(
             graph,
             nat_subnet_ids,
@@ -618,6 +616,25 @@ class InfrastructureTopologyBuilder:
             orphan_ids,
         )
 
+        empty_subnet_ids = self._empty_subnet_ids(
+            graph,
+            edges_by_source,
+        )
+        metadata["excluded_empty_subnet_count"] = len(empty_subnet_ids)
+        retained_unverified_nat_subnet_ids.difference_update(
+            empty_subnet_ids
+        )
+        retained_unverified_nat_subnet_count = len(
+            retained_unverified_nat_subnet_ids
+        )
+        metadata["retained_unverified_nat_subnet_count"] = (
+            retained_unverified_nat_subnet_count
+        )
+        metadata["removed_edge_count"] += self._remove_nodes(
+            graph,
+            empty_subnet_ids,
+        )
+
         if ambiguous_count and not any(
             warning.get("code") == "AUXILIARY_RESOURCE_NOT_EMBEDDED"
             for warning in graph.warnings
@@ -647,15 +664,38 @@ class InfrastructureTopologyBuilder:
             })
         return metadata
 
+    def _empty_subnet_ids(
+        self,
+        graph: _TopologyGraph,
+        edges_by_source: Mapping[str, Sequence[Mapping[str, Any]]],
+    ) -> set[str]:
+        """명시적인 포함 관계에 표시 자원이 없는 subnet을 숨긴다.
+
+        이름, CIDR 또는 IP로 소속을 추론하지 않는다. 검증된 NAT 전용 subnet은
+        앞 단계에서 축약되고, 그 밖의 subnet도 표시 자식이 없으면 동일하게 숨긴다.
+        """
+        result: set[str] = set()
+        for subnet_id, subnet in graph.nodes.items():
+            if subnet.get("category") != "SUBNET":
+                continue
+            has_visible_child = any(
+                edge.get("relationship") == "CONTAINS"
+                and str(edge.get("target_node_id") or "") in graph.nodes
+                for edge in edges_by_source.get(subnet_id, ())
+            )
+            if not has_visible_child:
+                result.add(subnet_id)
+        return result
+
     def _collapsible_nat_subnet_ids(
         self,
         graph: _TopologyGraph,
         edges_by_source: Mapping[str, Sequence[Mapping[str, Any]]],
         edges_by_target: Mapping[str, Sequence[Mapping[str, Any]]],
-    ) -> tuple[set[str], int]:
+    ) -> tuple[set[str], set[str]]:
         """NAT 전용임을 명시적으로 확인한 subnet만 숨긴다."""
         result: set[str] = set()
-        retained_unverified_count = 0
+        retained_unverified_ids: set[str] = set()
         for subnet_id, subnet in graph.nodes.items():
             if subnet.get("category") != "SUBNET":
                 continue
@@ -711,8 +751,8 @@ class InfrastructureTopologyBuilder:
             # API 일부 실패나 충돌 상태에서 subnet만 지우면 실제 구성보다
             # 단정적인 그림이 되므로 원본 노드를 남기고 품질을 낮춘다.
             subnet["confidence"] = "PARTIAL"
-            retained_unverified_count += 1
-        return result, retained_unverified_count
+            retained_unverified_ids.add(subnet_id)
+        return result, retained_unverified_ids
 
     def _bridge_nat_subnet_relations(
         self,

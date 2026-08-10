@@ -1,14 +1,17 @@
 import copy
+import time
 import unittest
 
 from app.infrastructure_topology import TopologyDisplayOptions
 from app.renderers.html_renderer import HtmlReportRenderer
 from app.renderers.html_styles import HTML_REPORT_STYLES
+from app.renderers.topology_edge_router import OrthogonalEdgeRouter
 
 
 class TopologyRendererLayoutTests(unittest.TestCase):
     def setUp(self):
         self.renderer = HtmlReportRenderer()
+        self.edge_router = OrthogonalEdgeRouter()
         self.options = TopologyDisplayOptions()
 
     def test_nat_gateways_straddle_their_verified_vpc_boundaries(self):
@@ -270,6 +273,163 @@ class TopologyRendererLayoutTests(unittest.TestCase):
             for boundary in layout["boundaries"]
         ))
         self.assertNotIn("Zone KR-1", svg)
+
+    def test_relationship_edge_avoids_unrelated_subnets_and_resources(self):
+        vpc = self._node("VPC", "vpc-a", "production")
+        load_balancer = self._node("LOAD_BALANCER", "lb-a", "public-lb")
+        nodes = [vpc, load_balancer]
+        edges = [self._edge("VPC:vpc-a", "LOAD_BALANCER:lb-a")]
+        for index in range(3):
+            subnet = self._node(
+                "SUBNET",
+                f"subnet-{index}",
+                f"application-{index}",
+            )
+            subnet["zone"] = "KR-1"
+            server = self._node(
+                "SERVER",
+                f"server-{index}",
+                f"application-{index}",
+            )
+            nodes.extend((subnet, server))
+            edges.extend((
+                self._edge("VPC:vpc-a", f"SUBNET:subnet-{index}"),
+                self._edge(
+                    f"SUBNET:subnet-{index}",
+                    f"SERVER:server-{index}",
+                ),
+            ))
+        edges.append({
+            **self._edge("LOAD_BALANCER:lb-a", "SERVER:server-2"),
+            "relationship": "TARGETS",
+        })
+
+        layout, width, height = self.renderer._topology_layout(
+            nodes,
+            edges,
+            self.options,
+        )
+        helper = self.renderer._topology_helper()
+        path, _, _, points = helper._topology_routed_edge_path(
+            source_id="LOAD_BALANCER:lb-a",
+            target_id="SERVER:server-2",
+            boxes=layout["boxes"],
+            boundaries=layout["boundaries"],
+            options=self.options,
+            width=width,
+            height=height,
+        )
+
+        self.assertTrue(points, "장애물 회피 경로가 fallback 없이 계산돼야 합니다.")
+        self.assertIn(" H ", path)
+        self.assertIn(" V ", path)
+        forbidden_ids = (
+            "SUBNET:subnet-0",
+            "SUBNET:subnet-1",
+            "SERVER:server-0",
+            "SERVER:server-1",
+        )
+        for node_id in forbidden_ids:
+            obstacle = self.edge_router.inflate_box(
+                layout["boxes"][node_id],
+                self.edge_router.EDGE_CLEARANCE,
+            )
+            for start, end in self.edge_router.path_segments(points):
+                self.assertTrue(
+                    self.edge_router.segment_clear(start, end, [obstacle]),
+                    f"관계선이 무관한 {node_id} 영역을 침범했습니다.",
+                )
+
+    def test_routing_is_deterministic_and_reserves_compound_gutters(self):
+        nodes = [
+            self._node("VPC", "vpc-a", "production"),
+            self._node("SUBNET", "subnet-a", "application-a"),
+            self._node("SUBNET", "subnet-b", "application-b"),
+            self._node("SERVER", "server-a", "application-a"),
+            self._node("SERVER", "server-b", "application-b"),
+        ]
+        for node in nodes:
+            if node["category"] == "SUBNET":
+                node["zone"] = "KR-1"
+        edges = [
+            self._edge("VPC:vpc-a", "SUBNET:subnet-a"),
+            self._edge("VPC:vpc-a", "SUBNET:subnet-b"),
+            self._edge("SUBNET:subnet-a", "SERVER:server-a"),
+            self._edge("SUBNET:subnet-b", "SERVER:server-b"),
+            {
+                **self._edge("SERVER:server-a", "SERVER:server-b"),
+                "relationship": "TARGETS",
+            },
+        ]
+
+        first = self.renderer._topology_svg(nodes, edges, self.options)
+        second = self.renderer._topology_svg(
+            list(reversed(nodes)),
+            list(reversed(edges)),
+            self.options,
+        )
+        layout, _, _ = self.renderer._topology_layout(
+            nodes,
+            edges,
+            self.options,
+        )
+        subnet_a = layout["boxes"]["SUBNET:subnet-a"]
+        subnet_b = layout["boxes"]["SUBNET:subnet-b"]
+
+        self.assertEqual(first, second)
+        self.assertGreaterEqual(
+            subnet_b[0] - (subnet_a[0] + subnet_a[2]),
+            24,
+        )
+
+    def test_dense_inventory_edge_routing_stays_bounded(self):
+        boxes = {
+            "SERVER:source": (20.0, 680.0, 40.0, 40.0),
+            "SERVER:target": (4940.0, 680.0, 40.0, 40.0),
+        }
+        for index in range(78):
+            boxes[f"SERVER:blocker-{index}"] = (
+                150.0 + index * 58.0,
+                70.0 + index * 13.0,
+                34.0,
+                34.0,
+            )
+
+        started_at = time.perf_counter()
+        path, _, _, points = self.edge_router.route(
+            source_id="SERVER:source",
+            target_id="SERVER:target",
+            boxes=boxes,
+            boundaries=[],
+            width=5000.0,
+            height=1400.0,
+        )
+        elapsed = time.perf_counter() - started_at
+
+        self.assertTrue(path)
+        self.assertTrue(points)
+        self.assertLess(elapsed, 2.0)
+
+    def test_blocked_route_is_omitted_instead_of_using_unsafe_fallback(self):
+        boxes = {
+            "SERVER:source": (20.0, 90.0, 20.0, 20.0),
+            "SERVER:blocker": (80.0, -20.0, 40.0, 240.0),
+            "SERVER:target": (160.0, 90.0, 20.0, 20.0),
+        }
+
+        path, label_x, label_y, points = self.edge_router.route(
+            source_id="SERVER:source",
+            target_id="SERVER:target",
+            boxes=boxes,
+            boundaries=[],
+            width=200.0,
+            height=200.0,
+        )
+
+        self.assertEqual(path, "")
+        self.assertIsNone(label_x)
+        self.assertIsNone(label_y)
+        self.assertEqual(points, [])
 
     def test_small_svg_is_not_forced_to_fill_the_report_width(self):
         topology_rule = HTML_REPORT_STYLES.split(".topology-svg {", 1)[1].split(

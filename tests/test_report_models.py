@@ -147,8 +147,14 @@ class ReportResultSnapshotTests(unittest.TestCase):
             topology["summary"]["time_basis"],
             "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
         )
-        self.assertEqual(len(topology["nodes"]), 2)
-        self.assertEqual(len(topology["edges"]), 1)
+        self.assertEqual(len(topology["nodes"]), 1)
+        self.assertEqual(len(topology["edges"]), 0)
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
         self.assertEqual(
             topology["warnings"][0]["code"],
             "CURRENT_STATE_TOPOLOGY_FALLBACK",

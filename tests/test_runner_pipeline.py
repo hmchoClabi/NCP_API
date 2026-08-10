@@ -550,7 +550,13 @@ class RunnerPipelineTests(unittest.TestCase):
             topology["summary"]["snapshot_source"],
             "STORED_REPORT_SNAPSHOT",
         )
-        self.assertEqual(topology["summary"]["verified_edge_count"], 1)
+        self.assertEqual(topology["summary"]["verified_edge_count"], 0)
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
 
     def test_monthly_snapshot_window_covers_full_report_period(self):
         runner = self._runner_without_factory_init()
@@ -1067,7 +1073,13 @@ class RunnerPipelineTests(unittest.TestCase):
             report_options=ReportOptions(),
         )
 
-        self.assertEqual(topology["summary"]["verified_edge_count"], 1)
+        self.assertEqual(topology["summary"]["verified_edge_count"], 0)
+        self.assertEqual(
+            topology["summary"]["presentation_policy"][
+                "excluded_empty_subnet_count"
+            ],
+            1,
+        )
         self.assertEqual(
             topology["summary"]["snapshot_source"],
             "STORED_REPORT_SNAPSHOT",
