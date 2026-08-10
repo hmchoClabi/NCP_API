@@ -177,6 +177,9 @@ def test_sourcebuild_runner_uses_dedicated_credentials_and_exact_build_id():
     assert 'RequestPath "/api/v1/project/$Id/history"' in script
     assert "Find-SourceBuildHistoryEntry" in script
     assert "Resolve-SourceBuildTag" in script
+    assert 'Where-Object { [string]$_.status -eq "success" }' in script
+    assert "Sort-Object -Property begin, buildId" in script
+    assert "$total - $index" not in script
     assert "failedPhase" in script
     assert "SourceBuild timed out" in script
     assert "SupportsShouldProcess = $true" in script

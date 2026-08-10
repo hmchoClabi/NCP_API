@@ -198,18 +198,19 @@ function Resolve-SourceBuildTag {
         throw "SourceBuild image tag template must contain '#': $TagTemplate"
     }
 
-    $entries = @($History.history)
-    $total = [int]$History.total
-    for ($index = 0; $index -lt $entries.Count; $index++) {
-        if ([string]$entries[$index].buildId -ne $BuildId) {
+    # 실패·취소 이력은 레지스트리의 # 순번을 증가시키지 않는다. 따라서 전체
+    # 이력 수가 아니라 성공한 빌드를 시간순으로 정렬해 실제 이미지 태그를 계산한다.
+    $successfulEntries = @(
+        @($History.history) |
+            Where-Object { [string]$_.status -eq "success" } |
+            Sort-Object -Property begin, buildId
+    )
+    for ($index = 0; $index -lt $successfulEntries.Count; $index++) {
+        if ([string]$successfulEntries[$index].buildId -ne $BuildId) {
             continue
         }
 
-        # SourceBuild 이력은 최신순이며 #은 프로젝트 빌드 순번으로 치환된다.
-        $buildNumber = $total - $index
-        if ($buildNumber -lt 1) {
-            throw "Unable to derive a valid SourceBuild build number."
-        }
+        $buildNumber = $index + 1
         return [Text.RegularExpressions.Regex]::Replace(
             $TagTemplate,
             '#+',
@@ -338,7 +339,7 @@ try {
         )
     }
 
-    # 성공 응답 직후 이력을 다시 읽어 최종 total과 위치에서 build-N을 계산한다.
+    # 성공 응답 직후 이력을 다시 읽어 확정된 성공 빌드 순번으로 build-N을 계산한다.
     $history = Get-SourceBuildHistory `
         -Id $ProjectId `
         -Credentials $credentials
