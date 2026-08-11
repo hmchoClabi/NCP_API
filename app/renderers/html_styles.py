@@ -114,156 +114,6 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 }
 .infra-summary-card span { display: block; color: var(--muted); font-size: .76rem; }
 .infra-summary-card strong { display: block; margin-top: 3px; font-size: 1.2rem; }
-.topology-accuracy {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px 14px;
-  margin-bottom: 12px;
-  padding: 11px 13px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  font-size: .76rem;
-}
-.topology-accuracy strong { color: var(--ink); }
-.topology-accuracy.verified { border-color: #86efac; background: #f0fdf4; }
-.topology-accuracy.warning { border-color: #fdba74; background: #fff7ed; }
-.topology-warnings {
-  margin: 0 0 12px;
-  padding: 10px 14px 10px 32px;
-  color: #9a3412;
-  background: #fff7ed;
-  border-radius: 10px;
-  font-size: .76rem;
-}
-.topology-warnings small { color: #7c2d12; }
-.topology-canvas {
-  overflow-x: auto;
-  padding: 14px;
-  background: #f3f6f9;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.topology-svg {
-  display: block;
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  height: auto;
-  margin: 0 auto;
-}
-.topology-boundary > rect {
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-.topology-boundary--vpc > rect {
-  fill: #ffffff;
-  stroke: #0ea5e9;
-  stroke-dasharray: 6 4;
-}
-.topology-boundary--zone > rect {
-  fill: #f0f9ff;
-  fill-opacity: .78;
-  stroke: #38bdf8;
-  stroke-width: 1.25;
-}
-.topology-boundary--subnet > rect {
-  fill: #ffffff;
-  fill-opacity: .42;
-  stroke: #94a3b8;
-  stroke-width: 1.25;
-  stroke-dasharray: 5 4;
-}
-.topology-boundary--supporting > rect {
-  fill: #fff7ed;
-  stroke: #f59e0b;
-  stroke-dasharray: 5 4;
-}
-.topology-vpc-title-tab { fill: #1e293b; }
-.topology-vpc-title {
-  fill: #ffffff;
-  font-size: 12px;
-  font-weight: 800;
-}
-.topology-zone-title-tab,
-.topology-subnet-title-tab { fill: #3f3f46; }
-.topology-zone-title,
-.topology-subnet-title {
-  fill: #ffffff;
-  font-size: 11px;
-  font-weight: 800;
-}
-.topology-boundary-detail { fill: #475569; font-size: 9.5px; }
-.topology-boundary-icon,
-.topology-node-icon {
-  opacity: .94;
-  pointer-events: none;
-}
-.topology-node rect {
-  fill: transparent;
-  stroke: none;
-  filter: none;
-}
-.topology-node--supporting rect {
-  fill: #fff7ed;
-  stroke: #f59e0b;
-  stroke-width: 1.1;
-  stroke-dasharray: 5 4;
-}
-.topology-node--vpc-boundary > rect:first-child {
-  fill: #ffffff;
-  fill-opacity: .94;
-}
-.topology-node-title { fill: #0f172a; font-size: 10.5px; font-weight: 800; }
-.topology-node-name { fill: #334155; font-size: 10px; font-weight: 650; }
-.topology-node-detail { fill: #475569; font-size: 9px; }
-.topology-node-badge-bg {
-  fill: transparent !important;
-  stroke: none !important;
-  filter: none !important;
-}
-.topology-node-badge {
-  fill: #475569;
-  font-size: 8px;
-  font-weight: 700;
-  text-anchor: middle;
-}
-.topology-edge path {
-  fill: none;
-  stroke: #64748b;
-  stroke-width: 1.35;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.topology-edge-label {
-  fill: #334155;
-  paint-order: stroke;
-  stroke: #f3f6f9;
-  stroke-width: 4px;
-  stroke-linejoin: round;
-  font-size: 8.5px;
-  text-anchor: middle;
-}
-#topology-arrow path { fill: #64748b; }
-.topology-subheading { margin: 18px 0 3px; font-size: .95rem; }
-.topology-note { margin: 0 0 9px; color: var(--muted); font-size: .76rem; }
-.topology-unmapped-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-}
-.topology-unmapped-card {
-  display: grid;
-  gap: 3px;
-  padding: 11px 12px;
-  background: #fff7ed;
-  border: 1px dashed #fdba74;
-  border-radius: 9px;
-  font-size: .75rem;
-}
-.topology-unmapped-card span { color: #475569; }
-.topology-unmapped-card small { color: #9a3412; overflow-wrap: anywhere; }
 .report-section {
   margin-top: 20px;
   padding: 26px;
@@ -298,6 +148,24 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
   font-size: .82rem;
   font-weight: 700;
 }
+.network-snapshot-basis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.network-snapshot-basis div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.network-snapshot-basis span { color: var(--muted); font-size: .76rem; }
+.network-snapshot-basis strong { font-size: .86rem; }
+.network-config-group + .network-config-group { margin-top: 22px; }
+.network-config-group h3 { margin: 0 0 9px; font-size: .98rem; }
 .section-heading {
   display: flex;
   align-items: flex-start;
@@ -423,14 +291,13 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .report-header { flex-direction: column; padding: 28px; }
   .report-identity { width: 100%; }
   .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
-  .summary-grid, .billing-facts, .infra-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .topology-unmapped-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid, .billing-facts, .infra-summary-grid, .network-snapshot-basis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts, .infra-summary-grid, .topology-unmapped-grid, .historical-basis-grid { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts, .infra-summary-grid, .historical-basis-grid, .network-snapshot-basis { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
   .report-identity { align-items: flex-start; flex-direction: column; }
   .customer-logo-plate { width: min(100%, 220px); height: 100px; }
@@ -444,8 +311,6 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .summary-grid, .report-section { break-inside: avoid; }
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
-  .topology-canvas { overflow: visible; }
-  .topology-svg { width: 100%; min-width: 0; max-width: 100%; }
   .report-section { padding: 18px; }
   table { font-size: 8pt; }
   tr { break-inside: avoid; }

@@ -183,7 +183,7 @@ class InfrastructureCollector:
         resources: List[Dict[str, Any]],
         selected_categories: Optional[frozenset[str]],
     ) -> None:
-        """VPC와 명시적 네트워크 관계 자원을 기존 호출 순서대로 수집한다."""
+        """VPC와 선택된 네트워크 구성 자원을 기존 호출 순서대로 수집한다."""
 
         # Subnet API만 공개 인수가 page이고 실제 요청 키는 pageNo로 변환된다.
         # Public IP 계열은 기존 공급자 페이지 기준에 맞춰 0부터 시작한다.
@@ -214,6 +214,14 @@ class InfrastructureCollector:
                 page_parameter="page",
                 request_kwargs=self._region_kwargs(),
             )
+            self._extend_normalized(
+                resources,
+                target_type="subnet",
+                api="get_subnet_list",
+                normalize=lambda: self.normalizer.normalize_subnets(subnets),
+            )
+
+        if self._category_enabled(selected_categories, "ROUTE_TABLE"):
             route_tables = self._collect_paged_service(
                 api_key="vpc",
                 method_name="get_route_table_list",
@@ -221,17 +229,104 @@ class InfrastructureCollector:
                 list_key="routeTableList",
                 identity_fields=("routeTableNo",),
                 target_type="route_table",
-                optional=True,
                 request_kwargs=self._region_kwargs(),
             )
-            route_evidence = self._collect_route_evidence(route_tables)
+            subnets_by_table = self._collect_child_lists(
+                route_tables,
+                api_key="vpc",
+                method_name="get_route_table_subnet_list",
+                parent_id_field="routeTableNo",
+                parent_parameter="route_table_no",
+                response_key="getRouteTableSubnetListResponse",
+                list_key="subnetList",
+                target_type="route_table_subnet",
+            )
+            routes_by_table = self._collect_child_lists(
+                route_tables,
+                api_key="vpc",
+                method_name="get_route_list",
+                parent_id_field="routeTableNo",
+                parent_parameter="route_table_no",
+                response_key="getRouteListResponse",
+                list_key="routeList",
+                target_type="route_table_route",
+                parent_request_kwargs=lambda item: {
+                    "vpc_no": item.get("vpcNo")
+                },
+                required_parent_fields=("vpcNo",),
+            )
             self._extend_normalized(
                 resources,
-                target_type="subnet",
-                api="get_subnet_list",
-                normalize=lambda: self.normalizer.normalize_subnets(
-                    subnets,
-                    route_evidence,
+                target_type="route_table",
+                api="get_route_table_list",
+                normalize=lambda: self.normalizer.normalize_route_tables(
+                    route_tables,
+                    subnets_by_table,
+                    routes_by_table,
+                ),
+            )
+
+        if self._category_enabled(
+            selected_categories,
+            "ACCESS_CONTROL_GROUP",
+        ):
+            access_control_groups = self._collect_paged_service(
+                api_key="vserver",
+                method_name="get_access_control_group_list",
+                response_key="getAccessControlGroupListResponse",
+                list_key="accessControlGroupList",
+                identity_fields=("accessControlGroupNo",),
+                target_type="access_control_group",
+                page_start=0,
+                request_kwargs=self._region_kwargs(),
+            )
+            rules_by_group = self._collect_child_lists(
+                access_control_groups,
+                api_key="vserver",
+                method_name="get_access_control_group_rule_list",
+                parent_id_field="accessControlGroupNo",
+                parent_parameter="access_control_group_no",
+                response_key="getAccessControlGroupRuleListResponse",
+                list_key="accessControlGroupRuleList",
+                target_type="access_control_group_rule",
+            )
+            self._extend_normalized(
+                resources,
+                target_type="access_control_group",
+                api="get_access_control_group_list",
+                normalize=lambda: self.normalizer.normalize_access_control_groups(
+                    access_control_groups,
+                    rules_by_group,
+                ),
+            )
+
+        if self._category_enabled(selected_categories, "NETWORK_ACL"):
+            network_acls = self._collect_paged_service(
+                api_key="vpc",
+                method_name="get_network_acl_list",
+                response_key="getNetworkAclListResponse",
+                list_key="networkAclList",
+                identity_fields=("networkAclNo",),
+                target_type="network_acl",
+                request_kwargs=self._region_kwargs(),
+            )
+            rules_by_acl = self._collect_child_lists(
+                network_acls,
+                api_key="vpc",
+                method_name="get_network_acl_rule_list",
+                parent_id_field="networkAclNo",
+                parent_parameter="network_acl_no",
+                response_key="getNetworkAclRuleListResponse",
+                list_key="networkAclRuleList",
+                target_type="network_acl_rule",
+            )
+            self._extend_normalized(
+                resources,
+                target_type="network_acl",
+                api="get_network_acl_list",
+                normalize=lambda: self.normalizer.normalize_network_acls(
+                    network_acls,
+                    rules_by_acl,
                 ),
             )
 
@@ -298,7 +393,7 @@ class InfrastructureCollector:
         resources: List[Dict[str, Any]],
         selected_categories: Optional[frozenset[str]],
     ) -> None:
-        """이미지·인증서·레지스트리 등 보조 플랫폼 자원을 수집한다."""
+        """이미지·인증서 등 보조 플랫폼 자원을 수집한다."""
 
         # 서비스마다 REST 페이지 표식(last/next)과 NCP pageNo 기준이 다르다.
         if self._category_enabled(
@@ -925,73 +1020,83 @@ class InfrastructureCollector:
                 )
         return result
 
-    def _collect_route_evidence(
+    def _collect_child_lists(
         self,
-        route_tables: Sequence[Mapping[str, Any]],
-    ) -> Dict[str, Dict[str, Any]]:
-        result: Dict[str, Dict[str, Any]] = {}
-        if not self._dict_items(route_tables):
-            return result
+        parents: Sequence[Mapping[str, Any]],
+        *,
+        api_key: str,
+        method_name: str,
+        parent_id_field: str,
+        parent_parameter: str,
+        response_key: str,
+        list_key: str,
+        target_type: str,
+        parent_request_kwargs: Optional[
+            Callable[[Mapping[str, Any]], Mapping[str, Any]]
+        ] = None,
+        required_parent_fields: Sequence[str] = (),
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """각 상위 자원에 연결된 규칙·연관 목록을 안전하게 수집한다."""
+
+        normalized_parents = self._dict_items(parents)
+        if not normalized_parents:
+            return {}
         try:
-            api = self.api_factory.get("vpc")
-            subnet_method = getattr(api, "get_route_table_subnet_list")
-            route_method = getattr(api, "get_route_list")
+            api = self.api_factory.get(api_key)
+            method = getattr(api, method_name)
         except Exception as exc:
             self._record_issue(
                 stage="initialization",
-                api="get_route_table_list",
-                target_type="route_table",
+                api=method_name,
+                target_type=target_type,
                 exc=exc,
             )
-            return result
+            return {}
 
-        for route_table in self._dict_items(route_tables):
-            route_table_no = route_table.get("routeTableNo")
-            vpc_no = route_table.get("vpcNo")
-            if not route_table_no or not vpc_no:
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for parent in normalized_parents:
+            parent_id = parent.get(parent_id_field)
+            if parent_id is None or not str(parent_id).strip():
                 continue
+            if any(
+                parent.get(field) is None
+                or not str(parent.get(field)).strip()
+                for field in required_parent_fields
+            ):
+                self._record_warning(
+                    stage="collection",
+                    api=method_name,
+                    target_type=target_type,
+                    message=(
+                        "상위 자원의 필수 식별 정보가 없어 상세 조회를 "
+                        "생략했습니다."
+                    ),
+                )
+                continue
+
             try:
-                subnet_response = subnet_method(
-                    route_table_no=str(route_table_no),
-                    **self._region_kwargs(),
+                request_kwargs: Dict[str, Any] = dict(self._region_kwargs())
+                request_kwargs[parent_parameter] = str(parent_id)
+                if parent_request_kwargs is not None:
+                    request_kwargs.update(
+                        dict(parent_request_kwargs(parent))
+                    )
+                response = method(**request_kwargs)
+                items, _ = self._extract_wrapped_items(
+                    response,
+                    response_key=response_key,
+                    list_key=list_key,
+                    api_name=method_name,
                 )
-                subnets, _ = self._extract_wrapped_items(
-                    subnet_response,
-                    response_key="getRouteTableSubnetListResponse",
-                    list_key="subnetList",
-                    api_name="get_route_table_subnet_list",
-                )
-                route_response = route_method(
-                    route_table_no=str(route_table_no),
-                    vpc_no=str(vpc_no),
-                    **self._region_kwargs(),
-                )
-                routes, _ = self._extract_wrapped_items(
-                    route_response,
-                    response_key="getRouteListResponse",
-                    list_key="routeList",
-                    api_name="get_route_list",
-                )
+                result[str(parent_id)] = items
             except Exception as exc:
                 self._record_issue(
                     stage="collection",
-                    api="get_route_list",
-                    target_type="route_table",
+                    api=method_name,
+                    target_type=target_type,
                     exc=exc,
                     optional=True,
                 )
-                continue
-
-            for subnet in subnets:
-                subnet_no = subnet.get("subnetNo")
-                if subnet_no is None or not str(subnet_no).strip():
-                    continue
-                evidence = result.setdefault(
-                    str(subnet_no),
-                    {"route_table_nos": [], "routes": []},
-                )
-                evidence["route_table_nos"].append(str(route_table_no))
-                evidence["routes"].extend(routes)
         return result
 
     def _collect_resource_manager(self) -> List[Dict[str, Any]]:

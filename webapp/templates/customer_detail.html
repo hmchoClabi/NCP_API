@@ -126,18 +126,6 @@
       </div>
     </fieldset>
 
-    <fieldset>
-      <legend>클라우드 구성도 표시</legend>
-      <div class="option-grid">
-        {% for option in diagram_boolean_options %}
-        <label><input type="checkbox" name="diagram_{{ option }}" value="true"{% if report_options.diagram[option] %} checked{% endif %}> {{ diagram_option_labels[option] }}</label>
-        {% endfor %}
-        <label>구성도 최대 자원 수<input type="number" name="diagram_max_nodes" value="{{ report_options.diagram.max_nodes }}" min="10" max="200" required></label>
-      </div>
-      <p class="settings-note">API가 명시적으로 확인한 연결만 선으로 표시합니다. 관계를 확인하지 못한 자원은 선택 시 별도 영역에 배치되며 임의로 연결하지 않습니다.</p>
-      <p class="settings-warning">자원 ID, 사설·공인 IP와 CIDR은 고객 내부 정보일 수 있습니다. 선택 시 보고서 열람 권한과 외부 전달 범위를 함께 확인하세요. Access Key, Secret Key 및 기타 인증정보는 어떤 설정에서도 수집하거나 출력하지 않습니다.</p>
-    </fieldset>
-
     <button class="primary" type="submit">보고서 출력 설정 저장</button>
   </form>
 </section>

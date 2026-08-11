@@ -8,8 +8,6 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, ur
 
 from app.report_branding import MAX_CUSTOMER_LOGO_BYTES, validate_customer_logo
 from app.report_options import (
-    DIAGRAM_BOOLEAN_OPTIONS,
-    DIAGRAM_OPTION_LABELS,
     MONITORING_CATEGORY_OPTIONS,
     REPORT_SECTION_LABELS,
     REPORT_SECTION_OPTIONS,
@@ -205,19 +203,12 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             resource_category_options=RESOURCE_CATEGORY_OPTIONS,
             resource_category_labels=RESOURCE_CATEGORY_LABELS,
             monitoring_category_options=MONITORING_CATEGORY_OPTIONS,
-            diagram_boolean_options=DIAGRAM_BOOLEAN_OPTIONS,
-            diagram_option_labels=DIAGRAM_OPTION_LABELS,
         )
 
     @app.post("/msp/customer/<tenant_id>/report-settings")
     @_msp_admin_required
     def update_customer_report_settings(tenant_id: str):
         try:
-            diagram = {
-                key: request.form.get(f"diagram_{key}") == "true"
-                for key in DIAGRAM_BOOLEAN_OPTIONS
-            }
-            diagram["max_nodes"] = request.form.get("diagram_max_nodes", "120")
             repository.update_tenant_report_settings(
                 tenant_id,
                 {
@@ -228,7 +219,6 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                     "monitoring_categories": request.form.getlist(
                         "monitoring_categories"
                     ),
-                    "diagram": diagram,
                 },
                 str(g.user["id"]),
             )

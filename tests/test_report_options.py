@@ -3,7 +3,6 @@ import unittest
 
 from app.customer import CustomerProfile
 from app.report_options import (
-    MAX_DIAGRAM_MAX_NODES,
     MONITORING_CATEGORY_OPTIONS,
     REPORT_SECTION_OPTIONS,
     RESOURCE_CATEGORY_OPTIONS,
@@ -25,53 +24,39 @@ class ReportOptionsTests(unittest.TestCase):
             options["monitoring_categories"],
             list(MONITORING_CATEGORY_OPTIONS),
         )
-        self.assertTrue(options["diagram"]["show_resource_id"])
-        self.assertTrue(options["diagram"]["show_private_ip"])
-        self.assertTrue(options["diagram"]["show_public_ip"])
 
     def test_unknown_values_and_keys_are_discarded(self):
         options = normalize_report_options({
             "sections": ["billing", "run_arbitrary_collector"],
             "resource_categories": ["SERVER", "IAM_USER", "SECRET_KEY"],
             "monitoring_categories": ["SERVER", "UNKNOWN"],
-            "diagram": {
-                "show_resource_id": False,
-                "show_unverified_relationships": True,
-                "template": "{{ secret_key }}",
-            },
             "command": "collect-everything",
         })
 
         self.assertEqual(options["sections"], ["billing"])
         self.assertEqual(options["resource_categories"], ["SERVER"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
-        self.assertFalse(options["diagram"]["show_resource_id"])
-        self.assertNotIn("show_unverified_relationships", options["diagram"])
-        self.assertNotIn("template", options["diagram"])
         self.assertNotIn("command", options)
 
-    def test_diagram_max_nodes_is_bounded_and_boolean_is_strict(self):
+    def test_legacy_diagram_section_is_upgraded_to_inventory(self):
         options = normalize_report_options({
-            "diagram": {
-                "enabled": "true",
-                "show_public_ip": False,
-                "max_nodes": 9999,
-            }
+            "sections": ["billing", "infrastructure_diagram"],
+            "resource_categories": ["SERVER"],
+            "monitoring_categories": [],
         })
 
-        self.assertTrue(options["diagram"]["enabled"])
-        self.assertFalse(options["diagram"]["show_public_ip"])
         self.assertEqual(
-            options["diagram"]["max_nodes"], MAX_DIAGRAM_MAX_NODES
+            options["sections"],
+            ["billing", "infrastructure_inventory"],
         )
+        self.assertNotIn("infrastructure_diagram", options["sections"])
 
     def test_explicit_settings_require_a_section(self):
-        with self.assertRaisesRegex(ValueError, "섹션"):
+        with self.assertRaises(ValueError):
             validate_report_options({
                 "sections": [],
                 "resource_categories": [],
                 "monitoring_categories": [],
-                "diagram": {},
             })
 
     def test_helper_exposes_collector_decisions(self):
@@ -79,7 +64,6 @@ class ReportOptionsTests(unittest.TestCase):
             "sections": ["billing", "monitoring"],
             "resource_categories": ["SERVER", "VPC"],
             "monitoring_categories": ["SERVER"],
-            "diagram": {"enabled": False, "max_nodes": 50},
         })
 
         self.assertTrue(options.section_enabled("billing"))
@@ -88,7 +72,6 @@ class ReportOptionsTests(unittest.TestCase):
         self.assertFalse(options.resource_enabled("CLOUD_DB"))
         self.assertTrue(options.monitoring_enabled("server"))
         self.assertFalse(options.monitoring_enabled("LOAD_BALANCER"))
-        self.assertFalse(options.diagram_option("enabled"))
 
     def test_customer_snapshot_contains_normalized_options_without_credentials(self):
         customer = CustomerProfile(
@@ -98,7 +81,6 @@ class ReportOptionsTests(unittest.TestCase):
                 "sections": ["billing"],
                 "resource_categories": ["SERVER"],
                 "monitoring_categories": [],
-                "diagram": {"show_resource_id": False},
             },
         )
 

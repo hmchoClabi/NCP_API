@@ -8,6 +8,10 @@ from zoneinfo import ZoneInfo
 
 from app.customer import CustomerProfile
 from app.report_options import ReportOptions
+from app.report_pipeline import (
+    ResourceCollectionResult,
+    build_collection_plan,
+)
 from app.runner import ReportRunner
 
 
@@ -222,6 +226,25 @@ class SnapshotRepository:
         return "report-run-id"
 
 
+class NetworkSnapshotRepository:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+        self.requests = []
+
+    def load_period_network_configuration_snapshot(
+        self,
+        period,
+        customer,
+        reference_at=None,
+    ):
+        self.requests.append({
+            "period": period,
+            "customer": customer,
+            "reference_at": reference_at,
+        })
+        return self.snapshot
+
+
 class EmptyInfrastructureMetricCollector:
     def __init__(self, api_factory):
         self.last_errors = []
@@ -307,11 +330,81 @@ class CapturingBillingNormalizer:
 
 
 class RunnerPipelineTests(unittest.TestCase):
+    NETWORK_CONFIGURATION_CATEGORIES = (
+        "ROUTE_TABLE",
+        "ACCESS_CONTROL_GROUP",
+        "NETWORK_ACL",
+    )
+
     def _runner_without_factory_init(self, output_dir="."):
         runner = ReportRunner.__new__(ReportRunner)
         runner.api_factory = object()
         runner.output_dir = output_dir
         return runner
+
+    def _network_collection_plan(self):
+        options = ReportOptions({
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": list(
+                self.NETWORK_CONFIGURATION_CATEGORIES
+            ),
+            "monitoring_categories": [],
+        })
+        return build_collection_plan(options)
+
+    @staticmethod
+    def _network_configuration_records(prefix):
+        return [
+            {
+                "category": "ROUTE_TABLE",
+                "category_label": "Route Table",
+                "resource_id": f"{prefix}-route-table",
+                "resource_name": f"{prefix}-routes",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "route_count": 1,
+                    "routes": [{
+                        "destination_cidr": "0.0.0.0/0",
+                        "target_type": "NATGW",
+                        "target_no": "nat-1",
+                    }],
+                },
+            },
+            {
+                "category": "ACCESS_CONTROL_GROUP",
+                "category_label": "ACG",
+                "resource_id": f"{prefix}-acg",
+                "resource_name": f"{prefix}-web-acg",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_count": 1,
+                    "rules": [{
+                        "direction": "INBND",
+                        "protocol": "TCP",
+                        "source_ip_block": "10.0.0.0/8",
+                        "port_range": "443",
+                    }],
+                },
+            },
+            {
+                "category": "NETWORK_ACL",
+                "category_label": "Network ACL",
+                "resource_id": f"{prefix}-network-acl",
+                "resource_name": f"{prefix}-private-acl",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_count": 1,
+                    "rules": [{
+                        "priority": 10,
+                        "direction": "INBND",
+                        "protocol": "TCP",
+                        "source_ip_block": "10.0.0.0/8",
+                        "port_range": "443",
+                        "action": "ALLOW",
+                    }],
+                },
+            },
+        ]
 
     def test_runner_accepts_report_repository(self):
         repository = object()
@@ -507,57 +600,6 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertEqual(context["confirmed_demand_month"], "202607")
         self.assertFalse(context["target_month_closed"])
 
-    def test_topology_uses_only_snapshot_observed_inside_report_period(self):
-        runner = self._runner_without_factory_init()
-        period = runner.build_period(
-            start=date(2026, 6, 1),
-            end=date(2026, 6, 30),
-            period_type="month",
-        )
-        infrastructure = [
-            {
-                "category": "VPC",
-                "resource_id": "vpc-1",
-                "resource_name": "production-vpc",
-                "details": {"vpc_no": "vpc-1"},
-            },
-            {
-                "category": "SUBNET",
-                "resource_id": "subnet-1",
-                "resource_name": "application-subnet",
-                "details": {"subnet_no": "subnet-1", "vpc_no": "vpc-1"},
-            },
-        ]
-
-        topology = runner._build_period_topology(
-            period=period,
-            infrastructure=infrastructure,
-            collection_metadata={
-                "infrastructure": {
-                    "completed_at": "2026-06-30T23:50:00+09:00",
-                    "reference_at": "2026-07-15T12:00:00+09:00",
-                    "source": "STORED_REPORT_SNAPSHOT",
-                }
-            },
-            report_options=ReportOptions(),
-        )
-
-        self.assertEqual(
-            topology["summary"]["time_basis"],
-            "REPORT_PERIOD",
-        )
-        self.assertEqual(
-            topology["summary"]["snapshot_source"],
-            "STORED_REPORT_SNAPSHOT",
-        )
-        self.assertEqual(topology["summary"]["verified_edge_count"], 0)
-        self.assertEqual(
-            topology["summary"]["presentation_policy"][
-                "excluded_empty_subnet_count"
-            ],
-            1,
-        )
-
     def test_monthly_snapshot_window_covers_full_report_period(self):
         runner = self._runner_without_factory_init()
         period = runner.build_period(
@@ -580,38 +622,171 @@ class RunnerPipelineTests(unittest.TestCase):
             "2026-08-01T00:00:00+09:00",
         )
 
-    def test_topology_accepts_snapshot_from_earlier_report_period_date(self):
+    def test_past_network_config_falls_back_to_generation_backup(self):
+        repository = NetworkSnapshotRepository(None)
         runner = self._runner_without_factory_init()
+        runner.report_repository = repository
+        runner._today_kst = lambda: date(2026, 8, 10)
         period = runner.build_period(
             start=date(2026, 7, 1),
             end=date(2026, 7, 31),
             period_type="month",
         )
-
-        topology = runner._build_period_topology(
-            period=period,
-            infrastructure=[{
-                "category": "VPC",
-                "resource_id": "stale-vpc",
-                "resource_name": "must-not-appear",
-                "details": {"vpc_no": "stale-vpc"},
-            }],
+        current_configuration = self._network_configuration_records(
+            "current"
+        )
+        resource_result = ResourceCollectionResult(
+            infrastructure=current_configuration,
             collection_metadata={
                 "infrastructure": {
-                    "completed_at": "2026-07-01T12:00:00+09:00",
-                    "reference_at": "2026-07-31T23:59:59.999999+09:00",
-                    "source": "STORED_REPORT_SNAPSHOT",
+                    "source": "LIVE_API_COLLECTION",
+                    "collected_categories": list(
+                        self.NETWORK_CONFIGURATION_CATEGORIES
+                    ),
+                    "completed_at": "2026-08-10T09:30:00+09:00",
                 }
             },
-            report_options=ReportOptions(),
         )
 
-        self.assertEqual(len(topology["nodes"]), 1)
-        self.assertNotEqual(topology["summary"]["confidence"], "UNAVAILABLE")
-        self.assertEqual(
-            topology["summary"]["eligible_start"],
-            "2026-07-01T00:00:00+09:00",
+        result = runner._resolve_network_configuration(
+            period=period,
+            collection_plan=self._network_collection_plan(),
+            customer_snapshot={"id": "customer-1"},
+            resource_result=resource_result,
         )
+
+        self.assertEqual(
+            result.metadata["time_basis"],
+            "REPORT_GENERATION_TIME_NOT_REPORT_PERIOD",
+        )
+        self.assertEqual(
+            result.metadata["source"],
+            "REPORT_GENERATION_SNAPSHOT",
+        )
+        self.assertFalse(result.metadata["is_report_period_snapshot"])
+        self.assertEqual(
+            result.metadata["captured_at"],
+            "2026-08-10T09:30:00+09:00",
+        )
+        self.assertEqual(
+            result.metadata["backup_captured_at"],
+            "2026-08-10T09:30:00+09:00",
+        )
+        self.assertEqual(
+            {item["resource_name"] for item in result.display_configuration},
+            {
+                "current-routes",
+                "current-web-acg",
+                "current-private-acl",
+            },
+        )
+        self.assertEqual(
+            result.generation_snapshot["source"],
+            "REPORT_GENERATION",
+        )
+        self.assertEqual(
+            result.generation_snapshot["captured_at"],
+            "2026-08-10T09:30:00+09:00",
+        )
+        self.assertFalse(result.generation_snapshot["reused"])
+        self.assertTrue(any(
+            warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
+            for warning in result.warnings
+        ))
+        self.assertEqual(len(repository.requests), 1)
+
+    def test_period_and_generation_network_backups_stay_separate(self):
+        historical_configuration = self._network_configuration_records(
+            "historical"
+        )
+        repository = NetworkSnapshotRepository({
+            "captured_at": "2026-07-15T10:00:00+09:00",
+            "selected_categories": list(
+                self.NETWORK_CONFIGURATION_CATEGORIES
+            ),
+            "configuration": historical_configuration,
+            "_snapshot_reference": {
+                "report_run_id": "historical-run-1",
+            },
+        })
+        runner = self._runner_without_factory_init()
+        runner.report_repository = repository
+        runner._today_kst = lambda: date(2026, 8, 10)
+        period = runner.build_period(
+            start=date(2026, 7, 1),
+            end=date(2026, 7, 31),
+            period_type="month",
+        )
+        current_configuration = self._network_configuration_records(
+            "current"
+        )
+        resource_result = ResourceCollectionResult(
+            infrastructure=current_configuration,
+            collection_metadata={
+                "infrastructure": {
+                    "source": "LIVE_API_COLLECTION",
+                    "collected_categories": list(
+                        self.NETWORK_CONFIGURATION_CATEGORIES
+                    ),
+                    "completed_at": "2026-08-10T09:30:00+09:00",
+                }
+            },
+        )
+
+        result = runner._resolve_network_configuration(
+            period=period,
+            collection_plan=self._network_collection_plan(),
+            customer_snapshot={"id": "customer-1"},
+            resource_result=resource_result,
+        )
+
+        self.assertEqual(
+            {item["resource_name"] for item in result.display_configuration},
+            {
+                "historical-routes",
+                "historical-web-acg",
+                "historical-private-acl",
+            },
+        )
+        self.assertEqual(
+            result.metadata["time_basis"],
+            "POINT_IN_TIME_WITHIN_REPORT_PERIOD",
+        )
+        self.assertEqual(
+            result.metadata["source"],
+            "STORED_NETWORK_CONFIGURATION_SNAPSHOT",
+        )
+        self.assertTrue(result.metadata["is_report_period_snapshot"])
+        self.assertEqual(
+            result.metadata["captured_at"],
+            "2026-07-15T10:00:00+09:00",
+        )
+        self.assertEqual(
+            result.metadata["backup_captured_at"],
+            "2026-08-10T09:30:00+09:00",
+        )
+        self.assertEqual(
+            result.metadata["source_report_run_id"],
+            "historical-run-1",
+        )
+        self.assertEqual(
+            {item["resource_name"] for item in (
+                result.generation_snapshot["configuration"]
+            )},
+            {
+                "current-routes",
+                "current-web-acg",
+                "current-private-acl",
+            },
+        )
+        self.assertNotEqual(
+            result.metadata["captured_at"],
+            result.generation_snapshot["captured_at"],
+        )
+        self.assertFalse(any(
+            warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
+            for warning in result.warnings
+        ))
 
     def test_live_collection_crossing_period_end_uses_stored_snapshot(self):
         snapshot = {
@@ -657,11 +832,9 @@ class RunnerPipelineTests(unittest.TestCase):
                 report_options={
                     "sections": [
                         "infrastructure_inventory",
-                        "infrastructure_diagram",
                     ],
                     "resource_categories": ["SERVER", "VPC"],
                     "monitoring_categories": [],
-                    "diagram": {"enabled": True},
                 },
             )
             runner.report_repository = repository
@@ -721,12 +894,10 @@ class RunnerPipelineTests(unittest.TestCase):
                 report_options={
                     "sections": [
                         "infrastructure_inventory",
-                        "infrastructure_diagram",
                         "monitoring",
                     ],
                     "resource_categories": ["SERVER", "BLOCK_STORAGE"],
                     "monitoring_categories": ["SERVER"],
-                    "diagram": {"enabled": True},
                 },
             )
             runner.report_repository = repository
@@ -796,36 +967,19 @@ class RunnerPipelineTests(unittest.TestCase):
             warning.get("code") == "RESOURCE_CREATE_TIME_UNAVAILABLE"
             for warning in report.collection_warnings
         ))
-        self.assertEqual(
-            report.infrastructure_topology["summary"]["confidence"],
-            "PARTIAL",
-        )
-        self.assertEqual(
-            {
-                node.get("resource_id")
-                for node in report.infrastructure_topology["nodes"]
-            },
-            {"old-server", "unknown-server", "old-storage"},
-        )
-        self.assertTrue(any(
-            warning.get("code") == "CURRENT_STATE_TOPOLOGY_FALLBACK"
-            for warning in report.infrastructure_topology["warnings"]
-        ))
         self.assertIn("old-server", html_text)
         self.assertIn("old-storage", html_text)
         self.assertIn("인프라 시간 기준 안내", html_text)
         self.assertIn("보고서 생성 시점의 현재 값", html_text)
         self.assertIn("생성 시각 기반 추정", html_text)
         self.assertIn("생성 시각 미확인", html_text)
-        self.assertIn("현재 관계 기반 추정", html_text)
-        self.assertIn("보고 기간 당시의 정확한 구성은 아닙니다", html_text)
         self.assertNotIn("boundary-server", html_text)
         self.assertNotIn("new-storage", html_text)
         public_payload = report.to_dict()
         public_old_server = next(
             server
             for server in public_payload["servers"]
-            if server["server_id"] == "old-server"
+            if server["server_name"] == "old-server"
         )
         self.assertEqual(
             public_old_server["historical_presence_confidence"],
@@ -834,7 +988,7 @@ class RunnerPipelineTests(unittest.TestCase):
         public_old_resource = next(
             resource
             for resource in public_payload["infrastructure"]
-            if resource["resource_id"] == "old-server"
+            if resource["resource_name"] == "old-server"
         )
         self.assertEqual(
             public_old_resource["details"][
@@ -856,7 +1010,6 @@ class RunnerPipelineTests(unittest.TestCase):
                     "sections": ["infrastructure_inventory"],
                     "resource_categories": ["SERVER", "BLOCK_STORAGE"],
                     "monitoring_categories": [],
-                    "diagram": {"enabled": False},
                 },
             )
             runner.report_repository = repository
@@ -882,38 +1035,6 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertEqual(
             report.collection_metadata["infrastructure"]["source"],
             "UNAVAILABLE",
-        )
-
-    def test_topology_does_not_substitute_current_state_for_past_period(self):
-        runner = self._runner_without_factory_init()
-        period = runner.build_period(
-            start=date(2026, 6, 1),
-            end=date(2026, 6, 30),
-            period_type="month",
-        )
-
-        topology = runner._build_period_topology(
-            period=period,
-            infrastructure=[{
-                "category": "SERVER",
-                "resource_id": "current-server",
-                "resource_name": "must-not-appear",
-                "details": {"server_instance_no": "current-server"},
-            }],
-            collection_metadata={
-                "infrastructure": {
-                    "completed_at": "2026-08-07T16:00:00+09:00",
-                    "source": "LIVE_API_COLLECTION",
-                }
-            },
-            report_options=ReportOptions(),
-        )
-
-        self.assertEqual(topology["summary"]["confidence"], "UNAVAILABLE")
-        self.assertEqual(topology["nodes"], [])
-        self.assertEqual(
-            topology["warnings"][0]["code"],
-            "PERIOD_SNAPSHOT_UNAVAILABLE",
         )
 
     def test_datetime_range_uses_exclusive_end_and_time_file_suffix(self):
@@ -1002,92 +1123,6 @@ class RunnerPipelineTests(unittest.TestCase):
 
         self.assertEqual(period["start_dt"], "2026-08-03 14:00:00")
         self.assertEqual(period["end_dt"], "2026-08-03 15:00:00")
-
-    def test_period_topology_refuses_a_live_snapshot_outside_report_date(self):
-        runner = self._runner_without_factory_init()
-        period = runner.build_period(
-            start=date(2026, 7, 1),
-            end=date(2026, 7, 31),
-            period_type="month",
-        )
-
-        topology = runner._build_period_topology(
-            period=period,
-            infrastructure=[{
-                "category": "VPC",
-                "resource_id": "vpc-1",
-                "resource_name": "current-vpc",
-                "details": {"vpc_no": "vpc-1"},
-            }],
-            collection_metadata={
-                "infrastructure": {
-                    "completed_at": "2026-08-07T12:00:00+09:00",
-                    "source": "LIVE_API_COLLECTION",
-                }
-            },
-            report_options=ReportOptions(),
-        )
-
-        self.assertEqual(topology["nodes"], [])
-        self.assertEqual(topology["summary"]["confidence"], "UNAVAILABLE")
-        self.assertEqual(
-            topology["warnings"][0]["code"],
-            "PERIOD_SNAPSHOT_UNAVAILABLE",
-        )
-
-    def test_period_topology_uses_an_observation_inside_report_date(self):
-        runner = self._runner_without_factory_init()
-        period = runner.build_period(
-            start=date(2026, 7, 1),
-            end=date(2026, 7, 31),
-            period_type="month",
-        )
-        infrastructure = [
-            {
-                "category": "VPC",
-                "resource_id": "vpc-1",
-                "resource_name": "period-vpc",
-                "details": {"vpc_no": "vpc-1"},
-            },
-            {
-                "category": "SUBNET",
-                "resource_id": "subnet-1",
-                "resource_name": "period-subnet",
-                "details": {
-                    "subnet_no": "subnet-1",
-                    "vpc_no": "vpc-1",
-                },
-            },
-        ]
-
-        topology = runner._build_period_topology(
-            period=period,
-            infrastructure=infrastructure,
-            collection_metadata={
-                "infrastructure": {
-                    "completed_at": "2026-07-31T23:00:00+09:00",
-                    "source": "STORED_REPORT_SNAPSHOT",
-                    "source_report_run_id": "run-1",
-                }
-            },
-            report_options=ReportOptions(),
-        )
-
-        self.assertEqual(topology["summary"]["verified_edge_count"], 0)
-        self.assertEqual(
-            topology["summary"]["presentation_policy"][
-                "excluded_empty_subnet_count"
-            ],
-            1,
-        )
-        self.assertEqual(
-            topology["summary"]["snapshot_source"],
-            "STORED_REPORT_SNAPSHOT",
-        )
-        self.assertEqual(
-            topology["summary"]["source_report_run_id"],
-            "run-1",
-        )
 
     def test_run_passes_billing_comparison_flag_for_scope(self):
         CapturingBillingNormalizer.comparison_flags = []
@@ -1202,7 +1237,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 json.loads(json_path.read_text(encoding="utf-8"))[
                     "schema_version"
                 ],
-                "1.3",
+                "1.4",
             )
 
     def test_period_scoped_empty_summary_files_replace_stale_content(self):

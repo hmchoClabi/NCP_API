@@ -62,7 +62,7 @@ GRANT SELECT, INSERT, UPDATE ON control.tenant_report_settings TO
     ncp_msp_app;
 
 INSERT INTO control.schema_versions (version, description)
-VALUES ('140', 'Per-tenant report content and diagram settings')
+VALUES ('140', 'Per-tenant report content settings')
 ON CONFLICT (version) DO UPDATE SET description = EXCLUDED.description;
 
 COMMIT;

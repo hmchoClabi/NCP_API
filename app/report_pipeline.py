@@ -17,7 +17,6 @@ class ReportCollectionPlan:
     report_options_snapshot: Dict[str, Any]
     selected_resource_categories: FrozenSet[str]
     selected_monitoring_categories: FrozenSet[str]
-    diagram_enabled: bool
     monitoring_enabled: bool
     monitored_infrastructure_categories: FrozenSet[str]
     collection_resource_categories: FrozenSet[str]
@@ -52,6 +51,17 @@ class ResourceCollectionResult:
 
 
 @dataclass
+class NetworkConfigurationResult:
+    """보고서 표시용 구성과 생성시점 백업을 분리한 결과."""
+
+    display_configuration: List[Dict[str, Any]] = field(default_factory=list)
+    generation_snapshot: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    errors: List[Dict[str, Any]] = field(default_factory=list)
+    warnings: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
 class ObservabilityResult:
     """모니터링과 이벤트 수집 단계의 결과 묶음."""
 
@@ -72,9 +82,9 @@ class ObservabilityResult:
 def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan:
     """표시 옵션을 수집기 실행 여부와 자원 범주로 변환한다.
 
-    표시 범위와 수집 범위는 같지 않다. 예를 들어 구성도에만 필요한 자원과
-    모니터링에 필요한 TARGET_GROUP은 화면 옵션에 직접 노출되지 않아도 먼저
-    수집해야 하므로 이 판단을 렌더러가 아니라 파이프라인 입구에서 고정한다.
+    표시 범위와 수집 범위는 같지 않다. 예를 들어 모니터링에 필요한
+    TARGET_GROUP은 화면 옵션에 직접 노출되지 않아도 먼저 수집해야 하므로 이
+    판단을 렌더러가 아니라 파이프라인 입구에서 고정한다.
     """
     snapshot = report_options.to_dict()
     selected_resources = frozenset(snapshot["resource_categories"])
@@ -82,17 +92,13 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
     inventory_enabled = report_options.section_enabled(
         "infrastructure_inventory"
     )
-    diagram_enabled = (
-        report_options.section_enabled("infrastructure_diagram")
-        and bool(report_options.diagram_option("enabled", True))
-    )
     monitoring_enabled = report_options.section_enabled("monitoring")
     active_monitoring = (
         selected_monitoring if monitoring_enabled else frozenset()
     )
     monitored_infrastructure = active_monitoring - {"SERVER"}
     collection_resources = set(active_monitoring)
-    if inventory_enabled or diagram_enabled:
+    if inventory_enabled:
         collection_resources.update(selected_resources)
 
     collection_resource_categories = frozenset(collection_resources)
@@ -105,7 +111,6 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
         report_options_snapshot=snapshot,
         selected_resource_categories=selected_resources,
         selected_monitoring_categories=selected_monitoring,
-        diagram_enabled=diagram_enabled,
         monitoring_enabled=monitoring_enabled,
         monitored_infrastructure_categories=frozenset(
             monitored_infrastructure

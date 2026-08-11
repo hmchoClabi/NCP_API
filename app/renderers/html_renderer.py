@@ -7,10 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
-from app.infrastructure_topology import (
-    REPRESENTATIVE_CATEGORY_LABELS,
-    TopologyDisplayOptions,
-)
 from app.renderers.html_styles import HTML_REPORT_STYLES
 from app.renderers.html_view_models import (
     BillingDisplayData,
@@ -19,10 +15,10 @@ from app.renderers.html_view_models import (
     ReportDisplayData,
     ReportSectionHtml,
 )
-from app.renderers.topology_renderer import TopologyRenderer
 from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
+    NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     RESOURCE_CATEGORY_LABELS,
 )
 from app.report_models import ReportResult
@@ -49,25 +45,8 @@ class HtmlReportRenderer:
         "#475569",
     )
     INFRASTRUCTURE_CATEGORIES = tuple(
-        REPRESENTATIVE_CATEGORY_LABELS.items()
+        RESOURCE_CATEGORY_LABELS.items()
     )
-    TOPOLOGY_LAYER_ORDER = TopologyRenderer.TOPOLOGY_LAYER_ORDER
-    TOPOLOGY_NODE_WIDTH = TopologyRenderer.TOPOLOGY_NODE_WIDTH
-    TOPOLOGY_NODE_HEIGHT = TopologyRenderer.TOPOLOGY_NODE_HEIGHT
-
-    def __init__(
-        self,
-        *,
-        topology_display_options: Dict[str, Any] | None = None,
-        topology_max_nodes: int | None = None,
-    ) -> None:
-        self._topology_options_override = (
-            dict(topology_display_options)
-            if isinstance(topology_display_options, dict)
-            else None
-        )
-        self._topology_max_nodes_override = topology_max_nodes
-        self._topology_renderer = TopologyRenderer(self)
 
     def render(self, report: ReportResult) -> str:
         display = self._prepare_display_data(report)
@@ -100,15 +79,8 @@ class HtmlReportRenderer:
         load_balancer_target_groups = (
             report.display_load_balancer_target_groups
         )
-        topology_options, _ = self._topology_options(report)
-        infrastructure_topology = report.display_infrastructure_topology
-
         inventory_enabled = report_options.section_enabled(
             "infrastructure_inventory"
-        )
-        diagram_enabled = (
-            report_options.section_enabled("infrastructure_diagram")
-            and topology_options.enabled
         )
         monitoring_enabled = report_options.section_enabled("monitoring")
         billing_enabled = report_options.section_enabled("billing")
@@ -118,6 +90,9 @@ class HtmlReportRenderer:
         collection_metadata = self._mapping(report.collection_metadata)
         infrastructure_metadata = self._mapping(
             collection_metadata.get("infrastructure")
+        )
+        network_configuration_metadata = self._mapping(
+            collection_metadata.get("network_configuration")
         )
         customer_logo_data_uri = self._safe_customer_logo_data_uri(
             report.customer.get("logo_data_uri")
@@ -133,14 +108,14 @@ class HtmlReportRenderer:
             activity_events=activity_events,
             infrastructure=infrastructure,
             load_balancer_target_groups=load_balancer_target_groups,
-            topology_options=topology_options,
-            infrastructure_topology=infrastructure_topology,
             inventory_enabled=inventory_enabled,
-            diagram_enabled=diagram_enabled,
             monitoring_enabled=monitoring_enabled,
             billing_enabled=billing_enabled,
             organization_billing_enabled=organization_billing_enabled,
             infrastructure_metadata=infrastructure_metadata,
+            network_configuration_metadata=(
+                network_configuration_metadata
+            ),
         )
 
     def _prepare_billing_display(
@@ -287,7 +262,7 @@ class HtmlReportRenderer:
         report_options = display.report_options
         if report_options.section_enabled("executive_summary"):
             summary_cards = []
-            if display.inventory_enabled or display.diagram_enabled:
+            if display.inventory_enabled:
                 summary_cards.append(
                     self._summary_card(
                         "대표 인프라",
@@ -338,9 +313,30 @@ class HtmlReportRenderer:
         report: ReportResult,
         display: ReportDisplayData,
     ) -> InfrastructureSectionHtml:
+        network_categories = set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+        inventory_resources = [
+            resource
+            for resource in display.infrastructure
+            if str(resource.get("category") or "").upper()
+            not in network_categories
+        ]
         inventory_html = (
-            self._infrastructure_section(display.infrastructure)
-            if display.inventory_enabled else ""
+            self._infrastructure_section(inventory_resources)
+            if display.inventory_enabled and inventory_resources else ""
+        )
+        network_configuration_html = (
+            self._network_configuration_section(
+                display.infrastructure,
+                display.network_configuration_metadata,
+            )
+            if (
+                display.inventory_enabled
+                and any(
+                    display.report_options.resource_enabled(category)
+                    for category in network_categories
+                )
+            )
+            else ""
         )
         target_group_html = ""
         if display.inventory_enabled and (
@@ -355,13 +351,6 @@ class HtmlReportRenderer:
                 display.load_balancer_target_groups,
                 display.infrastructure_metadata,
             )
-        topology_html = (
-            self._infrastructure_topology_section(
-                display.infrastructure_topology,
-                display.topology_options,
-            )
-            if display.diagram_enabled else ""
-        )
         server_detail_html = ""
         if (
             display.inventory_enabled
@@ -411,8 +400,8 @@ class HtmlReportRenderer:
             )
         return InfrastructureSectionHtml(
             inventory=inventory_html,
+            network_configuration=network_configuration_html,
             target_groups=target_group_html,
-            topology=topology_html,
             server_details=server_detail_html,
         )
 
@@ -581,8 +570,10 @@ class HtmlReportRenderer:
             summary=summary,
             historical_notice=historical_notice,
             inventory=infrastructure.inventory,
+            network_configuration=(
+                infrastructure.network_configuration
+            ),
             target_groups=infrastructure.target_groups,
-            topology=infrastructure.topology,
             server_details=infrastructure.server_details,
             monitoring=monitoring,
             billing=billing,
@@ -643,8 +634,8 @@ class HtmlReportRenderer:
     {sections.summary}
     {sections.historical_notice}
     {sections.inventory}
+    {sections.network_configuration}
     {sections.target_groups}
-    {sections.topology}
     {sections.server_details}
     {sections.monitoring}
     {sections.billing}
@@ -857,6 +848,190 @@ class HtmlReportRenderer:
             len(prepared),
         )
 
+    def _network_configuration_section(
+        self,
+        resources: List[Dict[str, Any]],
+        metadata: Mapping[str, Any],
+    ) -> str:
+        """Route Table·ACG·Network ACL을 단일 시점 백업으로 표시한다."""
+        categories = set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+        configurations = [
+            resource
+            for resource in self._records(resources)
+            if str(resource.get("category") or "").upper() in categories
+        ]
+        captured_at = self._infrastructure_create_time(
+            metadata.get("captured_at")
+        )
+        backup_captured_at = self._infrastructure_create_time(
+            metadata.get("backup_captured_at")
+        )
+        in_period = metadata.get("is_report_period_snapshot") is True
+        period_basis = (
+            "보고 기간 내 단일 시점 관측"
+            if in_period
+            else "보고 기간 외 · 생성시점 현재 상태"
+        )
+        source_label = {
+            "STORED_NETWORK_CONFIGURATION_SNAPSHOT": (
+                "별도 저장된 과거 네트워크 스냅샷"
+            ),
+            "REPORT_GENERATION_SNAPSHOT": (
+                "이번 보고서 생성 과정의 네트워크 스냅샷"
+            ),
+        }.get(str(metadata.get("source") or ""), "네트워크 구성 스냅샷")
+        metadata_html = f"""
+      <div class="network-snapshot-basis">
+        <div><span>데이터 성격</span><strong>단일 시점 구성 백업</strong></div>
+        <div><span>실제 수집 시각</span><strong>{self._text(captured_at)}</strong></div>
+        <div><span>보고 기간과의 관계</span><strong>{self._text(period_basis)}</strong></div>
+        <div><span>수집 계기</span><strong>보고서 생성 과정</strong></div>
+        <div><span>표시 데이터 출처</span><strong>{self._text(source_label)}</strong></div>
+        <div><span>이번 생성시점 백업 시각</span><strong>{self._text(backup_captured_at)}</strong></div>
+      </div>"""
+
+        summary_rows = []
+        route_rows = []
+        acg_rule_rows = []
+        network_acl_rule_rows = []
+        for resource in configurations:
+            category = str(resource.get("category") or "").upper()
+            details = self._mapping(resource.get("details"))
+            summary_rows.append({
+                "category": resource.get("category_label") or category,
+                "name": resource.get("resource_name"),
+                "id": resource.get("resource_id"),
+                "vpc_no": details.get("vpc_no"),
+                "status": resource.get("status"),
+                "default": "기본" if details.get("default") is True else "-",
+                "association_count": details.get(
+                    "associated_subnet_count"
+                ),
+                "rule_count": details.get("rule_count")
+                if category != "ROUTE_TABLE"
+                else details.get("route_count"),
+            })
+            if category == "ROUTE_TABLE":
+                subnet_names = ", ".join(
+                    str(subnet.get("subnet_name") or subnet.get("subnet_no"))
+                    for subnet in self._records(
+                        details.get("associated_subnets")
+                    )
+                ) or "-"
+                for route in self._records(details.get("routes")):
+                    route_rows.append({
+                        "route_table": resource.get("resource_name"),
+                        "vpc_no": details.get("vpc_no"),
+                        "subnets": subnet_names,
+                        "destination": route.get("destination_cidr"),
+                        "target_type": route.get("target_type"),
+                        "target": route.get("target_name")
+                        or route.get("target_no"),
+                        "default": "기본" if route.get("default") is True else "-",
+                    })
+            elif category == "ACCESS_CONTROL_GROUP":
+                for rule in self._records(details.get("rules")):
+                    acg_rule_rows.append({
+                        "group": resource.get("resource_name"),
+                        "vpc_no": details.get("vpc_no"),
+                        "direction": rule.get("direction"),
+                        "protocol": rule.get("protocol"),
+                        "source": rule.get("source_ip_block")
+                        or rule.get("source_access_control_group_no"),
+                        "port": rule.get("port_range"),
+                        "description": rule.get("description"),
+                    })
+            elif category == "NETWORK_ACL":
+                for rule in self._records(details.get("rules")):
+                    network_acl_rule_rows.append({
+                        "network_acl": resource.get("resource_name"),
+                        "vpc_no": details.get("vpc_no"),
+                        "priority": rule.get("priority"),
+                        "direction": rule.get("direction"),
+                        "protocol": rule.get("protocol"),
+                        "source": rule.get("source_ip_block")
+                        or rule.get("deny_allow_group_no"),
+                        "port": rule.get("port_range"),
+                        "action": rule.get("action"),
+                        "description": rule.get("description"),
+                    })
+
+        tables = "".join((
+            '<div class="network-config-group"><h3>구성 객체</h3>',
+            self._table(
+                summary_rows,
+                (
+                    ("category", "구분"),
+                    ("name", "이름"),
+                    ("id", "ID"),
+                    ("vpc_no", "VPC No."),
+                    ("status", "상태"),
+                    ("default", "기본 여부"),
+                    ("association_count", "연결 Subnet", "number0"),
+                    ("rule_count", "규칙", "number0"),
+                ),
+            ),
+            '</div><div class="network-config-group"><h3>Route 규칙</h3>',
+            self._table(
+                route_rows,
+                (
+                    ("route_table", "Route Table"),
+                    ("vpc_no", "VPC No."),
+                    ("subnets", "연결 Subnet"),
+                    ("destination", "Destination CIDR"),
+                    ("target_type", "Target 유형"),
+                    ("target", "Target"),
+                    ("default", "기본 여부"),
+                ),
+            ),
+            '</div><div class="network-config-group"><h3>ACG 규칙</h3>',
+            self._table(
+                acg_rule_rows,
+                (
+                    ("group", "ACG"),
+                    ("vpc_no", "VPC No."),
+                    ("direction", "방향"),
+                    ("protocol", "프로토콜"),
+                    ("source", "접근 소스"),
+                    ("port", "포트"),
+                    ("description", "설명"),
+                ),
+            ),
+            '</div><div class="network-config-group"><h3>Network ACL 규칙</h3>',
+            self._table(
+                network_acl_rule_rows,
+                (
+                    ("network_acl", "Network ACL"),
+                    ("vpc_no", "VPC No."),
+                    ("priority", "우선순위", "number0"),
+                    ("direction", "방향"),
+                    ("protocol", "프로토콜"),
+                    ("source", "IP / Deny-Allow Group"),
+                    ("port", "포트"),
+                    ("action", "동작"),
+                    ("description", "설명"),
+                ),
+            ),
+            "</div>",
+        ))
+        description = (
+            "보고 기간 안에 저장된 단일 시점의 Route Table·ACG·Network ACL "
+            "구성입니다. 기간 전체의 변경 이력을 의미하지 않습니다."
+            if in_period
+            else (
+                "보고 기간에 저장된 네트워크 스냅샷이 없어 이번 보고서 생성 "
+                "과정에서 조회한 현재 설정을 별도로 백업했습니다. 아래 값은 "
+                "보고 대상 기간의 과거 상태가 아닙니다."
+            )
+        )
+        return self._section(
+            "네트워크 구성 스냅샷",
+            description,
+            metadata_html + tables,
+            len(configurations),
+            warning=not in_period,
+        )
+
     def _load_balancer_target_group_section(
         self,
         target_groups: List[Dict[str, Any]],
@@ -1008,134 +1183,6 @@ class HtmlReportRenderer:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=self.KST)
         return parsed.astimezone(self.KST).strftime("%Y-%m-%d %H:%M KST")
-
-    def _topology_helper(self) -> TopologyRenderer:
-        helper = getattr(self, "_topology_renderer", None)
-        if helper is None:
-            helper = TopologyRenderer(self)
-            self._topology_renderer = helper
-        return helper
-
-    def _topology_options(
-        self,
-        report: ReportResult,
-    ) -> tuple[TopologyDisplayOptions, int]:
-        return self._topology_helper()._topology_options(report)
-
-    def _infrastructure_topology_section(
-        self,
-        topology: Dict[str, Any],
-        options: TopologyDisplayOptions,
-    ) -> str:
-        return self._topology_helper()._infrastructure_topology_section(
-            topology,
-            options,
-        )
-
-    def _topology_svg(
-        self,
-        nodes: List[Dict[str, Any]],
-        edges: List[Dict[str, Any]],
-        options: TopologyDisplayOptions,
-    ) -> str:
-        return self._topology_helper()._topology_svg(nodes, edges, options)
-
-    def _topology_layout(
-        self,
-        nodes: List[Dict[str, Any]],
-        edges: List[Dict[str, Any]],
-        options: TopologyDisplayOptions,
-    ) -> tuple[Dict[str, Any], int, int]:
-        return self._topology_helper()._topology_layout(
-            nodes,
-            edges,
-            options,
-        )
-
-    def _topology_compound_layout(
-        self,
-        nodes: List[Dict[str, Any]],
-        edges: List[Dict[str, Any]],
-        options: TopologyDisplayOptions,
-    ) -> tuple[Dict[str, Any], int, int]:
-        return self._topology_helper()._topology_compound_layout(
-            nodes,
-            edges,
-            options,
-        )
-
-    def _topology_boundary_header_height(
-        self,
-        node: Mapping[str, Any],
-        options: TopologyDisplayOptions,
-    ) -> int:
-        return self._topology_helper()._topology_boundary_header_height(
-            node,
-            options,
-        )
-
-    @staticmethod
-    def _topology_node_sort_key(
-        node: Mapping[str, Any],
-    ) -> tuple[str, str, str]:
-        return TopologyRenderer._topology_node_sort_key(node)
-
-    @staticmethod
-    def _topology_edge_key(
-        edge: Mapping[str, Any],
-    ) -> tuple[str, str, str]:
-        return TopologyRenderer._topology_edge_key(edge)
-
-    @staticmethod
-    def _topology_edge_path(
-        source: tuple[float, float, float, float],
-        target: tuple[float, float, float, float],
-    ) -> tuple[str, float, float]:
-        return TopologyRenderer._topology_edge_path(source, target)
-
-    def _topology_node_lines(
-        self,
-        node: Mapping[str, Any],
-        options: TopologyDisplayOptions,
-    ) -> List[str]:
-        return self._topology_helper()._topology_node_lines(node, options)
-
-    def _topology_unmapped_card(
-        self,
-        node: Mapping[str, Any],
-        options: TopologyDisplayOptions,
-    ) -> str:
-        return self._topology_helper()._topology_unmapped_card(node, options)
-
-    def _topology_evidence_table(
-        self,
-        edges: List[Dict[str, Any]],
-        nodes: List[Dict[str, Any]],
-        options: TopologyDisplayOptions,
-    ) -> str:
-        return self._topology_helper()._topology_evidence_table(
-            edges,
-            nodes,
-            options,
-        )
-
-    def _topology_node_reference(
-        self,
-        node: Mapping[str, Any],
-        options: TopologyDisplayOptions,
-    ) -> str:
-        return self._topology_helper()._topology_node_reference(node, options)
-
-    @staticmethod
-    def _topology_relation_label(value: Any) -> str:
-        return TopologyRenderer._topology_relation_label(value)
-
-    def _topology_value_list(self, value: Any) -> str:
-        return self._topology_helper()._topology_value_list(value)
-
-    @staticmethod
-    def _topology_short_text(value: Any, limit: int = 32) -> str:
-        return TopologyRenderer._topology_short_text(value, limit)
 
     def _infrastructure_metric_section(
         self,

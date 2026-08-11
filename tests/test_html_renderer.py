@@ -204,12 +204,16 @@ class HtmlReportRendererTests(unittest.TestCase):
                     ("OBJECT_STORAGE", "Object Storage"),
                     ("NAS", "NAS"),
                     ("CLOUD_DB", "Cloud DB"),
-                    ("CDN", "CDN"),
                     ("KUBERNETES", "Kubernetes"),
                 ),
                 start=1,
             )
         ] + [
+            {
+                "category": "CDN",
+                "category_label": "CDN",
+                "resource_name": "excluded-cdn",
+            },
             {
                 "category": "ALARM",
                 "category_label": "Alarm",
@@ -228,11 +232,12 @@ class HtmlReportRendererTests(unittest.TestCase):
             1,
         )[0]
 
-        for index in range(1, 9):
+        for index in range(1, 8):
             with self.subTest(index=index):
                 self.assertIn(f"allowed-{index}", inventory)
-        self.assertIn("8건", inventory)
+        self.assertIn("7건", inventory)
         self.assertIn("1970-01-01 09:00 KST", inventory)
+        self.assertNotIn("excluded-cdn", html)
         self.assertNotIn("excluded-alarm-instance", html)
         self.assertNotIn("excluded-sub-account", html)
 
@@ -246,6 +251,121 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("DB 서버: 2개", details)
         self.assertIn("총 메모리: 32 GB", details)
         self.assertIn("데이터 용량: 500 GB", details)
+
+    def test_network_snapshot_marks_generation_time_and_renders_rules(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": [
+                "ROUTE_TABLE",
+                "ACCESS_CONTROL_GROUP",
+                "NETWORK_ACL",
+            ],
+            "monitoring_categories": [],
+        }
+        report.collection_metadata = {
+            "network_configuration": {
+                "source": "REPORT_GENERATION_SNAPSHOT",
+                "time_basis": (
+                    "REPORT_GENERATION_TIME_NOT_REPORT_PERIOD"
+                ),
+                "captured_at": "2026-08-10T09:30:00+09:00",
+                "backup_captured_at": "2026-08-10T09:30:00+09:00",
+                "capture_trigger": "REPORT_GENERATION",
+                "is_point_in_time_snapshot": True,
+                "is_report_period_snapshot": False,
+                "report_period_start": "2026-06-01 00:00:00",
+                "report_period_end": "2026-06-30 23:59:59",
+            }
+        }
+        report.infrastructure = [
+            {
+                "category": "ROUTE_TABLE",
+                "category_label": "Route Table",
+                "resource_id": "rt-1",
+                "resource_name": "private-routes",
+                "status": "RUN",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "associated_subnet_count": 1,
+                    "associated_subnets": [{
+                        "subnet_no": "subnet-1",
+                        "subnet_name": "private-a",
+                    }],
+                    "route_count": 1,
+                    "routes": [{
+                        "destination_cidr": "0.0.0.0/0",
+                        "target_type": "NATGW",
+                        "target_name": "nat-main",
+                    }],
+                },
+            },
+            {
+                "category": "ACCESS_CONTROL_GROUP",
+                "category_label": "ACG",
+                "resource_id": "acg-1",
+                "resource_name": "web-acg",
+                "status": "RUN",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_count": 1,
+                    "rules": [{
+                        "direction": "INBND",
+                        "protocol": "TCP",
+                        "source_ip_block": "10.0.0.0/8",
+                        "port_range": "443",
+                        "description": "HTTPS from private network",
+                    }],
+                },
+            },
+            {
+                "category": "NETWORK_ACL",
+                "category_label": "Network ACL",
+                "resource_id": "nacl-1",
+                "resource_name": "private-nacl",
+                "status": "RUN",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_count": 1,
+                    "rules": [{
+                        "priority": 10,
+                        "direction": "INBND",
+                        "protocol": "TCP",
+                        "source_ip_block": "10.0.0.0/8",
+                        "port_range": "443",
+                        "action": "ALLOW",
+                    }],
+                },
+            },
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        section = html.split(
+            "<h2>네트워크 구성 스냅샷</h2>",
+            1,
+        )[1].split("</section>", 1)[0]
+
+        self.assertIn("단일 시점 구성 백업", section)
+        self.assertIn("실제 수집 시각", section)
+        self.assertIn("2026-08-10 09:30 KST", section)
+        self.assertIn("보고 기간 외 · 생성시점 현재 상태", section)
+        self.assertIn("수집 계기", section)
+        self.assertIn("보고서 생성 과정", section)
+        self.assertIn(
+            "보고 대상 기간의 과거 상태가 아닙니다.",
+            section,
+        )
+        self.assertIn("Route 규칙", section)
+        self.assertIn("private-routes", section)
+        self.assertIn("private-a", section)
+        self.assertIn("0.0.0.0/0", section)
+        self.assertIn("NATGW", section)
+        self.assertIn("ACG 규칙", section)
+        self.assertIn("web-acg", section)
+        self.assertIn("10.0.0.0/8", section)
+        self.assertIn("Network ACL 규칙", section)
+        self.assertIn("private-nacl", section)
+        self.assertIn("ALLOW", section)
 
     def test_infrastructure_charts_preserve_metric_units(self):
         report = self._sample_report()
@@ -649,14 +769,12 @@ class HtmlReportRendererTests(unittest.TestCase):
             "sections": ["activity_history"],
             "resource_categories": [],
             "monitoring_categories": [],
-            "diagram": {"enabled": False},
         }
 
         html = HtmlReportRenderer().render(report)
 
         self.assertIn("<h2>Cloud Activity Tracer</h2>", html)
         self.assertNotIn("<h2>대표 인프라 현황</h2>", html)
-        self.assertNotIn("<h2>클라우드 구성도</h2>", html)
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)

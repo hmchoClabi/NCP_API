@@ -147,7 +147,6 @@ class PortalIntegrationTests(unittest.TestCase):
                     "sections": ["billing"],
                     "resource_categories": ["SERVER"],
                     "monitoring_categories": [],
-                    "diagram": {"enabled": False, "max_nodes": 40},
                 },
                 admin_id,
             )

@@ -1,4 +1,5 @@
 import inspect
+import json
 import sys
 import unittest
 from datetime import datetime, timezone
@@ -224,7 +225,7 @@ class ReportRepositoryTests(unittest.TestCase):
             "renderer_version = EXCLUDED.renderer_version",
             query,
         )
-        self.assertIn("'1.3', '1.3', '1.3'", query)
+        self.assertIn("'1.4', '1.4', '1.4'", query)
 
     def test_historical_snapshot_query_uses_observation_time_not_report_date(self):
         source = inspect.getsource(
@@ -384,6 +385,201 @@ class ReportRepositoryTests(unittest.TestCase):
 
         self.assertEqual(window["eligible_start"].day, 1)
         self.assertEqual(window["eligible_end"].date().isoformat(), "2026-08-01")
+
+    def test_network_configuration_snapshot_is_stored_separately(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-01 00:00:00",
+                "end_dt": "2026-08-10 23:59:59",
+            },
+            generated_at="2026-08-10T12:30:00+09:00",
+        )
+        report.network_configuration_snapshot = {
+            "configuration": [{
+                "category": "ROUTE_TABLE",
+                "resource_id": "route-table-1",
+                "details": {"routes": []},
+            }],
+            "captured_at": report.generated_at,
+            "source": "REPORT_GENERATION",
+            "selected_categories": ["ROUTE_TABLE", "NETWORK_ACL"],
+            "reused": False,
+            "metadata": {
+                "collection_source": "LIVE_API_COLLECTION",
+            },
+            "collection_completeness": "COMPLETE_FOR_SELECTED_SCOPE",
+        }
+
+        self.repository._insert_network_configuration_snapshot(
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        query, parameters = cursor.calls[0]
+        self.assertIn("public_data.network_configuration_snapshots", query)
+        self.assertIn("'REPORT_GENERATION'", query)
+        self.assertEqual(
+            parameters[3],
+            datetime(2026, 8, 10, 12, 30, tzinfo=self.repository.KST),
+        )
+        self.assertEqual(json.loads(parameters[8])[0]["category"], "ROUTE_TABLE")
+        metadata = json.loads(parameters[9])
+        self.assertEqual(metadata["capture_basis"], "REPORT_GENERATION_TIME")
+        self.assertEqual(metadata["category_counts"]["NETWORK_ACL"], 0)
+        self.assertEqual(
+            metadata["collection_completeness"],
+            "COMPLETE_FOR_SELECTED_SCOPE",
+        )
+
+    def test_empty_selected_network_snapshot_is_distinct_from_no_selection(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={"start_dt": "2026-08-10", "end_dt": "2026-08-10"},
+            generated_at="2026-08-10T12:30:00+09:00",
+        )
+        self.repository._insert_network_configuration_snapshot(
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
+        )
+        self.assertEqual(cursor.calls, [])
+
+        report.network_configuration_snapshot = {
+            "configuration": [],
+            "captured_at": report.generated_at,
+            "source": "REPORT_GENERATION",
+            "selected_categories": ["NETWORK_ACL"],
+            "reused": False,
+            "metadata": {"completeness": "PARTIAL"},
+        }
+
+        self.repository._insert_network_configuration_snapshot(
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        _, parameters = cursor.calls[0]
+        self.assertEqual(json.loads(parameters[8]), [])
+        self.assertEqual(
+            json.loads(parameters[9])["selected_categories"],
+            ["NETWORK_ACL"],
+        )
+
+        cursor.calls.clear()
+        report.network_configuration_snapshot["selected_categories"] = []
+        self.repository._insert_network_configuration_snapshot(
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
+        )
+        self.assertEqual(cursor.calls, [])
+
+    def test_reused_network_snapshot_is_not_stored_with_a_new_capture_time(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={"start_dt": "2026-08-10", "end_dt": "2026-08-10"},
+        )
+        report.network_configuration_snapshot = {
+            "configuration": [{"category": "NETWORK_ACL"}],
+            "captured_at": "2026-08-08T09:00:00+09:00",
+            "source": "STORED_NETWORK_CONFIGURATION_SNAPSHOT",
+            "selected_categories": ["NETWORK_ACL"],
+            "reused": True,
+        }
+
+        self.repository._insert_network_configuration_snapshot(
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
+        )
+
+        self.assertEqual(cursor.calls, [])
+
+    def test_period_network_snapshot_lookup_returns_capture_time_envelope(self):
+        cursor = RecordingCursor()
+        captured_at = datetime.fromisoformat("2026-08-08T10:00:00+09:00")
+        cursor.fetchone = lambda: (
+            [{"category": "ACCESS_CONTROL_GROUP", "resource_id": "acg-1"}],
+            "report-run-id",
+            captured_at,
+            datetime.fromisoformat("2026-08-01T00:00:00+09:00"),
+            datetime.fromisoformat("2026-08-11T00:00:00+09:00"),
+            True,
+            "REPORT_GENERATION",
+            "1.0",
+            {
+                "capture_basis": "REPORT_GENERATION_TIME",
+                "selected_categories": ["ACCESS_CONTROL_GROUP", "NETWORK_ACL"],
+                "collection_completeness": "COMPLETE_FOR_SELECTED_SCOPE",
+            },
+        )
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return cursor
+
+        repository = PostgresReportRepository(
+            DatabaseSettings(tenant_id="tenant-id")
+        )
+        fake_psycopg = SimpleNamespace(connect=lambda **_kwargs: Connection())
+
+        with patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            snapshot = repository.load_period_network_configuration_snapshot(
+                {
+                    "start_dt": "2026-08-08T00:00:00+09:00",
+                    "end_dt": "2026-08-09T00:00:00+09:00",
+                    "end_exclusive": True,
+                },
+                {
+                    "cloud_account_id": "account-id",
+                    "api_type": "public",
+                },
+                "2026-08-09T12:00:00+09:00",
+            )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["source"], "REPORT_GENERATION")
+        self.assertEqual(snapshot["captured_at"], captured_at.isoformat())
+        self.assertEqual(
+            snapshot["selected_categories"],
+            ["ACCESS_CONTROL_GROUP", "NETWORK_ACL"],
+        )
+        self.assertTrue(snapshot["reused"])
+        self.assertEqual(
+            snapshot["_snapshot_reference"]["capture_basis"],
+            "REPORT_GENERATION_TIME",
+        )
+        query, parameters = cursor.calls[1]
+        self.assertIn("network_configuration_snapshots", query)
+        self.assertIn("captured_at >= %s", query)
+        self.assertIn("captured_at < %s", query)
+        self.assertEqual(parameters[:2], ("tenant-id", "account-id"))
 
 
 if __name__ == "__main__":

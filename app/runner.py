@@ -1,10 +1,19 @@
 from app.apifactory import APIFactory
 from app.customer import CustomerProfile
-from app.infrastructure_topology import InfrastructureTopologyBuilder
 from app.renderers import HtmlReportRenderer
+from app.network_configuration import (
+    build_generation_snapshot,
+    configuration_records,
+    replace_configuration_records,
+    snapshot_categories,
+)
 from app.report_models import ReportResult
-from app.report_options import ReportOptions
+from app.report_options import (
+    NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
+    ReportOptions,
+)
 from app.report_pipeline import (
+    NetworkConfigurationResult,
     ObservabilityResult,
     ReportCollectionPlan,
     ResourceCollectionResult,
@@ -556,142 +565,255 @@ class ReportRunner:
             }
         return snapshot, None
 
-    def _build_period_topology(
+    def _load_period_network_configuration_snapshot(
         self,
         *,
         period: Dict[str, Any],
-        infrastructure: List[Dict[str, Any]],
-        collection_metadata: Dict[str, Any],
-        report_options: ReportOptions,
-    ) -> Dict[str, Any]:
-        infrastructure_metadata = collection_metadata.get("infrastructure")
-        if not isinstance(infrastructure_metadata, dict):
-            infrastructure_metadata = {}
-        observed_at = (
-            infrastructure_metadata.get("completed_at")
-            or infrastructure_metadata.get("started_at")
+        customer: Dict[str, Any],
+        reference_at: str,
+        requested_categories: set[str],
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """보고 기간 안에 실제로 관측된 전용 네트워크 스냅샷을 찾는다."""
+        repository = getattr(self, "report_repository", None)
+        loader = getattr(
+            repository,
+            "load_period_network_configuration_snapshot",
+            None,
         )
-        source = str(infrastructure_metadata.get("source") or "UNAVAILABLE")
-        time_basis = str(
-            infrastructure_metadata.get("time_basis") or "REPORT_PERIOD"
-        ).strip().upper()
-        current_state_fallback = (
-            time_basis == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
-            and source == "CURRENT_API_COLLECTION"
-        )
-        reference_at = (
-            infrastructure_metadata.get("reference_at")
-            or self._now_kst_iso()
-        )
-        window = self._snapshot_eligibility_window(period, reference_at)
+        if not callable(loader):
+            return None, None
         try:
-            parsed_observed_at = self._parse_kst_datetime(str(observed_at))
-        except (TypeError, ValueError):
-            parsed_observed_at = None
-        window_metadata = self._snapshot_window_metadata(
-            window,
-            parsed_observed_at,
-        )
-        if not observed_at or (
-            not current_state_fallback
-            and not self._snapshot_observed_in_window(
+            snapshot = loader(
                 period,
-                observed_at,
-                reference_at,
+                customer,
+                reference_at=reference_at,
             )
+        except Exception as exc:
+            return None, {
+                "collector": "NetworkConfigurationSnapshotRepository",
+                "stage": "historical_snapshot_lookup",
+                "target_type": "network_configuration",
+                "api": "postgresql",
+                "severity": "warning",
+                "exception_type": type(exc).__name__,
+                "message": safe_exception_message(exc),
+            }
+        if not isinstance(snapshot, dict):
+            return None, None
+
+        captured_at = snapshot.get("captured_at")
+        if not self._snapshot_observed_in_window(
+            period,
+            captured_at,
+            reference_at,
         ):
-            return {
-                "nodes": [],
-                "edges": [],
-                "unmapped_node_ids": [],
-                "unresolved_node_ids": [],
-                "warnings": [{
-                    "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
-                    "message": (
-                        "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
-                        "현재 구성을 대신 그리지 않았습니다."
-                    ),
-                    "source": "stored_report_snapshot",
-                    "confidence": "UNAVAILABLE",
-                }],
-                "summary": {
-                    "representative_node_count": 0,
-                    "supporting_node_count": 0,
-                    "verified_edge_count": 0,
-                    "total_verified_edge_count": 0,
-                    "unmapped_resource_count": 0,
-                    "unresolved_reference_count": 0,
-                    "collected_at": observed_at,
-                    "max_nodes": report_options.diagram_option("max_nodes"),
-                    "truncated": False,
-                    "omitted_node_count": 0,
-                    "confidence": "UNAVAILABLE",
-                    "relationship_confidence": "UNAVAILABLE",
-                    "relationship_coverage": "UNAVAILABLE",
-                    "inventory_completeness": "UNAVAILABLE",
-                    "collection_issue_count": 1,
-                    "time_basis": "REPORT_PERIOD",
-                    "snapshot_source": source,
-                    "period_start": period.get("start_dt"),
-                    "period_end": period.get("end_dt"),
-                    **window_metadata,
-                },
+            return None, {
+                "collector": "NetworkConfigurationSnapshotRepository",
+                "stage": "historical_snapshot_validation",
+                "target_type": "network_configuration",
+                "severity": "warning",
+                "code": "NETWORK_SNAPSHOT_OUTSIDE_REPORT_PERIOD",
+                "message": (
+                    "저장된 네트워크 구성의 실제 수집 시각이 보고 기간 밖이어서 "
+                    "기간 데이터로 사용하지 않았습니다."
+                ),
             }
 
-        topology = InfrastructureTopologyBuilder().build(
-            infrastructure,
-            collected_at=str(observed_at),
-            max_nodes=report_options.diagram_option("max_nodes"),
-            allowed_reference_categories=report_options.to_dict()[
-                "resource_categories"
-            ],
-            inventory_completeness=str(
-                infrastructure_metadata.get("inventory_completeness")
-                or "UNKNOWN"
-            ),
-            collection_issue_count=(
-                infrastructure_metadata.get("collection_issue_count") or 0
-            ),
+        missing_categories = requested_categories - set(
+            snapshot_categories(snapshot)
         )
-        summary = topology.setdefault("summary", {})
-        topology_window_metadata = (
-            {
-                "reference_at": (
-                    infrastructure_metadata.get("reference_at")
-                    or observed_at
-                ),
-                "eligible_start": None,
-                "eligible_end": None,
-                "snapshot_age_seconds": None,
-            }
-            if current_state_fallback
-            else window_metadata
-        )
-        summary.update({
-            "time_basis": time_basis,
-            "snapshot_source": source,
-            "period_start": period.get("start_dt"),
-            "period_end": period.get("end_dt"),
-            "source_report_run_id": infrastructure_metadata.get(
-                "source_report_run_id"
-            ),
-            **topology_window_metadata,
-        })
-        if current_state_fallback:
-            summary["confidence"] = "PARTIAL"
-            topology.setdefault("warnings", []).insert(0, {
-                "code": "CURRENT_STATE_TOPOLOGY_FALLBACK",
+        if missing_categories:
+            return None, {
+                "collector": "NetworkConfigurationSnapshotRepository",
+                "stage": "historical_snapshot_coverage",
+                "target_type": "network_configuration",
+                "severity": "warning",
+                "code": "NETWORK_SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE",
                 "message": (
-                    "보고 기간 안에 저장된 인프라 스냅샷이 없어, 보고 종료 "
-                    "전에 생성된 것으로 확인되는 현재 자원의 연결 관계를 "
-                    "표시합니다. 삭제되었거나 변경된 과거 구성은 복원되지 "
-                    "않으므로 보고 기간 당시의 정확한 구성으로 해석해서는 "
-                    "안 됩니다."
+                    "보고 기간의 네트워크 구성 스냅샷에 요청 범주가 모두 "
+                    f"포함되지 않았습니다: {', '.join(sorted(missing_categories))}"
                 ),
-                "source": "current_api_collection",
-                "confidence": "PARTIAL",
-            })
-        return topology
+            }
+        return snapshot, None
+
+    def _resolve_network_configuration(
+        self,
+        *,
+        period: Dict[str, Any],
+        collection_plan: ReportCollectionPlan,
+        customer_snapshot: Dict[str, Any],
+        resource_result: ResourceCollectionResult,
+    ) -> NetworkConfigurationResult:
+        """기간 스냅샷과 생성시점 백업을 혼동하지 않도록 분리한다."""
+        requested_categories = set(
+            collection_plan.selected_resource_categories
+        ) & set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+        if (
+            not collection_plan.report_options.section_enabled(
+                "infrastructure_inventory"
+            )
+            or not requested_categories
+        ):
+            return NetworkConfigurationResult()
+
+        infrastructure_metadata = resource_result.collection_metadata.get(
+            "infrastructure"
+        )
+        if not isinstance(infrastructure_metadata, dict):
+            infrastructure_metadata = {}
+        collected_categories = {
+            str(category).upper()
+            for category in (
+                infrastructure_metadata.get("collected_categories") or []
+            )
+        }
+        can_reuse_live_collection = bool(
+            infrastructure_metadata.get("source") == "LIVE_API_COLLECTION"
+            and requested_categories <= collected_categories
+        )
+
+        generation_errors: List[Dict[str, Any]] = []
+        generation_warnings: List[Dict[str, Any]] = []
+        if can_reuse_live_collection:
+            generation_configuration = configuration_records(
+                resource_result.infrastructure,
+                requested_categories,
+            )
+            captured_at = str(
+                infrastructure_metadata.get("completed_at")
+                or infrastructure_metadata.get("started_at")
+                or self._now_kst_iso()
+            )
+            collection_source = "LIVE_INFRASTRUCTURE_COLLECTION"
+        else:
+            (
+                generation_configuration,
+                generation_errors,
+                generation_warnings,
+            ) = self.collect_infrastructure(
+                servers=[],
+                server_raw_data={},
+                categories=requested_categories,
+            )
+            captured_at = self._now_kst_iso()
+            collection_source = "DEDICATED_NETWORK_API_COLLECTION"
+
+        generation_snapshot = build_generation_snapshot(
+            configuration=generation_configuration,
+            selected_categories=requested_categories,
+            captured_at=captured_at,
+            collection_source=collection_source,
+            errors=generation_errors,
+            warnings=generation_warnings,
+        )
+
+        captured_in_report_period = self._period_contains_timestamp(
+            period,
+            captured_at,
+        )
+        period_snapshot: Optional[Dict[str, Any]] = None
+        lookup_warning: Optional[Dict[str, Any]] = None
+        if not captured_in_report_period:
+            period_snapshot, lookup_warning = (
+                self._load_period_network_configuration_snapshot(
+                    period=period,
+                    customer=customer_snapshot,
+                    reference_at=captured_at,
+                    requested_categories=requested_categories,
+                )
+            )
+
+        warnings = list(generation_warnings)
+        if lookup_warning:
+            warnings.append(lookup_warning)
+
+        if period_snapshot is not None:
+            display_configuration = configuration_records(
+                period_snapshot.get("configuration"),
+                requested_categories,
+            )
+            display_captured_at = str(period_snapshot.get("captured_at") or "")
+            snapshot_reference = period_snapshot.get("_snapshot_reference")
+            if not isinstance(snapshot_reference, dict):
+                snapshot_reference = {}
+            display_source = "STORED_NETWORK_CONFIGURATION_SNAPSHOT"
+            source_report_run_id = snapshot_reference.get("report_run_id")
+            time_basis = "POINT_IN_TIME_WITHIN_REPORT_PERIOD"
+            is_report_period_snapshot = True
+            display_completeness = period_snapshot.get(
+                "collection_completeness"
+            )
+            display_issue_count = period_snapshot.get(
+                "collection_issue_count",
+                0,
+            )
+        else:
+            display_configuration = configuration_records(
+                generation_configuration,
+                requested_categories,
+            )
+            display_captured_at = captured_at
+            display_source = "REPORT_GENERATION_SNAPSHOT"
+            source_report_run_id = None
+            is_report_period_snapshot = captured_in_report_period
+            time_basis = (
+                "POINT_IN_TIME_WITHIN_REPORT_PERIOD"
+                if captured_in_report_period
+                else "REPORT_GENERATION_TIME_NOT_REPORT_PERIOD"
+            )
+            display_completeness = generation_snapshot.get(
+                "collection_completeness"
+            )
+            display_issue_count = generation_snapshot.get(
+                "collection_issue_count",
+                0,
+            )
+            if not captured_in_report_period:
+                warnings.append({
+                    "collector": "NetworkConfigurationSnapshotRepository",
+                    "stage": "historical_snapshot_lookup",
+                    "target_type": "network_configuration",
+                    "severity": "warning",
+                    "code": "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE",
+                    "message": (
+                        "보고 기간 안에 수집된 Route Table·ACG·Network ACL "
+                        "스냅샷이 없어, 보고서 생성 과정에서 백업한 현재 구성을 "
+                        "기간 데이터와 구분해 표시합니다."
+                    ),
+                })
+
+        metadata = {
+            "source": display_source,
+            "time_basis": time_basis,
+            "captured_at": display_captured_at,
+            "capture_trigger": "REPORT_GENERATION",
+            "is_point_in_time_snapshot": True,
+            "is_report_period_snapshot": is_report_period_snapshot,
+            "report_period_start": period.get("start_dt"),
+            "report_period_end": period.get("end_dt"),
+            "selected_categories": sorted(requested_categories),
+            "source_report_run_id": source_report_run_id,
+            "backup_captured_at": captured_at,
+            "backup_storage": "DEDICATED_NETWORK_CONFIGURATION_SNAPSHOT",
+            "collection_source": generation_snapshot.get(
+                "collection_source"
+            ),
+            "collection_completeness": display_completeness,
+            "collection_issue_count": display_issue_count,
+            "backup_collection_completeness": generation_snapshot.get(
+                "collection_completeness"
+            ),
+            "backup_collection_issue_count": generation_snapshot.get(
+                "collection_issue_count"
+            ),
+        }
+        return NetworkConfigurationResult(
+            display_configuration=display_configuration,
+            generation_snapshot=generation_snapshot,
+            metadata=metadata,
+            errors=generation_errors,
+            warnings=warnings,
+        )
 
     def _resolve_snapshot_decision(
         self,
@@ -1048,6 +1170,7 @@ class ReportRunner:
         period: Dict[str, Any],
         observability: ObservabilityResult,
         infrastructure: List[Dict[str, Any]],
+        network_configuration_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
         """과금 단계와 무관하게 완료된 수집 산출물을 먼저 보존한다.
 
@@ -1055,6 +1178,7 @@ class ReportRunner:
         필요하므로 이 저장 단계는 과금 수집보다 반드시 먼저 실행한다.
         """
         file_suffix = period["file_suffix"]
+        network_categories = set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
         self.print_server_metric_summary(
             observability.server_metrics,
             file_suffix=file_suffix,
@@ -1084,10 +1208,23 @@ class ReportRunner:
             filename=f"collection_errors_{file_suffix}.json",
         )
         self.save_json_file(
-            data=infrastructure,
+            data=[
+                resource
+                for resource in infrastructure
+                if str(resource.get("category") or "").upper()
+                not in network_categories
+            ],
             output_dir=self.output_dir,
             filename=f"infrastructure_inventory_{file_suffix}.json",
         )
+        if network_configuration_snapshot:
+            self.save_json_file(
+                data=network_configuration_snapshot,
+                output_dir=self.output_dir,
+                filename=(
+                    f"network_configuration_snapshot_{file_suffix}.json"
+                ),
+            )
         self.save_json_file(
             data=observability.infrastructure_metrics,
             output_dir=self.output_dir,
@@ -1882,7 +2019,6 @@ class ReportRunner:
         selected_monitoring_categories = (
             collection_plan.selected_monitoring_categories
         )
-        diagram_enabled = collection_plan.diagram_enabled
         monitoring_enabled = collection_plan.monitoring_enabled
         monitored_infrastructure_categories = (
             collection_plan.monitored_infrastructure_categories
@@ -1931,6 +2067,30 @@ class ReportRunner:
             customer_snapshot=customer_snapshot,
             resource_result=resource_result,
         )
+        network_configuration = self._resolve_network_configuration(
+            period=period,
+            collection_plan=collection_plan,
+            customer_snapshot=customer_snapshot,
+            resource_result=resource_result,
+        )
+        if network_configuration.generation_snapshot:
+            resource_result.infrastructure = replace_configuration_records(
+                resource_result.infrastructure,
+                network_configuration.display_configuration,
+            )
+            resource_result.infrastructure_errors = self._merge_error_lists(
+                resource_result.infrastructure_errors,
+                network_configuration.errors,
+            )
+            resource_result.infrastructure_warnings = (
+                self._merge_error_lists(
+                    resource_result.infrastructure_warnings,
+                    network_configuration.warnings,
+                )
+            )
+            resource_result.collection_metadata[
+                "network_configuration"
+            ] = network_configuration.metadata
         collection_metadata = resource_result.collection_metadata
         server_data = resource_result.servers
         server_errors = resource_result.server_errors
@@ -1980,6 +2140,9 @@ class ReportRunner:
             period=period,
             observability=observability,
             infrastructure=infrastructure_data,
+            network_configuration_snapshot=(
+                network_configuration.generation_snapshot
+            ),
         )
 
         (
@@ -1992,15 +2155,6 @@ class ReportRunner:
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,
         )
-
-        infrastructure_topology: Dict[str, Any] = {}
-        if diagram_enabled:
-            infrastructure_topology = self._build_period_topology(
-                period=period,
-                infrastructure=self._dict_records(infrastructure_data),
-                collection_metadata=collection_metadata,
-                report_options=report_options,
-            )
 
         report = ReportResult(
             period=period,
@@ -2019,9 +2173,11 @@ class ReportRunner:
             billing=billing_result,
             report_options=report_options_snapshot,
             collection_metadata=collection_metadata,
-            infrastructure_topology=infrastructure_topology,
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,
+            network_configuration_snapshot=(
+                network_configuration.generation_snapshot
+            ),
             generated_at=self._now_kst_iso(),
         )
         self._persist_report_artifacts(

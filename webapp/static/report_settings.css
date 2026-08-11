@@ -100,14 +100,6 @@
   flex: 0 0 auto;
 }
 
-.option-grid input[type="number"] {
-  width: 90px;
-  margin-left: auto;
-  padding: 7px;
-  border: 1px solid #cdd9e7;
-  border-radius: 8px;
-}
-
 .option-actions {
   display: flex;
   justify-content: flex-end;

@@ -88,8 +88,8 @@ def test_forced_test_customer_deletion_is_audited():
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "150"' in values
-    assert 'REPORT_SCHEMA_VERSION:-150' in (
+    assert 'schemaVersion: "170"' in values
+    assert 'REPORT_SCHEMA_VERSION:-170' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
 
@@ -154,6 +154,46 @@ def test_tenant_branding_is_size_limited_and_tenant_isolated():
     ).read_text(encoding="utf-8")
     assert "tenant_branding" in verification
     assert "Expected at least 33 tables" in verification
+
+
+def test_report_topology_settings_are_removed_safely():
+    migration = (
+        ROOT / "database" / "schema" / "160_remove_report_topology_settings.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "settings - 'diagram'" in migration
+    assert "infrastructure_diagram" in migration
+    assert "infrastructure_inventory" in migration
+    assert "jsonb_array_elements_text" in migration
+    assert "VALUES ('160'" in migration
+
+
+def test_network_configuration_snapshots_are_separate_and_tenant_isolated():
+    migration = (
+        ROOT
+        / "database"
+        / "schema"
+        / "170_network_configuration_snapshots.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "network_configuration_snapshots" in migration
+    assert "cloud_account_id uuid NOT NULL" in migration
+    assert "captured_at timestamptz NOT NULL" in migration
+    assert "period_start timestamptz NOT NULL" in migration
+    assert "period_end timestamptz NOT NULL" in migration
+    assert "source varchar(40) NOT NULL" in migration
+    assert "schema_version varchar(40) NOT NULL" in migration
+    assert "configuration jsonb NOT NULL" in migration
+    assert "jsonb_typeof(configuration) = 'array'" in migration
+    assert "REFERENCES control.report_runs(id, tenant_id, environment)" in migration
+    assert "REFERENCES control.cloud_accounts(id, tenant_id)" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "tenant_id = control.current_tenant_id()" in migration
+    assert "environment_worker_access" in migration
+    assert "GRANT SELECT, INSERT, DELETE" in migration
+    assert "GRANT SELECT, INSERT, UPDATE" not in migration
+    assert "VALUES ('170'" in migration
 
 
 def test_sourcebuild_deployment_waits_for_migration_job():

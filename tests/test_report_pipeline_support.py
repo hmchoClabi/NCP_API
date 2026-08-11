@@ -10,7 +10,6 @@ class ReportPipelineSupportTest(unittest.TestCase):
             "sections": ["infrastructure_inventory", "monitoring"],
             "resource_categories": ["SERVER", "VPC"],
             "monitoring_categories": ["LOAD_BALANCER"],
-            "diagram": {"enabled": False},
         })
 
         plan = build_collection_plan(options)

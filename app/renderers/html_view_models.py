@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from app.infrastructure_topology import TopologyDisplayOptions
 from app.report_options import ReportOptions
 
 
@@ -36,14 +35,12 @@ class ReportDisplayData:
     activity_events: List[Dict[str, Any]]
     infrastructure: List[Dict[str, Any]]
     load_balancer_target_groups: List[Dict[str, Any]]
-    topology_options: TopologyDisplayOptions
-    infrastructure_topology: Dict[str, Any]
     inventory_enabled: bool
-    diagram_enabled: bool
     monitoring_enabled: bool
     billing_enabled: bool
     organization_billing_enabled: bool
     infrastructure_metadata: Dict[str, Any]
+    network_configuration_metadata: Dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,8 +48,8 @@ class InfrastructureSectionHtml:
     """인프라 관련 섹션을 최종 문서 순서대로 보관한다."""
 
     inventory: str = ""
+    network_configuration: str = ""
     target_groups: str = ""
-    topology: str = ""
     server_details: str = ""
 
 
@@ -72,8 +69,8 @@ class ReportSectionHtml:
     summary: str = ""
     historical_notice: str = ""
     inventory: str = ""
+    network_configuration: str = ""
     target_groups: str = ""
-    topology: str = ""
     server_details: str = ""
     monitoring: str = ""
     billing: str = ""

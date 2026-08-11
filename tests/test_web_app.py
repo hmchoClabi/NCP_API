@@ -720,14 +720,9 @@ class MspCustomerDetailTests(unittest.TestCase):
             "/msp/customer/tenant-1/report-settings",
             data={
                 "csrf_token": "csrf-token",
-                "sections": ["billing", "infrastructure_diagram"],
+                "sections": ["billing", "infrastructure_inventory"],
                 "resource_categories": ["SERVER", "VPC"],
                 "monitoring_categories": ["SERVER"],
-                "diagram_enabled": "true",
-                "diagram_show_resource_name": "true",
-                "diagram_show_resource_id": "true",
-                "diagram_show_private_ip": "true",
-                "diagram_max_nodes": "80",
             },
         )
 
@@ -735,11 +730,10 @@ class MspCustomerDetailTests(unittest.TestCase):
         tenant_id, options, actor_id = self.repository.updated_report_settings[0]
         self.assertEqual((tenant_id, actor_id), ("tenant-1", "user-1"))
         self.assertEqual(options["sections"], [
-            "billing", "infrastructure_diagram",
+            "billing", "infrastructure_inventory",
         ])
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
-        self.assertTrue(options["diagram"]["show_resource_id"])
-        self.assertFalse(options["diagram"]["show_public_ip"])
+        self.assertEqual(options["monitoring_categories"], ["SERVER"])
 
     def test_msp_admin_can_upload_valid_customer_logo(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

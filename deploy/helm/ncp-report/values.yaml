@@ -14,7 +14,7 @@ migration:
     repository: ncp-report-migrate
     tag: local
     pullPolicy: IfNotPresent
-  schemaVersion: "150"
+  schemaVersion: "170"
   waitSeconds: 300
 
 existingSecret: ncp-report-secrets

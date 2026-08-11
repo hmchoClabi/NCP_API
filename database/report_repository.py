@@ -25,6 +25,12 @@ class DatabasePersistenceError(RuntimeError):
 class PostgresReportRepository:
     KST = ZoneInfo("Asia/Seoul")
     SCHEMAS = {"public": "public_data", "gov": "gov_data"}
+    NETWORK_CONFIGURATION_CATEGORIES = frozenset({
+        "ROUTE_TABLE",
+        "ACCESS_CONTROL_GROUP",
+        "NETWORK_ACL",
+    })
+    NETWORK_SNAPSHOT_SCHEMA_VERSION = "1.0"
 
     def __init__(
         self,
@@ -199,6 +205,125 @@ class PostgresReportRepository:
         }
         return result
 
+    def load_period_network_configuration_snapshot(
+        self,
+        period: Mapping[str, Any],
+        customer: Mapping[str, Any],
+        reference_at: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest network configuration captured in the period.
+
+        ``captured_at`` is the report-generation time, not the report lookup
+        time and not an arbitrary historical state reconstructed from NCP.
+        Consequently, only a snapshot whose capture time falls inside the
+        requested period is eligible for reuse.
+        """
+        tenant_id = self.settings.tenant_id
+        cloud_account_id = customer.get("cloud_account_id")
+        environment = str(customer.get("api_type") or "public").casefold()
+        if (
+            not tenant_id
+            or not cloud_account_id
+            or environment not in self.SCHEMAS
+        ):
+            return None
+
+        window = self._snapshot_eligibility_window(period, reference_at)
+        if window is None:
+            return None
+
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabasePersistenceError(
+                "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        schema = self.SCHEMAS[environment]
+        try:
+            with psycopg.connect(
+                **self.settings.connection_kwargs()
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
+                cursor.execute(
+                    f"""
+                    SELECT configuration, report_run_id, captured_at,
+                           period_start, period_end, end_exclusive,
+                           source, schema_version, capture_metadata
+                    FROM {schema}.network_configuration_snapshots
+                    WHERE tenant_id = %s
+                      AND cloud_account_id = %s
+                      AND captured_at >= %s
+                      AND captured_at < %s
+                    ORDER BY captured_at DESC, created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        str(tenant_id),
+                        str(cloud_account_id),
+                        window["eligible_start"],
+                        window["eligible_end"],
+                    ),
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            raise DatabasePersistenceError(
+                "Historical network configuration snapshot lookup failed."
+            ) from exc
+
+        if not row or not isinstance(row[0], list):
+            return None
+
+        captured_at = self._parse_datetime(row[2])
+        period_start = self._parse_datetime(row[3])
+        period_end = self._parse_datetime(row[4])
+        metadata = row[8] if isinstance(row[8], dict) else {}
+        raw_selected_categories = metadata.get("selected_categories")
+        selected_categories = (
+            list(raw_selected_categories)
+            if isinstance(raw_selected_categories, list)
+            else []
+        )
+        return {
+            "configuration": list(row[0]),
+            "captured_at": captured_at.isoformat(),
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "end_exclusive": bool(row[5]),
+            "source": str(row[6]),
+            "schema_version": str(row[7]),
+            "metadata": dict(metadata),
+            "selected_categories": selected_categories,
+            "collection_source": metadata.get("collection_source"),
+            "collection_completeness": metadata.get(
+                "collection_completeness"
+            ),
+            "collection_issue_count": metadata.get(
+                "collection_issue_count",
+                0,
+            ),
+            "reused": True,
+            "_snapshot_reference": {
+                "report_run_id": str(row[1]),
+                "captured_at": captured_at.isoformat(),
+                "capture_basis": "REPORT_GENERATION_TIME",
+                "reference_at": window["reference_at"].isoformat(),
+                "eligible_start": window["eligible_start"].isoformat(),
+                "eligible_end": window["eligible_end"].isoformat(),
+                "snapshot_age_seconds": max(
+                    0,
+                    int(
+                        (
+                            window["reference_at"] - captured_at
+                        ).total_seconds()
+                    ),
+                ),
+            },
+        }
+
     def _snapshot_eligibility_window(
         self,
         period: Mapping[str, Any],
@@ -289,7 +414,7 @@ class PostgresReportRepository:
                 attempt_count, error_count, started_at, completed_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                '1.3', '1.3', '1.3', %s, 1, %s, clock_timestamp(), clock_timestamp()
+                '1.4', '1.4', '1.4', %s, 1, %s, clock_timestamp(), clock_timestamp()
             )
             ON CONFLICT (idempotency_key) DO UPDATE SET
                 period_start = EXCLUDED.period_start,
@@ -365,6 +490,7 @@ class PostgresReportRepository:
             "metric_series", "metric_summaries", "cost_details",
             "billing_cost_facts", "raw_payload_refs",
             "billing_account_cost_facts",
+            "network_configuration_snapshots",
         ):
             cursor.execute(
                 f"DELETE FROM {schema}.{table} WHERE report_run_id = %s",
@@ -380,7 +506,7 @@ class PostgresReportRepository:
                 report_run_id, tenant_id, schema_version, normalized_data,
                 content_hash_sha256, collector_version, normalizer_version,
                 renderer_version
-            ) VALUES (%s, %s, '1.3', %s::jsonb, %s, '1.3', '1.3', '1.3')
+            ) VALUES (%s, %s, '1.4', %s::jsonb, %s, '1.4', '1.4', '1.4')
             """,
             (
                 report_run_id,
@@ -388,6 +514,14 @@ class PostgresReportRepository:
                 payload,
                 hashlib.sha256(payload.encode("utf-8")).hexdigest(),
             ),
+        )
+        self._insert_network_configuration_snapshot(
+            cursor,
+            schema,
+            report,
+            report_run_id,
+            tenant_id,
+            cloud_account_id,
         )
         self._insert_insight_events(
             cursor, schema, report, report_run_id, tenant_id
@@ -411,6 +545,170 @@ class PostgresReportRepository:
         self._insert_billing_account_cost_facts(
             cursor, schema, report, report_run_id, tenant_id,
             cloud_account_id,
+        )
+
+    def _insert_network_configuration_snapshot(
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+        cloud_account_id: Any,
+    ) -> None:
+        """Persist a report-generation network snapshot in its own table.
+
+        Reused historical data is deliberately not written again. Re-saving
+        it with a new timestamp would make an old configuration look as if it
+        had been observed at the current report generation time.
+        """
+        snapshot = getattr(report, "network_configuration_snapshot", None)
+        if snapshot is None:
+            return
+        if not isinstance(snapshot, Mapping):
+            raise DatabasePersistenceError(
+                "Network configuration snapshot must be an object."
+            )
+        if not snapshot:
+            return
+
+        source = str(snapshot.get("source") or "").strip().upper()
+        reused = bool(snapshot.get("reused"))
+        if reused or source == "STORED_NETWORK_CONFIGURATION_SNAPSHOT":
+            return
+        if source != "REPORT_GENERATION":
+            raise DatabasePersistenceError(
+                "Network configuration snapshot source must be REPORT_GENERATION."
+            )
+
+        raw_configuration = snapshot.get("configuration")
+        if not isinstance(raw_configuration, list):
+            raise DatabasePersistenceError(
+                "Network configuration snapshot data must be an array."
+            )
+
+        configuration = []
+        configuration_categories = set()
+        for item in raw_configuration:
+            if not isinstance(item, Mapping):
+                raise DatabasePersistenceError(
+                    "Network configuration snapshot entries must be objects."
+                )
+            category = str(item.get("category") or "").strip().upper()
+            if category not in self.NETWORK_CONFIGURATION_CATEGORIES:
+                raise DatabasePersistenceError(
+                    "Network configuration snapshot contains an unsupported category."
+                )
+            configuration.append(dict(item))
+            configuration_categories.add(category)
+
+        raw_selected_categories = snapshot.get("selected_categories")
+        selected_categories = sorted({
+            str(category).strip().upper()
+            for category in (
+                raw_selected_categories
+                if isinstance(raw_selected_categories, (list, tuple, set))
+                else []
+            )
+            if str(category).strip().upper()
+            in self.NETWORK_CONFIGURATION_CATEGORIES
+        })
+        if not selected_categories:
+            selected_categories = sorted(configuration_categories)
+        if not selected_categories:
+            return
+        if not configuration_categories.issubset(selected_categories):
+            raise DatabasePersistenceError(
+                "Network configuration contains a category outside the selected scope."
+            )
+
+        raw_metadata = snapshot.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
+        collection_issue_count = (
+            metadata.get("collection_issue_count")
+            if "collection_issue_count" in metadata
+            else snapshot.get("collection_issue_count")
+        )
+        try:
+            collection_issue_count = max(0, int(collection_issue_count or 0))
+        except (TypeError, ValueError):
+            collection_issue_count = 0
+        category_counts = {
+            category: sum(
+                str(item.get("category") or "").upper() == category
+                for item in configuration
+            )
+            for category in selected_categories
+        }
+        capture_metadata = {
+            "capture_basis": "REPORT_GENERATION_TIME",
+            "selected_categories": selected_categories,
+            "category_counts": category_counts,
+            "resource_count": len(configuration),
+            "collection_source": self._text(
+                metadata.get("collection_source")
+                or snapshot.get("collection_source"),
+                80,
+            ),
+            "collection_started_at": self._text(
+                metadata.get("collection_started_at")
+                or snapshot.get("collection_started_at"),
+                80,
+            ),
+            "collection_completed_at": self._text(
+                metadata.get("collection_completed_at")
+                or snapshot.get("collection_completed_at"),
+                80,
+            ),
+            "collection_completeness": self._text(
+                metadata.get("collection_completeness")
+                or snapshot.get("collection_completeness")
+                or metadata.get("completeness")
+                or snapshot.get("completeness"),
+                80,
+            ),
+            "collection_issue_count": collection_issue_count,
+        }
+        capture_metadata = {
+            key: value
+            for key, value in capture_metadata.items()
+            if value is not None
+        }
+
+        captured_at = self._parse_datetime(
+            snapshot.get("captured_at") or report.generated_at
+        )
+        period_start, period_end, end_exclusive = self._period_bounds(
+            report.period
+        )
+        configuration_payload = self._json(configuration)
+        cursor.execute(
+            f"""
+            INSERT INTO {schema}.network_configuration_snapshots (
+                report_run_id, tenant_id, cloud_account_id, captured_at,
+                period_start, period_end, end_exclusive, source,
+                schema_version, configuration, capture_metadata,
+                content_hash_sha256
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, 'REPORT_GENERATION',
+                %s, %s::jsonb, %s::jsonb, %s
+            )
+            """,
+            (
+                report_run_id,
+                tenant_id,
+                cloud_account_id,
+                captured_at,
+                period_start,
+                period_end,
+                end_exclusive,
+                self.NETWORK_SNAPSHOT_SCHEMA_VERSION,
+                configuration_payload,
+                self._json(capture_metadata),
+                hashlib.sha256(
+                    configuration_payload.encode("utf-8")
+                ).hexdigest(),
+            ),
         )
 
     def _insert_insight_events(

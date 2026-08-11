@@ -26,10 +26,12 @@ CATEGORY_LABELS = {
     "NAS": "NAS",
     "CLOUD_DB": "Cloud DB",
     "KUBERNETES": "Kubernetes",
-    "CDN": "CDN",
     "OBJECT_STORAGE": "Object Storage",
     "VPC": "VPC",
     "SUBNET": "Subnet",
+    "ROUTE_TABLE": "Route Table",
+    "ACCESS_CONTROL_GROUP": "ACG",
+    "NETWORK_ACL": "Network ACL",
     "NAT_GATEWAY": "NAT Gateway",
     "PUBLIC_IP": "Public IP",
     "VPC_PEERING": "VPC Peering",
@@ -49,7 +51,6 @@ CATEGORY_LABELS = {
     "CLOUD_HADOOP": "Cloud Hadoop",
     "DATA_STREAM": "Data Stream",
     "CLOUD_FUNCTIONS": "Cloud Functions",
-    "CONTAINER_REGISTRY": "Container Registry",
     "SECURITY_SERVICE": "Security Service",
     "IPSEC_VPN": "IPsec VPN",
     "CLOUD_CONNECT": "Cloud Connect",
@@ -64,6 +65,11 @@ CATEGORY_ALIASES = {
     "NKS": "KUBERNETES",
     "LB": "LOAD_BALANCER",
     "NATGW": "NAT_GATEWAY",
+    "ROUTETABLE": "ROUTE_TABLE",
+    "ACG": "ACCESS_CONTROL_GROUP",
+    "ACCESSCONTROLGROUP": "ACCESS_CONTROL_GROUP",
+    "NACL": "NETWORK_ACL",
+    "NETWORKACL": "NETWORK_ACL",
     "VPCPEERING": "VPC_PEERING",
     "VGW": "VIRTUAL_PRIVATE_GATEWAY",
     "AUTOSCALING": "AUTO_SCALING",
@@ -137,10 +143,14 @@ _RESOURCE_MANAGER_PRODUCTS = {
             "VPCKUBERNETESSERVICE",
         }
     ),
-    "CDN": frozenset({"CDN", "CDNPLUS", "GCDN", "GLOBALCDN"}),
     "OBJECT_STORAGE": frozenset({"OBJECTSTORAGE"}),
     "VPC": frozenset({"VPC"}),
     "SUBNET": frozenset({"VPC"}),
+    "ROUTE_TABLE": frozenset({"VPC"}),
+    "ACCESS_CONTROL_GROUP": frozenset(
+        {"SERVER", "VPCSERVER", "VSERVER"}
+    ),
+    "NETWORK_ACL": frozenset({"VPC"}),
     "NAT_GATEWAY": frozenset({"VPC"}),
     "PUBLIC_IP": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
     "VPC_PEERING": frozenset({"VPC"}),
@@ -162,7 +172,6 @@ _RESOURCE_MANAGER_PRODUCTS = {
     "CLOUD_HADOOP": frozenset({"CLOUDHADOOP", "VPCCLOUDHADOOP"}),
     "DATA_STREAM": frozenset({"DATASTREAM", "VPCDATASTREAM"}),
     "CLOUD_FUNCTIONS": frozenset({"CLOUDFUNCTIONS", "VPCCLOUDFUNCTIONS"}),
-    "CONTAINER_REGISTRY": frozenset({"CONTAINERREGISTRY"}),
     "SECURITY_SERVICE": frozenset(
         {"SECURITYMONITORING", "VPCSECURITYMONITORING"}
     ),
@@ -197,17 +206,14 @@ _RESOURCE_MANAGER_TYPES = {
     "KUBERNETES": frozenset(
         {"CLUSTER", "KUBERNETESCLUSTER", "NKSCLUSTER"}
     ),
-    "CDN": frozenset(
-        {
-            "CDNINSTANCE",
-            "CDNPLUSINSTANCE",
-            "GLOBALCDNINSTANCE",
-            "SERVICE",
-        }
-    ),
     "OBJECT_STORAGE": frozenset({"BUCKET", "OBJECTSTORAGEBUCKET"}),
     "VPC": frozenset({"VPC"}),
     "SUBNET": frozenset({"SUBNET"}),
+    "ROUTE_TABLE": frozenset({"ROUTETABLE"}),
+    "ACCESS_CONTROL_GROUP": frozenset(
+        {"ACCESSCONTROLGROUP", "ACG"}
+    ),
+    "NETWORK_ACL": frozenset({"NETWORKACL"}),
     "NAT_GATEWAY": frozenset({"NATGATEWAY"}),
     "PUBLIC_IP": frozenset({"PUBLICIP"}),
     "VPC_PEERING": frozenset({"VPCPEERING"}),
@@ -227,7 +233,6 @@ _RESOURCE_MANAGER_TYPES = {
     "CLOUD_HADOOP": frozenset({"CLUSTER"}),
     "DATA_STREAM": frozenset({"TOPIC"}),
     "CLOUD_FUNCTIONS": frozenset({"NAMESPACE"}),
-    "CONTAINER_REGISTRY": frozenset({"REGISTRY"}),
     "SECURITY_SERVICE": frozenset({"AV", "DDOS", "IDS", "IPS", "WAF"}),
     "IPSEC_VPN": frozenset({"IPSECVPNGATEWAY"}),
     "CLOUD_CONNECT": frozenset({"CLOUDCONNECT"}),

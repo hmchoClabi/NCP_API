@@ -1,9 +1,5 @@
 import unittest
 
-from app.infrastructure_topology import (
-    TOPOLOGY_PRESENTATION_POLICY_MODE,
-    TOPOLOGY_PRESENTATION_POLICY_VERSION,
-)
 from app.report_models import ReportResult
 
 
@@ -26,7 +22,7 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 "raw_metrics": {"CPU/used_rto": {"avg": [{"values": [1, 2]}]}},
             }],
         )
-        snapshot = report.to_dict()
+        snapshot = report.to_persistence_dict()
         snapshot["server_metrics"] = report.server_metrics
 
         restored = ReportResult.from_dict(snapshot)
@@ -37,7 +33,7 @@ class ReportResultSnapshotTests(unittest.TestCase):
             restored.infrastructure_metrics,
             report.infrastructure_metrics,
         )
-        self.assertEqual(snapshot["schema_version"], "1.3")
+        self.assertEqual(snapshot["schema_version"], "1.4")
 
     def test_legacy_snapshot_uses_servers_as_infrastructure_fallback(self):
         restored = ReportResult.from_dict({
@@ -54,148 +50,11 @@ class ReportResultSnapshotTests(unittest.TestCase):
             restored.display_infrastructure[0]["category"],
             "SERVER",
         )
-        self.assertFalse(
+        self.assertTrue(
             restored.selected_report_options.section_enabled(
-                "infrastructure_diagram"
+                "infrastructure_inventory"
             )
         )
-        self.assertEqual(restored.display_infrastructure_topology, {})
-
-    def test_stored_topology_outside_period_is_not_rendered(self):
-        report = ReportResult(
-            period={
-                "file_suffix": "202607",
-                "start_dt": "2026-07-01 00:00:00",
-                "end_dt": "2026-07-31 23:59:59",
-            },
-            infrastructure_topology={
-                "nodes": [{"node_id": "SERVER:current"}],
-                "edges": [],
-                "summary": {
-                    "collected_at": "2026-08-07T12:00:00+09:00",
-                    "confidence": "VERIFIED",
-                    "snapshot_source": "LIVE_API_COLLECTION",
-                },
-            },
-        )
-
-        topology = report.display_infrastructure_topology
-
-        self.assertEqual(topology["nodes"], [])
-        self.assertEqual(topology["summary"]["confidence"], "UNAVAILABLE")
-        self.assertEqual(
-            topology["warnings"][0]["code"],
-            "PERIOD_SNAPSHOT_UNAVAILABLE",
-        )
-
-    def test_legacy_placeholder_rebuilds_labelled_current_state_topology(self):
-        collected_at = "2026-08-09T22:19:17+09:00"
-        report = ReportResult(
-            period={
-                "file_suffix": "20260808",
-                "start_dt": "2026-08-08T00:00:00+09:00",
-                "end_dt": "2026-08-09T00:00:00+09:00",
-                "end_exclusive": True,
-            },
-            report_options={
-                "sections": ["infrastructure_diagram"],
-                "resource_categories": ["VPC", "SUBNET"],
-                "diagram": {"enabled": True},
-            },
-            infrastructure=[
-                {
-                    "category": "VPC",
-                    "resource_id": "vpc-1",
-                    "resource_name": "main-vpc",
-                    "details": {"vpc_no": "vpc-1"},
-                },
-                {
-                    "category": "SUBNET",
-                    "resource_id": "subnet-1",
-                    "resource_name": "app-subnet",
-                    "details": {"vpc_no": "vpc-1"},
-                },
-            ],
-            collection_metadata={
-                "infrastructure": {
-                    "source": "CURRENT_API_COLLECTION",
-                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
-                    "completed_at": collected_at,
-                    "reference_at": collected_at,
-                    "inventory_completeness": "PARTIAL",
-                    "collection_issue_count": 1,
-                }
-            },
-            infrastructure_topology={
-                "nodes": [],
-                "edges": [],
-                "warnings": [],
-                "summary": {
-                    "collected_at": collected_at,
-                    "confidence": "UNAVAILABLE",
-                    "time_basis": "REPORT_PERIOD",
-                    "snapshot_source": "CURRENT_API_COLLECTION",
-                },
-            },
-            generated_at="2026-08-09T22:19:40+09:00",
-        )
-
-        topology = report.display_infrastructure_topology
-
-        self.assertEqual(topology["summary"]["confidence"], "PARTIAL")
-        self.assertEqual(
-            topology["summary"]["time_basis"],
-            "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
-        )
-        self.assertEqual(len(topology["nodes"]), 1)
-        self.assertEqual(len(topology["edges"]), 0)
-        self.assertEqual(
-            topology["summary"]["presentation_policy"][
-                "excluded_empty_subnet_count"
-            ],
-            1,
-        )
-        self.assertEqual(
-            topology["warnings"][0]["code"],
-            "CURRENT_STATE_TOPOLOGY_FALLBACK",
-        )
-
-    def test_current_state_topology_with_mismatched_timestamp_is_rejected(self):
-        report = ReportResult(
-            period={
-                "start_dt": "2026-08-08T00:00:00+09:00",
-                "end_dt": "2026-08-09T00:00:00+09:00",
-                "end_exclusive": True,
-            },
-            report_options={
-                "sections": ["infrastructure_diagram"],
-                "resource_categories": ["VPC"],
-                "diagram": {"enabled": True},
-            },
-            collection_metadata={
-                "infrastructure": {
-                    "source": "CURRENT_API_COLLECTION",
-                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
-                    "completed_at": "2026-08-09T22:19:17+09:00",
-                }
-            },
-            infrastructure_topology={
-                "nodes": [{"node_id": "VPC:vpc-1"}],
-                "edges": [],
-                "summary": {
-                    "collected_at": "2026-08-09T22:20:17+09:00",
-                    "confidence": "PARTIAL",
-                    "time_basis": "CURRENT_STATE_FILTERED_BY_CREATE_TIME",
-                    "snapshot_source": "CURRENT_API_COLLECTION",
-                },
-            },
-            generated_at="2026-08-09T22:20:30+09:00",
-        )
-
-        topology = report.display_infrastructure_topology
-
-        self.assertEqual(topology["nodes"], [])
-        self.assertEqual(topology["summary"]["confidence"], "UNAVAILABLE")
 
     def test_public_and_persistence_inventory_are_separated(self):
         report = ReportResult(
@@ -204,7 +63,6 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 "sections": ["infrastructure_inventory", "monitoring"],
                 "resource_categories": ["SERVER"],
                 "monitoring_categories": ["CLOUD_DB"],
-                "diagram": {"enabled": False},
             },
             infrastructure=[
                 {"category": "SERVER", "resource_id": "server-1"},
@@ -234,7 +92,6 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 "sections": ["infrastructure_inventory"],
                 "resource_categories": ["LOAD_BALANCER"],
                 "monitoring_categories": ["LOAD_BALANCER"],
-                "diagram": {"enabled": False},
             },
             infrastructure=[
                 {"category": "LOAD_BALANCER", "resource_id": "lb-1"},
@@ -265,117 +122,76 @@ class ReportResultSnapshotTests(unittest.TestCase):
             "tg-1",
         )
 
-    def test_public_json_redacts_hidden_topology_and_internal_customer_fields(self):
+    def test_public_json_exposes_only_safe_inventory_fields(self):
         report = ReportResult(
             period={"file_suffix": "redacted"},
             customer={
                 "id": "customer-1",
-                "name": "고객 1",
+                "name": "Customer One",
                 "api_type": "public",
                 "region": "KR",
                 "credential_ref": "encrypted-db://credential-secret",
                 "cloud_account_id": "internal-account-uuid",
             },
             report_options={
-                "sections": ["infrastructure_diagram"],
+                "sections": ["infrastructure_inventory"],
                 "resource_categories": ["SERVER"],
                 "monitoring_categories": [],
-                "diagram": {
-                    "enabled": True,
-                    "show_resource_name": False,
-                    "show_resource_id": False,
-                    "show_private_ip": False,
-                    "show_public_ip": False,
-                    "show_network_cidr": False,
-                },
             },
             servers=[{
                 "server_id": "server-secret",
-                "server_name": "server-name-secret",
+                "server_name": "web-1",
                 "private_ip": "10.0.0.10",
+                "status": "RUN",
+                "unexpected_internal_field": "server-internal-secret",
             }],
             infrastructure=[{
                 "category": "SERVER",
-                "resource_id": "server-secret",
-                "resource_name": "server-name-secret",
-                "details": {"private_ip": "10.0.0.10"},
+                "resource_id": "resource-secret",
+                "resource_name": "web-1",
+                "status": "RUN",
+                "details": {
+                    "private_ip": "10.0.0.10",
+                    "network_cidr": "10.0.0.0/24",
+                    "network_interfaces": [{"resource_id": "nic-secret"}],
+                    "size_gb": 100,
+                    "unexpected_internal_field": "inventory-internal-secret",
+                },
             }],
-            infrastructure_topology={
-                "nodes": [{
-                    "node_id": "SERVER:server-secret",
-                    "category": "SERVER",
-                    "resource_id": "server-secret",
-                    "name": "server-name-secret",
-                    "private_ips": ["10.0.0.10"],
-                    "public_ips": ["203.0.113.10"],
-                    "network_cidrs": ["10.0.0.0/24"],
-                    "network_interface_count": 1,
-                    "network_interfaces": [{
-                        "resource_id": "nic-secret",
-                        "private_ips": ["10.0.0.11"],
-                    }],
-                    "attached_disk_count": 1,
-                    "attached_disk_total_gb": 100,
-                    "attached_disks": [{
-                        "resource_id": "disk-secret",
-                        "name": "disk-name-secret",
-                        "size_gb": 100,
-                    }],
-                    "public_ip_resource_ids": ["public-ip-secret"],
-                    "unexpected_internal_field": "topology-secret",
-                }],
-                "edges": [],
-                "unmapped_node_ids": ["SERVER:server-secret"],
-                "unresolved_node_ids": [],
-                "summary": {"confidence": "UNMAPPED"},
-            },
         )
 
         public_snapshot = report.to_dict()
         persistence_snapshot = report.to_persistence_dict()
         public_text = str(public_snapshot)
 
-        self.assertEqual(public_snapshot["servers"], [])
-        self.assertEqual(public_snapshot["infrastructure"], [])
-        self.assertNotIn("credential-secret", public_text)
-        self.assertNotIn("internal-account-uuid", public_text)
-        self.assertNotIn("server-secret", public_text)
-        self.assertNotIn("server-name-secret", public_text)
-        self.assertNotIn("10.0.0.10", public_text)
-        self.assertNotIn("203.0.113.10", public_text)
-        self.assertNotIn("10.0.0.0/24", public_text)
-        self.assertNotIn("10.0.0.11", public_text)
-        self.assertNotIn("nic-secret", public_text)
-        self.assertNotIn("disk-secret", public_text)
-        self.assertNotIn("disk-name-secret", public_text)
-        self.assertNotIn("public-ip-secret", public_text)
-        self.assertNotIn("topology-secret", public_text)
         self.assertEqual(
-            public_snapshot["infrastructure_topology"]["nodes"][0][
-                "node_id"
-            ],
-            "node-001",
+            public_snapshot["servers"],
+            [{"server_name": "web-1", "status": "RUN"}],
         )
         self.assertEqual(
-            public_snapshot["infrastructure_topology"]["nodes"][0][
-                "attached_disk_total_gb"
-            ],
-            100,
+            public_snapshot["infrastructure"],
+            [{
+                "category": "SERVER",
+                "resource_name": "web-1",
+                "status": "RUN",
+                "details": {"size_gb": 100},
+            }],
         )
-        public_summary = public_snapshot["infrastructure_topology"]["summary"]
-        self.assertEqual(
-            public_summary["presentation_policy_version"],
-            TOPOLOGY_PRESENTATION_POLICY_VERSION,
-        )
-        self.assertEqual(
-            public_summary["presentation_policy_mode"],
-            TOPOLOGY_PRESENTATION_POLICY_MODE,
-        )
-        self.assertEqual(
-            persistence_snapshot["infrastructure_topology"]["nodes"][0][
-                "resource_id"
-            ],
+        for secret in (
+            "credential-secret",
+            "internal-account-uuid",
             "server-secret",
+            "resource-secret",
+            "10.0.0.10",
+            "10.0.0.0/24",
+            "nic-secret",
+            "server-internal-secret",
+            "inventory-internal-secret",
+        ):
+            self.assertNotIn(secret, public_text)
+        self.assertEqual(
+            persistence_snapshot["infrastructure"][0]["resource_id"],
+            "resource-secret",
         )
 
     def test_snapshot_excludes_non_infrastructure_and_unsupported_metrics(self):
@@ -386,10 +202,12 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 {
                     "category": "LOAD_BALANCER",
                     "resource_id": "lb-1",
+                    "resource_name": "frontend",
                 },
                 {
                     "category": "ALARM",
                     "resource_id": "alarm-1",
+                    "resource_name": "internal-alarm",
                 },
             ],
             infrastructure_metrics=[
@@ -402,14 +220,15 @@ class ReportResultSnapshotTests(unittest.TestCase):
         snapshot = report.to_dict()
 
         self.assertEqual(
-            [item["resource_id"] for item in snapshot["infrastructure"]],
-            ["lb-1"],
+            [item["category"] for item in snapshot["infrastructure"]],
+            ["LOAD_BALANCER"],
         )
+        self.assertNotIn("resource_id", snapshot["infrastructure"][0])
         self.assertEqual(
             [item["category"] for item in snapshot["infrastructure_metrics"]],
             ["CLOUD_DB", "NAS"],
         )
-        self.assertNotIn("alarm-1", str(snapshot))
+        self.assertNotIn("internal-alarm", str(snapshot))
 
     def test_invalid_snapshot_is_rejected(self):
         with self.assertRaises(ValueError):

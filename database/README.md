@@ -41,7 +41,8 @@ PostgreSQL stores searchable and transactional data:
 - tenants, users, memberships and platform roles;
 - credential references (never NCP access or secret keys in plaintext);
 - schedules, report executions, artifacts and collection errors;
-- reproducible normalized report snapshots;
+- reproducible normalized report snapshots and separate network configuration
+  snapshots captured when a report is generated;
 - Insight and Activity events, metric summaries and cost details;
 - daily MSP dashboard facts, email delivery and audit history.
 
@@ -55,7 +56,7 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | Table | Purpose |
 | --- | --- |
 | `tenants` | Customer identity, Public/GOV environment and region |
-| `tenant_report_settings` | Per-customer report sections, resources and diagram options |
+| `tenant_report_settings` | Per-customer report sections and resource options |
 | `tenant_branding` | Validated customer logo used by newly generated report snapshots |
 | `users` | Login identity and MFA state; passwords are hashes only |
 | `memberships` | Customer-scoped viewer/admin roles |
@@ -75,13 +76,14 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 
 ### Environment data schemas
 
-`public_data` and `gov_data` contain the same eight tables. A constant
+`public_data` and `gov_data` contain the same environment-scoped tables. A constant
 environment check and a composite foreign key prevent a report run from being
 written to the wrong schema.
 
 | Table | Purpose |
 | --- | --- |
 | `report_snapshots` | Versioned normalized JSON used to reproduce a report |
+| `network_configuration_snapshots` | Route Table, ACG and Network ACL configuration captured at report generation time |
 | `insight_events` | Searchable Cloud Insight events and rule conditions |
 | `activity_events` | Searchable account, action and resource audit events |
 | `metric_series` | Chart points or an external artifact URI |
@@ -89,6 +91,14 @@ written to the wrong schema.
 | `cost_details` | Confirmed/estimated costs and calculation confidence |
 | `billing_cost_facts` | Period-aware confirmed, estimated and projected billing totals |
 | `raw_payload_refs` | URI and checksum for raw collector payloads |
+
+`network_configuration_snapshots.captured_at` is the time the report-generation
+workflow captured the network configuration. `period_start` and `period_end`
+are the report's requested data range and are kept separately; they do not mean
+that NCP returned a historical configuration for that range. A snapshot can be
+reused as historical evidence only when its `captured_at` falls inside the
+requested report period. Reopening or viewing a report does not create a new
+snapshot, and a reused snapshot is never saved again with a newer timestamp.
 
 ### `audit` schema
 

@@ -231,6 +231,30 @@ class EmptyVpcAPI:
             [],
         )
 
+    def get_route_table_subnet_list(self, **kwargs):
+        return wrapped(
+            "getRouteTableSubnetListResponse",
+            "subnetList",
+            [],
+        )
+
+    def get_route_list(self, **kwargs):
+        return wrapped("getRouteListResponse", "routeList", [])
+
+    def get_network_acl_list(self, **kwargs):
+        return wrapped(
+            "getNetworkAclListResponse",
+            "networkAclList",
+            [],
+        )
+
+    def get_network_acl_rule_list(self, **kwargs):
+        return wrapped(
+            "getNetworkAclRuleListResponse",
+            "networkAclRuleList",
+            [],
+        )
+
 
 class EmptyVserverAPI:
     def get_network_interface_instance_list(self, **kwargs):
@@ -265,6 +289,20 @@ class EmptyVserverAPI:
         return wrapped(
             "getMemberServerImageInstanceListResponse",
             "memberServerImageInstanceList",
+            [],
+        )
+
+    def get_access_control_group_list(self, **kwargs):
+        return wrapped(
+            "getAccessControlGroupListResponse",
+            "accessControlGroupList",
+            [],
+        )
+
+    def get_access_control_group_rule_list(self, **kwargs):
+        return wrapped(
+            "getAccessControlGroupRuleListResponse",
+            "accessControlGroupRuleList",
             [],
         )
 
@@ -438,6 +476,200 @@ class InfrastructureCollectorTests(unittest.TestCase):
             self.assertNotIn(removed_api, factory.requests)
         self.assertEqual(collector.last_errors, [])
         self.assertEqual(collector.last_warnings, [])
+
+    def test_collects_network_configuration_with_rule_snapshots(self):
+        vpc = Mock()
+        vpc.get_route_table_list.return_value = wrapped(
+            "getRouteTableListResponse",
+            "routeTableList",
+            [
+                {
+                    "routeTableNo": "rt-1",
+                    "routeTableName": "private-routes",
+                    "regionCode": "KR",
+                    "vpcNo": "vpc-1",
+                    "supportedSubnetType": {"code": "PRIVATE"},
+                    "routeTableStatus": {"code": "RUN"},
+                    "createDate": "2026-01-01T00:00:00+0900",
+                    "eventTime": "2026-08-10T09:00:00+0900",
+                }
+            ],
+        )
+        vpc.get_route_table_subnet_list.return_value = wrapped(
+            "getRouteTableSubnetListResponse",
+            "subnetList",
+            [
+                {
+                    "subnetNo": "subnet-1",
+                    "subnetName": "private-a",
+                    "subnet": "10.0.1.0/24",
+                    "zoneCode": "KR-1",
+                    "subnetType": {"code": "PRIVATE"},
+                }
+            ],
+        )
+        vpc.get_route_list.return_value = wrapped(
+            "getRouteListResponse",
+            "routeList",
+            [
+                {
+                    "routeTableNo": "rt-1",
+                    "destinationCidrBlock": "0.0.0.0/0",
+                    "targetName": "nat-1",
+                    "targetType": {"code": "NATGW"},
+                    "targetNo": "nat-1",
+                    "isDefault": False,
+                }
+            ],
+        )
+        vpc.get_network_acl_list.return_value = wrapped(
+            "getNetworkAclListResponse",
+            "networkAclList",
+            [
+                {
+                    "networkAclNo": "nacl-1",
+                    "networkAclName": "private-nacl",
+                    "vpcNo": "vpc-1",
+                    "networkAclStatus": {"code": "RUN"},
+                    "createDate": "2026-01-02T00:00:00+0900",
+                }
+            ],
+        )
+        vpc.get_network_acl_rule_list.return_value = wrapped(
+            "getNetworkAclRuleListResponse",
+            "networkAclRuleList",
+            [
+                {
+                    "networkAclNo": "nacl-1",
+                    "priority": 10,
+                    "networkAclRuleType": {"code": "INBND"},
+                    "protocolType": {"code": "TCP"},
+                    "portRange": "443",
+                    "ruleAction": {"code": "ALLOW"},
+                    "ipBlock": "10.0.0.0/8",
+                    "createDate": "2026-01-03T00:00:00+0900",
+                }
+            ],
+        )
+
+        vserver = Mock()
+        vserver.get_access_control_group_list.return_value = wrapped(
+            "getAccessControlGroupListResponse",
+            "accessControlGroupList",
+            [
+                {
+                    "accessControlGroupNo": "acg-1",
+                    "accessControlGroupName": "web-acg",
+                    "vpcNo": "vpc-1",
+                    "accessControlGroupStatus": {"code": "RUN"},
+                    "createDate": "2026-01-04T00:00:00+0900",
+                }
+            ],
+        )
+        vserver.get_access_control_group_rule_list.return_value = wrapped(
+            "getAccessControlGroupRuleListResponse",
+            "accessControlGroupRuleList",
+            [
+                {
+                    "accessControlGroupNo": "acg-1",
+                    "accessControlGroupRuleType": {"code": "OTBND"},
+                    "protocolType": {"code": "TCP", "number": 6},
+                    "ipBlock": "0.0.0.0/0",
+                    "portRange": "1-65535",
+                }
+            ],
+        )
+        collector = InfrastructureCollector(
+            build_factory(vpc=vpc, vserver=vserver)
+        )
+
+        resources = collector.collect(
+            [],
+            {},
+            categories=(
+                "ROUTE_TABLE",
+                "ACCESS_CONTROL_GROUP",
+                "NETWORK_ACL",
+            ),
+        )
+        by_category = {
+            resource["category"]: resource for resource in resources
+        }
+
+        route_table = by_category["ROUTE_TABLE"]
+        self.assertEqual(
+            route_table["create_time"],
+            "2026-01-01T00:00:00+0900",
+        )
+        self.assertEqual(
+            route_table["details"]["associated_subnet_nos"],
+            ["subnet-1"],
+        )
+        self.assertEqual(
+            route_table["details"]["routes"][0]["target_type"],
+            "NATGW",
+        )
+        self.assertEqual(
+            route_table["details"]["observation_time"],
+            "2026-08-10T09:00:00+0900",
+        )
+
+        access_control_group = by_category["ACCESS_CONTROL_GROUP"]
+        self.assertTrue(
+            access_control_group["details"]["rule_snapshot_available"]
+        )
+        self.assertEqual(
+            access_control_group["details"]["outbound_rule_count"],
+            1,
+        )
+        self.assertEqual(
+            access_control_group["details"]["rules"][0]["protocol_number"],
+            6,
+        )
+
+        network_acl = by_category["NETWORK_ACL"]
+        self.assertEqual(network_acl["details"]["inbound_rule_count"], 1)
+        self.assertEqual(
+            network_acl["details"]["rules"][0]["action"],
+            "ALLOW",
+        )
+        vpc.get_route_list.assert_called_once_with(
+            route_table_no="rt-1",
+            vpc_no="vpc-1",
+        )
+
+    def test_network_configuration_apis_are_selected_independently(self):
+        cases = (
+            ("ROUTE_TABLE", "get_route_table_list"),
+            ("ACCESS_CONTROL_GROUP", "get_access_control_group_list"),
+            ("NETWORK_ACL", "get_network_acl_list"),
+        )
+        for category, expected_method in cases:
+            with self.subTest(category=category):
+                vpc = Mock(wraps=EmptyVpcAPI())
+                vserver = Mock(wraps=EmptyVserverAPI())
+                collector = InfrastructureCollector(
+                    build_factory(vpc=vpc, vserver=vserver)
+                )
+
+                collector.collect([], {}, categories=(category,))
+
+                expected_api = (
+                    vserver if category == "ACCESS_CONTROL_GROUP" else vpc
+                )
+                getattr(expected_api, expected_method).assert_called_once()
+                unexpected_methods = {
+                    "get_route_table_list",
+                    "get_access_control_group_list",
+                    "get_network_acl_list",
+                } - {expected_method}
+                for method_name in unexpected_methods:
+                    api = (
+                        vserver
+                        if method_name == "get_access_control_group_list"
+                        else vpc
+                    )
+                    getattr(api, method_name).assert_not_called()
 
     def test_normalizer_canonicalizes_supported_category_aliases(self):
         resources = InfrastructureNormalizer().finalize(
@@ -655,13 +887,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
                     "platformType": "VPC",
                 },
                 {
-                    "productName": "GCDN",
-                    "resourceType": "Service",
-                    "resourceId": "cdn-1",
-                    "resourceName": "static",
-                    "platformType": "VPC",
-                },
-                {
                     "productName": "CDBServerless",
                     "resourceType": "Service",
                     "resourceId": "serverless-1",
@@ -678,7 +903,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
             },
             {
                 "redis-1": "CACHE",
-                "cdn-1": "GLOBAL_CDN",
                 "serverless-1": "SERVERLESS",
             },
         )
@@ -796,7 +1020,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
             ("VPCCloudDBforMySQL", "Service", "mysql"),
             ("VPCCloudDBforPostgreSQL", "Service", "postgresql"),
             ("VPCKubernetesService", "Cluster", "nks"),
-            ("GCDN", "Service", "gcdn"),
             ("ObjectStorage", "Bucket", "bucket"),
         ]
         excluded = [
@@ -804,6 +1027,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
             ("VPCKubernetesService", "NodePool", "node-pool"),
             ("ObjectStorage", "LifeCyclePolicy", "lifecycle"),
             ("CloudInsight", "EventRule", "alarm"),
+            ("GCDN", "Service", "gcdn"),
+            ("ContainerRegistry", "Registry", "registry"),
         ]
         raw_resources = [
             {
@@ -833,7 +1058,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "NAS",
                 "CLOUD_DB",
                 "KUBERNETES",
-                "CDN",
                 "OBJECT_STORAGE",
             },
         )
@@ -842,6 +1066,13 @@ class InfrastructureCollectorTests(unittest.TestCase):
         specs = {
             "vpc": ("VPC", "VPC", "VPC"),
             "subnet": ("VPC", "Subnet", "SUBNET"),
+            "route-table": ("VPC", "RouteTable", "ROUTE_TABLE"),
+            "acg": (
+                "VPCServer",
+                "AccessControlGroup",
+                "ACCESS_CONTROL_GROUP",
+            ),
+            "network-acl": ("VPC", "NetworkACL", "NETWORK_ACL"),
             "nat": ("VPC", "NATGateway", "NAT_GATEWAY"),
             "public-ip": ("VPCServer", "PublicIP", "PUBLIC_IP"),
             "peering": ("VPC", "VPCPeering", "VPC_PEERING"),
@@ -884,11 +1115,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "Namespace",
                 "CLOUD_FUNCTIONS",
             ),
-            "registry": (
-                "ContainerRegistry",
-                "Registry",
-                "CONTAINER_REGISTRY",
-            ),
             "waf": (
                 "VPCSecurityMonitoring",
                 "WAF",
@@ -907,6 +1133,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             ("VPCCloudHadoop", "Server", "hadoop-child"),
             ("VPCDataStream", "Connector", "connector"),
             ("VPCCloudFunctions", "Action", "function-action"),
+            ("ContainerRegistry", "Registry", "container-registry"),
             ("ContainerRegistry", "Image", "container-image"),
             ("VPCBackup", "Job", "backup-job"),
             ("VPCBackup", "Policy", "backup-policy"),
@@ -958,7 +1185,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
         for _, _, resource_id in excluded_specs:
             self.assertNotIn(resource_id, by_id)
 
-    def test_normalizers_keep_only_api_explicit_topology_evidence(self):
+    def test_normalizers_preserve_inventory_details(self):
         normalizer = InfrastructureNormalizer()
         server = normalizer.normalize_servers(
             [
@@ -985,18 +1212,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
             server["details"]["all_private_ips"],
             ["10.0.1.4", "10.0.1.5"],
         )
-        self.assertEqual(server["details"]["network_interface_nos"], ["nic-1"])
-        self.assertEqual(
-            {
-                (relation["target_category"], relation["target_id"])
-                for relation in server["details"]["explicit_relations"]
-            },
-            {
-                ("VPC", "vpc-1"),
-                ("SUBNET", "subnet-1"),
-                ("NETWORK_INTERFACE", "nic-1"),
-            },
-        )
+        self.assertEqual(server["details"]["vpc_no"], "vpc-1")
+        self.assertEqual(server["details"]["subnet_no"], "subnet-1")
 
         load_balancer = normalizer.normalize_load_balancers(
             [
@@ -1018,21 +1235,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
             {"tg-1": [{"targetNo": "server-1", "targetIp": "10.0.1.4"}]},
         )[0]
         self.assertEqual(load_balancer["details"]["target_group_nos"], ["tg-1"])
-        self.assertEqual(
-            load_balancer["details"]["target_server_instance_nos"],
-            ["server-2", "server-1"],
-        )
-        self.assertEqual(
-            {
-                relation["source_field"]
-                for relation in load_balancer["details"]["explicit_relations"]
-                if relation["target_category"] == "SERVER"
-            },
-            {
-                "targetGroupList[].targetNoList[]",
-                "targetList[].targetNo",
-            },
-        )
+        self.assertEqual(load_balancer["details"]["registered_target_count"], 1)
+        self.assertEqual(load_balancer["details"]["subnet_count"], 2)
 
         subnet = normalizer.normalize_subnets(
             [
@@ -1042,36 +1246,10 @@ class InfrastructureCollectorTests(unittest.TestCase):
                     "vpcNo": "vpc-1",
                     "subnet": "10.0.1.0/24",
                 }
-            ],
-            {
-                "subnet-1": {
-                    "route_table_nos": ["rt-1"],
-                    "routes": [
-                        {
-                            "targetType": {"code": "NATGW"},
-                            "targetNo": "nat-1",
-                        },
-                        {"targetType": {"code": "IGW"}},
-                        {
-                            "targetType": {"code": "NATGW"},
-                            "targetNo": "https://not-an-id.invalid",
-                        },
-                    ],
-                }
-            },
+            ]
         )[0]
-        self.assertEqual(
-            {
-                (relation["target_category"], relation["target_id"])
-                for relation in subnet["details"]["explicit_relations"]
-            },
-            {("VPC", "vpc-1"), ("NAT_GATEWAY", "nat-1")},
-        )
-        self.assertEqual(
-            subnet["details"]["reference_only_route_target_types"],
-            ["IGW"],
-        )
-        self.assertNotIn("not-an-id.invalid", json.dumps(subnet))
+        self.assertEqual(subnet["details"]["vpc_no"], "vpc-1")
+        self.assertEqual(subnet["details"]["ipv4_cidr_block"], "10.0.1.0/24")
 
         database = normalizer.normalize_cdb(
             "MYSQL",
@@ -1094,27 +1272,6 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )[0]
         self.assertEqual(database["details"]["server_names"], ["orders-db-001"])
         self.assertEqual(database["details"]["private_ips"], ["10.0.2.10"])
-
-        registry = normalizer.normalize_container_registries(
-            [
-                {
-                    "name": "production-images",
-                    "private_id": "private-access-1",
-                    "end_point": "registry.example.invalid",
-                    "private_end_point": "private.registry.example.invalid",
-                    "end_point_enabled": True,
-                    "status": "running",
-                }
-            ]
-        )[0]
-        self.assertEqual(registry["resource_id"], "production-images")
-        self.assertIsNone(registry["platform"])
-        self.assertEqual(
-            registry["details"]["private_access_id"],
-            "private-access-1",
-        )
-        self.assertTrue(registry["details"]["client_access_enabled"])
-        self.assertNotIn("registry.example.invalid", json.dumps(registry))
 
     def test_selected_category_calls_only_relevant_direct_service(self):
         vpc = Mock()
