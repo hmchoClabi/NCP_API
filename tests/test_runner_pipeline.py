@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from app.customer import CustomerProfile
 from app.report_options import ReportOptions
 from app.report_pipeline import (
+    ObservabilityResult,
     ResourceCollectionResult,
     build_collection_plan,
 )
@@ -1239,6 +1240,78 @@ class RunnerPipelineTests(unittest.TestCase):
                 ],
                 "1.4",
             )
+
+    def test_diagnostic_json_excludes_raw_network_configuration(self):
+        sensitive_rule_marker = "must-not-leak-network-rule"
+        network_configuration = [
+            {
+                "category": "ROUTE_TABLE",
+                "resource_id": "rt-1",
+                "details": {
+                    "routes": [{
+                        "destination_cidr": "0.0.0.0/0",
+                        "description": sensitive_rule_marker,
+                    }]
+                },
+            },
+            {
+                "category": "ACCESS_CONTROL_GROUP",
+                "resource_id": "acg-1",
+                "details": {
+                    "rules": [{
+                        "source_ip_block": "10.0.0.0/8",
+                        "description": sensitive_rule_marker,
+                    }]
+                },
+            },
+            {
+                "category": "NETWORK_ACL",
+                "resource_id": "nacl-1",
+                "details": {
+                    "rules": [{
+                        "source_ip_block": "10.0.0.0/8",
+                        "description": sensitive_rule_marker,
+                    }]
+                },
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = self._runner_without_factory_init(temp_dir)
+            suffix = "20260601_20260630"
+            runner._write_prebilling_artifacts(
+                period={"file_suffix": suffix},
+                observability=ObservabilityResult(),
+                infrastructure=[
+                    {
+                        "category": "SERVER",
+                        "resource_id": "server-1",
+                    },
+                    *network_configuration,
+                ],
+            )
+
+            inventory_path = Path(temp_dir) / (
+                f"infrastructure_inventory_{suffix}.json"
+            )
+            inventory = json.loads(
+                inventory_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                [item["category"] for item in inventory],
+                ["SERVER"],
+            )
+            self.assertFalse(
+                (Path(temp_dir) / (
+                    f"network_configuration_snapshot_{suffix}.json"
+                )).exists()
+            )
+            for diagnostic_path in Path(temp_dir).glob("*.json"):
+                with self.subTest(filename=diagnostic_path.name):
+                    self.assertNotIn(
+                        sensitive_rule_marker,
+                        diagnostic_path.read_text(encoding="utf-8"),
+                    )
 
     def test_period_scoped_empty_summary_files_replace_stale_content(self):
         with tempfile.TemporaryDirectory() as temp_dir:

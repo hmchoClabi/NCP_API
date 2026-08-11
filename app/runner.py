@@ -1170,7 +1170,6 @@ class ReportRunner:
         period: Dict[str, Any],
         observability: ObservabilityResult,
         infrastructure: List[Dict[str, Any]],
-        network_configuration_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
         """과금 단계와 무관하게 완료된 수집 산출물을 먼저 보존한다.
 
@@ -1217,14 +1216,6 @@ class ReportRunner:
             output_dir=self.output_dir,
             filename=f"infrastructure_inventory_{file_suffix}.json",
         )
-        if network_configuration_snapshot:
-            self.save_json_file(
-                data=network_configuration_snapshot,
-                output_dir=self.output_dir,
-                filename=(
-                    f"network_configuration_snapshot_{file_suffix}.json"
-                ),
-            )
         self.save_json_file(
             data=observability.infrastructure_metrics,
             output_dir=self.output_dir,
@@ -2140,9 +2131,6 @@ class ReportRunner:
             period=period,
             observability=observability,
             infrastructure=infrastructure_data,
-            network_configuration_snapshot=(
-                network_configuration.generation_snapshot
-            ),
         )
 
         (
