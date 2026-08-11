@@ -19,6 +19,7 @@ from app.renderers.infrastructure_presenter import (
     merge_server_details,
     resource_connection_summary,
     resource_size_summary,
+    server_spec_summary,
 )
 from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import (
@@ -311,11 +312,25 @@ class HtmlReportRenderer:
             if str(resource.get("category") or "").upper()
             not in network_categories
         ]
+        server_resources = [
+            resource
+            for resource in inventory_resources
+            if str(resource.get("category") or "").upper() == "SERVER"
+        ]
+        non_server_resources = [
+            resource
+            for resource in inventory_resources
+            if str(resource.get("category") or "").upper() != "SERVER"
+        ]
         inventory_html = (
-            self._infrastructure_section(
-                inventory_resources,
-                report.servers,
-            )
+            "".join((
+                self._server_section(
+                    server_resources,
+                    report.servers,
+                    report.infrastructure,
+                ),
+                self._infrastructure_section(non_server_resources),
+            ))
             if display.inventory_enabled and inventory_resources else ""
         )
         network_configuration_html = (
@@ -657,8 +672,10 @@ class HtmlReportRenderer:
     def _infrastructure_section(
         self,
         resources: List[Dict[str, Any]],
-        servers: List[Dict[str, Any]],
     ) -> str:
+        if not resources:
+            return ""
+
         allowed = {
             category for category, _ in self.INFRASTRUCTURE_CATEGORIES
         }
@@ -666,9 +683,9 @@ class HtmlReportRenderer:
         prepared = []
 
         for candidate in self._records(resources):
-            resource = merge_server_details(candidate, servers)
+            resource = candidate
             category = str(resource.get("category") or "").upper()
-            if category not in allowed:
+            if category not in allowed or category == "SERVER":
                 continue
             counts[category] += 1
             details = resource.get("details")
@@ -702,6 +719,9 @@ class HtmlReportRenderer:
                     )
                 ),
             })
+
+        if not prepared:
+            return ""
 
         summary_categories = [
             (category, label)
@@ -744,15 +764,123 @@ class HtmlReportRenderer:
         )
         content = summary + table
         return self._section(
-            "자원 현황",
+            "기타 자원 현황",
             (
-                "선택한 자원과 서버 상세를 한 표에 표시합니다. 규모 열은 "
+                "서버를 제외한 선택 자원을 표시합니다. 규모 열은 "
                 "NCP 응답에서 확인된 SKU·사양·용량·처리 등급 등 과금 관련 "
                 "지표이며 실제 청구 금액을 의미하지 않습니다."
             ),
             content,
             len(prepared),
         )
+
+    def _server_section(
+        self,
+        resources: List[Dict[str, Any]],
+        servers: List[Dict[str, Any]],
+        infrastructure: List[Dict[str, Any]],
+    ) -> str:
+        """서버 자원을 전용 열 구조로 표시한다."""
+        if not resources:
+            return ""
+
+        prepared = []
+        for candidate in self._records(resources):
+            resource = merge_server_details(candidate, servers)
+            details = self._mapping(resource.get("details"))
+            private_ips = details.get("all_private_ips") or details.get(
+                "private_ip"
+            )
+            prepared.append({
+                **resource,
+                "server_name": resource.get("resource_name"),
+                "server_spec": server_spec_summary(details),
+                "vpc": self._resource_membership_label(
+                    details.get("vpc_no"),
+                    "VPC",
+                    infrastructure,
+                ),
+                "subnet": self._resource_membership_label(
+                    details.get("subnet_no"),
+                    "SUBNET",
+                    infrastructure,
+                ),
+                "public_ip": self._compact_values(details.get("public_ip")),
+                "private_ip": self._compact_values(private_ips),
+                "create_time_text": self._infrastructure_create_time(
+                    resource.get("create_time")
+                ),
+                "historical_presence_text": (
+                    self._historical_confidence_text(
+                        details.get("historical_presence_confidence")
+                    )
+                ),
+            })
+
+        columns = [
+            ("server_name", "서버명"),
+            ("status", "서버 상태"),
+            ("server_spec", "서버 스펙"),
+            ("vpc", "소속 VPC"),
+            ("subnet", "소속 Subnet"),
+            ("public_ip", "Public IP"),
+            ("private_ip", "Private IP"),
+            ("create_time_text", "생성 시각 (KST)"),
+        ]
+        if any(
+            self._mapping(resource.get("details")).get(
+                "historical_presence_confidence"
+            )
+            for resource in prepared
+        ):
+            columns.append(("historical_presence_text", "기간 존재 판단"))
+
+        return self._section(
+            "서버 현황",
+            (
+                "서버별 상태, NCP 상품·컴퓨팅 사양, 연결 스토리지, "
+                "소속 네트워크와 IP를 표시합니다."
+            ),
+            self._table(prepared, tuple(columns)),
+            len(prepared),
+        )
+
+    def _resource_membership_label(
+        self,
+        resource_id: Any,
+        category: str,
+        resources: List[Dict[str, Any]],
+    ) -> str:
+        """VPC·Subnet ID를 수집된 자원명과 함께 사람이 읽기 좋게 표시한다."""
+        normalized_id = str(resource_id or "").strip()
+        if not normalized_id:
+            return "-"
+        for resource in self._records(resources):
+            if str(resource.get("category") or "").upper() != category:
+                continue
+            if str(resource.get("resource_id") or "").strip() != normalized_id:
+                continue
+            resource_name = str(resource.get("resource_name") or "").strip()
+            if resource_name and resource_name != normalized_id:
+                return f"{resource_name} ({normalized_id})"
+            break
+        return normalized_id
+
+    @staticmethod
+    def _compact_values(value: Any) -> str:
+        """IP처럼 짧은 복수 값을 중복 없이 쉼표로 연결한다."""
+        if isinstance(value, (list, tuple, set)):
+            values = []
+            seen = set()
+            for item in value:
+                text = str(item or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                values.append(text)
+            return ", ".join(values) or "-"
+        text = str(value or "").strip()
+        return text or "-"
 
     def _network_configuration_section(
         self,

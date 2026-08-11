@@ -135,9 +135,15 @@ def merge_server_details(
         return merged
 
     raw_server = _mapping(server.get("raw_server"))
+    if not _has_value(merged.get("resource_name")):
+        merged["resource_name"] = server.get("server_name")
+    if not _has_value(merged.get("status")):
+        merged["status"] = server.get("status")
     values = {
         "cpu_count": server.get("cpu_count"),
         "memory_gb": server.get("memory_gb"),
+        "vpc_no": server.get("vpc_id") or raw_server.get("vpcNo"),
+        "subnet_no": server.get("subnet_id") or raw_server.get("subnetNo"),
         "private_ip": server.get("private_ip"),
         "public_ip": server.get("public_ip"),
         "all_private_ips": _server_private_ips(server),
@@ -155,8 +161,40 @@ def merge_server_details(
     for key, value in values.items():
         if key not in details and _has_value(value):
             details[key] = value
+    if not _has_value(merged.get("create_time")):
+        create_time = (
+            server.get("create_date")
+            or server.get("create_time")
+            or raw_server.get("createDate")
+        )
+        if _has_value(create_time):
+            merged["create_time"] = create_time
     merged["details"] = details
     return merged
+
+
+def server_spec_summary(details: Mapping[str, Any]) -> str:
+    """서버 상품·컴퓨팅 사양과 연결 스토리지 규모를 한 셀로 요약한다."""
+    parts = []
+    product_name = details.get("server_product_name")
+    product_code = details.get("server_product_code")
+    if _has_value(product_name):
+        _append_value(parts, "상품", product_name)
+    elif _has_value(product_code):
+        _append_value(parts, "SKU", product_code)
+    _append_suffixed_value(parts, "vCPU", details.get("cpu_count"), "개")
+    _append_suffixed_value(parts, "메모리", details.get("memory_gb"), " GB")
+
+    storage_count = details.get("storage_count")
+    storage_size = details.get("storage_size_gb_total")
+    if _has_value(storage_count) or _has_value(storage_size):
+        storage_values = []
+        if _has_value(storage_count):
+            storage_values.append(f"{_display_value(storage_count)}개")
+        if _has_value(storage_size):
+            storage_values.append(f"{_display_value(storage_size)} GB")
+        parts.append(f"연결 스토리지: {' / '.join(storage_values)}")
+    return " · ".join(parts) or "수집된 서버 사양 정보 없음"
 
 
 def resource_size_summary(category: Any, details: Mapping[str, Any]) -> str:
@@ -292,6 +330,16 @@ def _server_storage_size_gb(server: Mapping[str, Any]) -> float | int | None:
 def _append_value(parts: list[str], label: str, value: Any) -> None:
     if _has_value(value):
         parts.append(f"{label}: {_display_value(value)}")
+
+
+def _append_suffixed_value(
+    parts: list[str],
+    label: str,
+    value: Any,
+    suffix: str,
+) -> None:
+    if _has_value(value):
+        parts.append(f"{label}: {_display_value(value)}{suffix}")
 
 
 def _first_value(details: Mapping[str, Any], keys: Sequence[str]) -> Any:

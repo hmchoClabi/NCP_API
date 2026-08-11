@@ -4,6 +4,7 @@ from app.renderers.infrastructure_presenter import (
     merge_server_details,
     resource_connection_summary,
     resource_size_summary,
+    server_spec_summary,
 )
 
 
@@ -73,27 +74,58 @@ class InfrastructurePresenterTests(unittest.TestCase):
         resource = {
             "category": "SERVER",
             "resource_id": "server-1",
-            "resource_name": "web-1",
+            "resource_name": None,
+            "status": None,
             "details": {"cpu_count": 8},
         }
         server = {
             "server_id": "server-1",
             "server_name": "web-1",
+            "status": "RUN",
             "cpu_count": 4,
             "memory_gb": 16,
+            "vpc_id": "vpc-1",
+            "subnet_id": "subnet-1",
             "private_ip": "10.0.0.10",
             "storages": [{"size_gb": 50}, {"size_gb": 100}],
+            "raw_server": {
+                "serverProductCode": "SVR.PRODUCT.1",
+                "serverProductName": "Standard 4 vCPU, 16 GB",
+                "createDate": "2026-07-01T00:00:00+09:00",
+            },
         }
 
         merged = merge_server_details(resource, [server])
 
+        self.assertEqual(merged["resource_name"], "web-1")
+        self.assertEqual(merged["status"], "RUN")
         self.assertEqual(merged["details"]["cpu_count"], 8)
         self.assertEqual(merged["details"]["memory_gb"], 16)
         self.assertEqual(merged["details"]["storage_count"], 2)
         self.assertEqual(merged["details"]["storage_size_gb_total"], 150)
+        self.assertEqual(merged["details"]["vpc_no"], "vpc-1")
+        self.assertEqual(merged["details"]["subnet_no"], "subnet-1")
+        self.assertEqual(
+            merged["create_time"],
+            "2026-07-01T00:00:00+09:00",
+        )
         self.assertEqual(
             resource_connection_summary("SERVER", merged["details"]),
-            "Private: 10.0.0.10 · 연결 스토리지: 2개 / 150 GB",
+            (
+                "Private: 10.0.0.10 · 연결 스토리지: 2개 / 150 GB · "
+                "VPC: vpc-1 · Subnet: subnet-1"
+            ),
+        )
+        self.assertEqual(
+            server_spec_summary(merged["details"]),
+            (
+                "상품: Standard 4 vCPU, 16 GB · vCPU: 8개 · "
+                "메모리: 16 GB · 연결 스토리지: 2개 / 150 GB"
+            ),
+        )
+        self.assertEqual(
+            server_spec_summary({"server_product_code": "SVR.PRODUCT.1"}),
+            "SKU: SVR.PRODUCT.1",
         )
 
     def test_duplicate_server_names_are_not_guessed(self):

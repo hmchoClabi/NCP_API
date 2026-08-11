@@ -227,21 +227,29 @@ class HtmlReportRendererTests(unittest.TestCase):
         ]
 
         html = HtmlReportRenderer().render(report)
-        inventory = html.split("<h2>자원 현황</h2>", 1)[1].split(
+        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
             "</section>",
             1,
         )[0]
+        resource_inventory = html.split(
+            "<h2>기타 자원 현황</h2>",
+            1,
+        )[1].split("</section>", 1)[0]
 
-        for index in range(1, 8):
+        self.assertIn("allowed-1", server_inventory)
+        self.assertNotIn("allowed-1", resource_inventory)
+        for index in range(2, 8):
             with self.subTest(index=index):
-                self.assertIn(f"allowed-{index}", inventory)
-        self.assertIn("7건", inventory)
-        self.assertIn("1970-01-01 09:00 KST", inventory)
+                self.assertIn(f"allowed-{index}", resource_inventory)
+                self.assertNotIn(f"allowed-{index}", server_inventory)
+        self.assertIn("1건", server_inventory)
+        self.assertIn("6건", resource_inventory)
+        self.assertIn("1970-01-01 09:00 KST", server_inventory)
         self.assertNotIn("excluded-cdn", html)
         self.assertNotIn("excluded-alarm-instance", html)
         self.assertNotIn("excluded-sub-account", html)
-        self.assertIn("규모 / 과금 관련 지표", inventory)
-        self.assertIn("주소 / 연결", inventory)
+        self.assertIn("규모 / 과금 관련 지표", resource_inventory)
+        self.assertIn("주소 / 연결", resource_inventory)
 
         details = HtmlReportRenderer()._infrastructure_details_text({
             "kubernetes_version": "1.32",
@@ -252,11 +260,11 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("HA: 사용", details)
         self.assertIn("암호화: 미사용", details)
 
-    def test_server_details_are_merged_into_resource_inventory(self):
+    def test_server_inventory_has_dedicated_columns_and_network_names(self):
         report = self._sample_report()
         report.report_options = {
             "sections": ["infrastructure_inventory"],
-            "resource_categories": ["SERVER", "BLOCK_STORAGE"],
+            "resource_categories": ["SERVER", "VPC", "SUBNET"],
             "monitoring_categories": [],
         }
         report.servers = [{
@@ -266,37 +274,167 @@ class HtmlReportRendererTests(unittest.TestCase):
             "memory_gb": 16,
             "private_ip": "10.0.1.10",
             "public_ip": "203.0.113.10",
+            "vpc_id": "vpc-1",
+            "subnet_id": "subnet-1",
+            "nics": [{
+                "all_private_ips": ["10.0.1.10", "10.0.1.11"],
+            }],
+            "storages": [{"size_gb": 50}, {"size_gb": 100}],
             "raw_server": {
                 "serverProductCode": "SVR.VSVR.STAND.C002.M008.NET.SSD.B050.G002",
                 "serverProductName": "Standard 4 vCPU, 16 GB",
+                "createDate": "2026-07-01T00:00:00+09:00",
             },
         }]
+        report.infrastructure = [
+            {
+                "category": "SERVER",
+                "category_label": "서버",
+                "service_name": "Server",
+                "resource_type": "ServerInstance",
+                "resource_id": "server-1",
+                "resource_name": "web-01",
+                "status": "RUN",
+                "region_code": "KR",
+                "zone_code": "KR-1",
+                "details": {},
+            },
+            {
+                "category": "VPC",
+                "category_label": "VPC",
+                "resource_id": "vpc-1",
+                "resource_name": "production-vpc",
+                "details": {},
+            },
+            {
+                "category": "SUBNET",
+                "category_label": "Subnet",
+                "resource_id": "subnet-1",
+                "resource_name": "private-a",
+                "details": {},
+            },
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
+            "</section>",
+            1,
+        )[0]
+        resource_inventory = html.split(
+            "<h2>기타 자원 현황</h2>",
+            1,
+        )[1].split("</section>", 1)[0]
+
+        for heading in (
+            "서버명",
+            "서버 상태",
+            "서버 스펙",
+            "소속 VPC",
+            "소속 Subnet",
+            "Public IP",
+            "Private IP",
+            "생성 시각 (KST)",
+        ):
+            self.assertIn(f">{heading}</th>", server_inventory)
+        self.assertIn("상품: Standard 4 vCPU, 16 GB", server_inventory)
+        self.assertNotIn("SKU:", server_inventory)
+        self.assertIn("vCPU: 4개", server_inventory)
+        self.assertIn("메모리: 16 GB", server_inventory)
+        self.assertIn("연결 스토리지: 2개 / 150 GB", server_inventory)
+        self.assertIn("production-vpc (vpc-1)", server_inventory)
+        self.assertIn("private-a (subnet-1)", server_inventory)
+        self.assertIn("203.0.113.10", server_inventory)
+        self.assertIn("10.0.1.10, 10.0.1.11", server_inventory)
+        self.assertIn("2026-07-01 00:00 KST", server_inventory)
+        self.assertNotIn("web-01", resource_inventory)
+        self.assertIn("production-vpc", resource_inventory)
+        self.assertIn("private-a", resource_inventory)
+
+    def test_server_only_inventory_omits_empty_other_resource_section(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["SERVER"],
+            "monitoring_categories": [],
+        }
         report.infrastructure = [{
             "category": "SERVER",
             "category_label": "서버",
-            "service_name": "Server",
-            "resource_type": "ServerInstance",
             "resource_id": "server-1",
-            "resource_name": "web-01",
+            "resource_name": "server-only",
             "status": "RUN",
-            "region_code": "KR",
-            "zone_code": "KR-1",
             "details": {},
         }]
 
         html = HtmlReportRenderer().render(report)
-        inventory = html.split("<h2>자원 현황</h2>", 1)[1].split(
+
+        self.assertIn("<h2>서버 현황</h2>", html)
+        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
+
+    def test_server_only_inventory_uses_collected_network_names(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["SERVER"],
+            "monitoring_categories": [],
+        }
+        report.servers = [{
+            "server_id": "server-1",
+            "server_name": "web-01",
+            "vpc_id": "vpc-1",
+            "subnet_id": "subnet-1",
+        }]
+        report.infrastructure = [
+            {
+                "category": "SERVER",
+                "resource_id": "server-1",
+                "resource_name": "web-01",
+                "details": {},
+            },
+            {
+                "category": "VPC",
+                "resource_id": "vpc-1",
+                "resource_name": "production-vpc",
+                "details": {},
+            },
+            {
+                "category": "SUBNET",
+                "resource_id": "subnet-1",
+                "resource_name": "private-a",
+                "details": {},
+            },
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
             "</section>",
             1,
         )[0]
 
-        self.assertEqual(html.count("<h2>자원 현황</h2>"), 1)
-        self.assertNotIn("<h2>서버 상세</h2>", html)
-        self.assertIn("상품: Standard 4 vCPU, 16 GB", inventory)
-        self.assertIn("vCPU: 4개", inventory)
-        self.assertIn("메모리: 16 GB", inventory)
-        self.assertIn("Private: 10.0.1.10", inventory)
-        self.assertIn("Public: 203.0.113.10", inventory)
+        self.assertIn("production-vpc (vpc-1)", server_inventory)
+        self.assertIn("private-a (subnet-1)", server_inventory)
+        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
+
+    def test_non_server_only_inventory_omits_empty_server_section(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["BLOCK_STORAGE"],
+            "monitoring_categories": [],
+        }
+        report.infrastructure = [{
+            "category": "BLOCK_STORAGE",
+            "category_label": "Block Storage",
+            "resource_id": "storage-1",
+            "resource_name": "data-volume",
+            "status": "ATTACHED",
+            "details": {"size_gb": 100},
+        }]
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertNotIn("<h2>서버 현황</h2>", html)
+        self.assertIn("<h2>기타 자원 현황</h2>", html)
 
     def test_network_snapshot_marks_generation_time_and_renders_rules(self):
         report = self._sample_report()
@@ -820,7 +958,8 @@ class HtmlReportRendererTests(unittest.TestCase):
         html = HtmlReportRenderer().render(report)
 
         self.assertIn("<h2>Cloud Activity Tracer</h2>", html)
-        self.assertNotIn("<h2>자원 현황</h2>", html)
+        self.assertNotIn("<h2>서버 현황</h2>", html)
+        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
