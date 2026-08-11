@@ -1192,10 +1192,20 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 {
                     "server_id": "server-1",
                     "server_name": "app-1",
+                    "cpu_count": 4,
+                    "memory_gb": 16,
                     "private_ip": "10.0.1.4",
                     "public_ip": "203.0.113.4",
                     "vpc_id": "vpc-1",
                     "subnet_id": "subnet-1",
+                    "storages": [
+                        {"size_gb": 50},
+                        {"size_gb": 100},
+                    ],
+                    "raw_server": {
+                        "serverProductCode": "SVR.PRODUCT.1",
+                        "serverProductName": "Standard 4 vCPU, 16 GB",
+                    },
                 }
             ],
             [
@@ -1214,6 +1224,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )
         self.assertEqual(server["details"]["vpc_no"], "vpc-1")
         self.assertEqual(server["details"]["subnet_no"], "subnet-1")
+        self.assertEqual(server["details"]["server_product_code"], "SVR.PRODUCT.1")
+        self.assertEqual(server["details"]["storage_size_gb_total"], 150)
 
         load_balancer = normalizer.normalize_load_balancers(
             [
@@ -1545,6 +1557,66 @@ class InfrastructureCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_warnings[0]["status_code"], 403)
         self.assertEqual(collector.last_warnings[0]["error_code"], "2300")
         self.assertNotIn("forbidden", str(collector.last_warnings))
+
+    def test_global_dns_sub_account_permission_error_exposes_required_action(self):
+        response = requests.Response()
+        response.status_code = 400
+        response._content = json.dumps(
+            {
+                "error": {
+                    "errorCode": "X00004",
+                    "message": "The sub-account is not authorized.",
+                    "devMessage": (
+                        "Please grant additional rights [View/getDomainList]. "
+                        "<b>internal provider detail must not be stored</b>"
+                    ),
+                }
+            }
+        ).encode("utf-8")
+        response.headers["Content-Type"] = "application/json"
+        global_dns = Mock()
+        global_dns.get_domain.side_effect = requests.HTTPError(
+            "bad request",
+            response=response,
+        )
+        collector = InfrastructureCollector(build_factory(global_dns=global_dns))
+
+        collector.collect(
+            [],
+            {"storages": []},
+            categories=("GLOBAL_DNS",),
+        )
+
+        self.assertEqual(collector.last_errors, [])
+        self.assertEqual(len(collector.last_warnings), 1)
+        warning = collector.last_warnings[0]
+        self.assertEqual(warning["status_code"], 400)
+        self.assertEqual(warning["error_code"], "X00004")
+        self.assertEqual(warning["required_actions"], ["View/getDomainList"])
+        self.assertIn("View/getDomainList", warning["message"])
+        self.assertNotIn("internal provider detail", str(warning))
+
+    def test_generic_bad_request_remains_collection_error(self):
+        response = requests.Response()
+        response.status_code = 400
+        response._content = b'{"error":{"errorCode":"X00001"}}'
+        response.headers["Content-Type"] = "application/json"
+        global_dns = Mock()
+        global_dns.get_domain.side_effect = requests.HTTPError(
+            "bad request",
+            response=response,
+        )
+        collector = InfrastructureCollector(build_factory(global_dns=global_dns))
+
+        collector.collect(
+            [],
+            {"storages": []},
+            categories=("GLOBAL_DNS",),
+        )
+
+        self.assertEqual(collector.last_warnings, [])
+        self.assertEqual(len(collector.last_errors), 1)
+        self.assertEqual(collector.last_errors[0]["error_code"], "X00001")
 
     def test_fetches_block_storage_only_when_server_data_cannot_be_reused(self):
         vserver = Mock()

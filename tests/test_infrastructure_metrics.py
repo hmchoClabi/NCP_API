@@ -1368,6 +1368,46 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             )
         )
 
+    def test_empty_legacy_schema_does_not_warn_when_category_already_mapped(self):
+        api = DiscoveryAPI()
+        api.schemas.extend([
+            {"prodName": "Load Balancer Monitor", "cwKey": "lb-legacy"},
+            {"prodName": "Kubernetes Service(VPC)", "cwKey": "nks-legacy"},
+        ])
+        api.metrics["lb-legacy"] = []
+        api.metrics["nks-legacy"] = []
+        collector = self._collector(api)
+
+        groups = collector.collect(
+            [
+                {
+                    "category": "LOAD_BALANCER",
+                    "resource_id": "lb-1",
+                    "resource_name": "lb-main",
+                    "details": {"load_balancer_instance_no": "lb-1"},
+                },
+                {
+                    "category": "KUBERNETES",
+                    "resource_id": "cluster-1",
+                    "resource_name": "nks-main",
+                    "details": {"cluster_uuid": "cluster-1"},
+                },
+            ],
+            1,
+            2,
+        )
+
+        self.assertEqual(
+            {group["category"] for group in groups},
+            {"LOAD_BALANCER", "KUBERNETES"},
+        )
+        self.assertFalse(
+            any(
+                warning["stage"] == "metric_mapping"
+                for warning in collector.last_warnings
+            )
+        )
+
     def test_mssql_user_connections_are_selected_as_count(self):
         api = DiscoveryAPI()
         api.schemas = [

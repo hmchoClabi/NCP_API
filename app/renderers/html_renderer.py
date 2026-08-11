@@ -15,6 +15,11 @@ from app.renderers.html_view_models import (
     ReportDisplayData,
     ReportSectionHtml,
 )
+from app.renderers.infrastructure_presenter import (
+    merge_server_details,
+    resource_connection_summary,
+    resource_size_summary,
+)
 from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
@@ -240,20 +245,6 @@ class HtmlReportRenderer:
             network_summary=network_summary,
         )
 
-    def _render_historical_notice(
-        self,
-        display: ReportDisplayData,
-    ) -> str:
-        if (
-            (display.inventory_enabled or display.monitoring_enabled)
-            and display.infrastructure_metadata.get("time_basis")
-            == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
-        ):
-            return self._historical_inventory_notice(
-                display.infrastructure_metadata
-            )
-        return ""
-
     def _render_summary_section(
         self,
         report: ReportResult,
@@ -265,7 +256,7 @@ class HtmlReportRenderer:
             if display.inventory_enabled:
                 summary_cards.append(
                     self._summary_card(
-                        "대표 인프라",
+                        "자원",
                         len(display.infrastructure),
                         "개",
                     )
@@ -321,7 +312,10 @@ class HtmlReportRenderer:
             not in network_categories
         ]
         inventory_html = (
-            self._infrastructure_section(inventory_resources)
+            self._infrastructure_section(
+                inventory_resources,
+                report.servers,
+            )
             if display.inventory_enabled and inventory_resources else ""
         )
         network_configuration_html = (
@@ -351,58 +345,10 @@ class HtmlReportRenderer:
                 display.load_balancer_target_groups,
                 display.infrastructure_metadata,
             )
-        server_detail_html = ""
-        if (
-            display.inventory_enabled
-            and display.report_options.resource_enabled("SERVER")
-        ):
-            server_rows = [
-                {
-                    **server,
-                    "historical_presence_text": (
-                        self._historical_confidence_text(
-                            server.get("historical_presence_confidence")
-                        )
-                    ),
-                }
-                for server in self._records(report.servers)
-            ]
-            server_columns = [
-                ("server_name", "서버명"),
-                ("status", "상태"),
-                ("private_ip", "Private IP"),
-                ("public_ip", "Public IP"),
-                ("cpu_count", "vCPU", "number0"),
-                ("memory_gb", "메모리(GB)", "number3"),
-                ("zone_code", "Zone"),
-            ]
-            if any(
-                server.get("historical_presence_confidence")
-                for server in server_rows
-            ):
-                server_columns.append(
-                    ("historical_presence_text", "기간 존재 판단")
-                )
-            server_detail_html = self._section(
-                "서버 상세",
-                (
-                    "생성 시각으로 선별한 현재 서버 구성입니다. 상태와 "
-                    "IP는 보고서 생성 시점의 값입니다."
-                    if display.infrastructure_metadata.get("time_basis")
-                    == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
-                    else "보고서 기준 시점에 저장된 서버 구성입니다."
-                ),
-                self._table(
-                    server_rows,
-                    tuple(server_columns),
-                ),
-                len(server_rows),
-            )
         return InfrastructureSectionHtml(
             inventory=inventory_html,
             network_configuration=network_configuration_html,
             target_groups=target_group_html,
-            server_details=server_detail_html,
         )
 
     def _render_monitoring_sections(
@@ -554,7 +500,6 @@ class HtmlReportRenderer:
         report: ReportResult,
         display: ReportDisplayData,
     ) -> ReportSectionHtml:
-        historical_notice = self._render_historical_notice(display)
         summary = self._render_summary_section(report, display)
         infrastructure = self._render_infrastructure_sections(
             report,
@@ -568,13 +513,11 @@ class HtmlReportRenderer:
         )
         return ReportSectionHtml(
             summary=summary,
-            historical_notice=historical_notice,
             inventory=infrastructure.inventory,
             network_configuration=(
                 infrastructure.network_configuration
             ),
             target_groups=infrastructure.target_groups,
-            server_details=infrastructure.server_details,
             monitoring=monitoring,
             billing=billing,
             organization_billing=organization_billing,
@@ -632,11 +575,9 @@ class HtmlReportRenderer:
     </header>
 
     {sections.summary}
-    {sections.historical_notice}
     {sections.inventory}
     {sections.network_configuration}
     {sections.target_groups}
-    {sections.server_details}
     {sections.monitoring}
     {sections.billing}
     {sections.organization_billing}
@@ -678,50 +619,6 @@ class HtmlReportRenderer:
         path.write_text(self.render(report), encoding="utf-8")
         return path
 
-    def _historical_inventory_notice(
-        self,
-        infrastructure_metadata: Mapping[str, Any],
-    ) -> str:
-        historical_filter = self._mapping(
-            infrastructure_metadata.get("historical_filter")
-        )
-        infrastructure_filter = self._mapping(
-            historical_filter.get("infrastructure")
-        )
-        excluded_count = infrastructure_filter.get(
-            "excluded_after_period_count",
-            0,
-        )
-        unknown_count = historical_filter.get(
-            "unknown_create_time_count",
-            infrastructure_filter.get("unknown_create_time_count", 0),
-        )
-        collected_at = self._infrastructure_create_time(
-            infrastructure_metadata.get("completed_at")
-            or infrastructure_metadata.get("started_at")
-        )
-
-        return f"""
-    <section class="report-section warning historical-basis-notice" role="note">
-      <div class="section-heading">
-        <div>
-          <h2>인프라 시간 기준 안내</h2>
-          <p>보고 기간 안에 저장된 인프라 스냅샷이 없어 현재 자원 목록을 생성 시각으로 선별했습니다.</p>
-        </div>
-        <span class="count">PARTIAL</span>
-      </div>
-      <div class="historical-basis-grid">
-        <div><span>목록 포함 기준</span><strong>보고 종료 전에 생성된 현재 자원</strong></div>
-        <div><span>상태·IP·연결 정보</span><strong>보고서 생성 시점의 현재 값</strong></div>
-        <div><span>시계열 그래프</span><strong>선별된 현재 자원의 보고 기간 메트릭</strong></div>
-        <div><span>구성도</span><strong>현재 관계 기반 추정 · 보고 기간 당시 구성 아님</strong></div>
-        <div><span>현재 목록 수집 시각</span><strong>{self._text(collected_at)}</strong></div>
-        <div><span>기간 종료 후 생성 제외</span><strong>{self._text(excluded_count)}개</strong></div>
-        <div><span>생성 시각 미확인</span><strong>{self._text(unknown_count)}개</strong></div>
-      </div>
-      <p class="historical-basis-caveat">보고 종료 후 삭제된 자원이나 변경 전 상태·IP·연결 관계는 복원되지 않으므로 정확한 과거 구성으로 해석해서는 안 됩니다.</p>
-    </section>"""
-
     def _summary_card(
         self,
         label: str,
@@ -760,6 +657,7 @@ class HtmlReportRenderer:
     def _infrastructure_section(
         self,
         resources: List[Dict[str, Any]],
+        servers: List[Dict[str, Any]],
     ) -> str:
         allowed = {
             category for category, _ in self.INFRASTRUCTURE_CATEGORIES
@@ -767,7 +665,8 @@ class HtmlReportRenderer:
         counts = defaultdict(int)
         prepared = []
 
-        for resource in self._records(resources):
+        for candidate in self._records(resources):
+            resource = merge_server_details(candidate, servers)
             category = str(resource.get("category") or "").upper()
             if category not in allowed:
                 continue
@@ -788,6 +687,11 @@ class HtmlReportRenderer:
                 "location": region_zone or "-",
                 "details_text": self._infrastructure_details_text(
                     details
+                ),
+                "size_summary": resource_size_summary(category, details),
+                "connection_summary": resource_connection_summary(
+                    category,
+                    details,
                 ),
                 "create_time_text": self._infrastructure_create_time(
                     resource.get("create_time")
@@ -819,7 +723,9 @@ class HtmlReportRenderer:
             ("resource_type", "유형"),
             ("status", "상태"),
             ("location", "리전 / Zone"),
-            ("details_text", "주요 구성"),
+            ("size_summary", "규모 / 과금 관련 지표"),
+            ("connection_summary", "주소 / 연결"),
+            ("details_text", "기타 구성"),
             ("create_time_text", "생성 시각 (KST)"),
         ]
         if any(
@@ -838,11 +744,11 @@ class HtmlReportRenderer:
         )
         content = summary + table
         return self._section(
-            "대표 인프라 현황",
+            "자원 현황",
             (
-                "실제 서비스 트래픽과 데이터를 처리하는 핵심 리소스만 "
-                "표시합니다. IAM 서브계정과 알람·이벤트·정책 객체는 "
-                "포함하지 않습니다."
+                "선택한 자원과 서버 상세를 한 표에 표시합니다. 규모 열은 "
+                "NCP 응답에서 확인된 SKU·사양·용량·처리 등급 등 과금 관련 "
+                "지표이며 실제 청구 금액을 의미하지 않습니다."
             ),
             content,
             len(prepared),
@@ -1126,26 +1032,20 @@ class HtmlReportRenderer:
         if not isinstance(value, dict):
             return "-"
         labels = (
-            ("load_balancer_type", "LB 유형", ""),
             ("network_type", "네트워크", ""),
             ("protocol", "프로토콜", ""),
-            ("engine", "엔진", ""),
             ("version", "버전", ""),
-            ("server_count", "DB 서버", "개"),
-            ("cpu_count_total", "총 vCPU", ""),
-            ("memory_gb_total", "총 메모리", " GB"),
-            ("data_storage_gb_total", "데이터 용량", " GB"),
-            ("cpu_count", "vCPU", ""),
-            ("memory_gb", "메모리", " GB"),
-            ("size_gb", "용량", " GB"),
-            ("storage_size_gb", "용량", " GB"),
             ("kubernetes_version", "Kubernetes", ""),
-            ("node_count", "노드", "개"),
-            ("node_pool_count", "노드풀", "개"),
-            ("domain_count", "도메인", "개"),
             ("attached_server_name", "연결 서버", ""),
             ("high_availability", "HA", ""),
             ("multi_zone", "Multi Zone", ""),
+            ("encrypted", "암호화", ""),
+            ("snapshot_configured", "스냅샷", ""),
+            ("termination_protection", "반납 보호", ""),
+            ("regional", "리전 클러스터", ""),
+            ("public_network", "Public Network", ""),
+            ("subnet_type", "Subnet 유형", ""),
+            ("usage_type", "용도", ""),
         )
         parts = []
         for key, label, suffix in labels:
@@ -1282,7 +1182,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>선택한 대표 인프라의 보고 기간 Cloud Insight 시계열입니다.</p>
+          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>

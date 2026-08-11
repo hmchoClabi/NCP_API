@@ -15,6 +15,7 @@ from app.report_options import (
     RESOURCE_CATEGORY_OPTIONS,
     default_report_options,
 )
+from webapp.logo_fetcher import fetch_customer_logo_from_url
 from webapp.route_access import _can_manage_tenant, _msp_admin_required, _msp_required
 from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
@@ -93,8 +94,31 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 password,
                 request.form.get("display_name", ""),
                 request.form.get("role", "MSP_OPERATOR"),
+                actor_id=str(g.user["id"]),
             )
             flash("MSP 계정을 등록했습니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_users"))
+
+    @app.post("/msp/users/platform/<user_id>/enabled")
+    @_msp_admin_required
+    def set_msp_user_enabled(user_id: str):
+        try:
+            enabled_value = request.form.get("enabled", "").strip().casefold()
+            if enabled_value not in {"true", "false"}:
+                raise ValueError("MSP 계정 상태 요청이 올바르지 않습니다.")
+            if user_id == str(g.user["id"]):
+                raise ValueError(
+                    "현재 로그인한 자신의 MSP 계정 상태는 변경할 수 없습니다."
+                )
+            display_name = repository.set_msp_user_enabled(
+                user_id,
+                str(g.user["id"]),
+                enabled_value == "true",
+            )
+            action = "활성화" if enabled_value == "true" else "비활성화"
+            flash(f"{display_name} MSP 계정을 {action}했습니다.", "success")
         except ValueError as exc:
             flash(str(exc), "error")
         return redirect(url_for("msp_users"))
@@ -232,10 +256,17 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     def update_customer_logo(tenant_id: str):
         try:
             upload = request.files.get("logo")
-            if upload is None or not upload.filename:
-                raise ValueError("등록할 고객사 로고 파일을 선택하세요.")
-            content = upload.stream.read(MAX_CUSTOMER_LOGO_BYTES + 1)
-            logo = validate_customer_logo(content, upload.mimetype)
+            logo_url = request.form.get("logo_url", "").strip()
+            has_upload = upload is not None and bool(upload.filename)
+            if has_upload and logo_url:
+                raise ValueError("로고 파일과 URL 중 한 가지만 입력하세요.")
+            if logo_url:
+                logo = fetch_customer_logo_from_url(logo_url)
+            elif has_upload and upload is not None:
+                content = upload.stream.read(MAX_CUSTOMER_LOGO_BYTES + 1)
+                logo = validate_customer_logo(content, upload.mimetype)
+            else:
+                raise ValueError("등록할 고객사 로고 파일 또는 HTTPS URL을 입력하세요.")
             repository.update_tenant_logo(
                 tenant_id,
                 logo,

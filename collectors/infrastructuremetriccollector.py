@@ -100,6 +100,8 @@ class InfrastructureMetricCollector:
         )
         records: List[Dict[str, Any]] = []
         matched_categories = set()
+        mapped_categories = set()
+        mapping_attempted_products: Dict[str, List[str]] = defaultdict(list)
 
         for schema in schemas:
             product_name = schema["product_name"]
@@ -126,6 +128,7 @@ class InfrastructureMetricCollector:
             if metric_items is None:
                 continue
 
+            mapping_attempted_products[category].append(product_name)
             product_records = self._build_product_records(
                 category=category,
                 product_name=product_name,
@@ -134,24 +137,14 @@ class InfrastructureMetricCollector:
                 resources=product_resources,
                 preferred_interval=preferred_interval,
             )
-            if not product_records:
-                self._record_issue(
-                    severity="warning",
-                    stage="metric_mapping",
-                    api="get_search_metric_list",
-                    category=self.OUTPUT_CATEGORIES[category],
-                    product_name=product_name,
-                    message=(
-                        "지원 지표 또는 인벤토리와 일치하는 Cloud Insight "
-                        "dimension을 찾지 못했습니다. 서비스 View 권한, "
-                        "직접 API 인벤토리 및 모니터링 dimension을 "
-                        "확인하십시오."
-                    ),
-                )
+            if product_records:
+                mapped_categories.add(category)
             records.extend(product_records)
 
         for category in self.MONITORED_CATEGORIES:
-            if resources[category] and category not in matched_categories:
+            if not resources[category]:
+                continue
+            if category not in matched_categories:
                 self._record_issue(
                     severity="warning",
                     stage="schema_lookup",
@@ -161,6 +154,29 @@ class InfrastructureMetricCollector:
                         "해당 인프라의 Cloud Insight 시스템 상품을 "
                         "찾지 못했습니다."
                     ),
+                )
+            elif (
+                category not in mapped_categories
+                and mapping_attempted_products[category]
+            ):
+                # 한 서비스에 현행/레거시 System Schema가 함께 반환될 수 있다.
+                # 동일 카테고리의 다른 상품에서 정상 매핑된 경우 개별 0건
+                # 상품은 장애가 아니므로 경고하지 않는다.
+                attempted_products = list(
+                    dict.fromkeys(mapping_attempted_products[category])
+                )
+                self._record_issue(
+                    severity="warning",
+                    stage="metric_mapping",
+                    api="get_search_metric_list",
+                    category=self.OUTPUT_CATEGORIES[category],
+                    message=(
+                        "지원 지표 또는 인벤토리와 일치하는 Cloud Insight "
+                        "dimension을 찾지 못했습니다. 서비스 View 권한, "
+                        "직접 API 인벤토리 및 모니터링 dimension을 "
+                        "확인하십시오."
+                    ),
+                    extra={"attempted_products": attempted_products[:10]},
                 )
 
         records = self._deduplicate_records(records)

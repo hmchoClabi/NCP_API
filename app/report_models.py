@@ -120,7 +120,23 @@ class ReportResult:
                 "zone_code": server.get("zone_code"),
                 "platform": "VPC",
                 "create_time": server.get("create_date"),
-                "details": {},
+                "details": {
+                    key: value
+                    for key, value in {
+                        "server_product_code": server.get(
+                            "server_product_code"
+                        ),
+                        "server_product_name": server.get(
+                            "server_product_name"
+                        ),
+                        "cpu_count": server.get("cpu_count"),
+                        "memory_gb": server.get("memory_gb"),
+                        "storage_count": len(server.get("storages") or []),
+                        "private_ip": server.get("private_ip"),
+                        "public_ip": server.get("public_ip"),
+                    }.items()
+                    if value not in (None, "", [])
+                },
             }
             for server in self.servers
             if isinstance(server, dict) and options.resource_enabled("SERVER")
@@ -264,12 +280,44 @@ class ReportResult:
             "data_storage_gb_total",
             "cpu_count",
             "memory_gb",
+            "server_product_code",
+            "server_product_name",
+            "storage_count",
+            "storage_size_gb_total",
             "size_gb",
             "storage_size_gb",
+            "storage_type",
+            "disk_type",
+            "volume_type",
+            "iops",
+            "throughput_mbps",
+            "throughput_type",
+            "snapshot_volume_size_gb",
+            "block_storage_size_gb",
             "kubernetes_version",
+            "cluster_type",
             "node_count",
+            "node_max_count",
             "node_pool_count",
+            "generation",
             "domain_count",
+            "record_count",
+            "endpoint_count",
+            "api_count",
+            "request_count",
+            "object_count",
+            "outbound_traffic_gb",
+            "broker_count",
+            "partition_count",
+            "retention_hours",
+            "retention_days",
+            "backup_size_gb",
+            "desired_capacity",
+            "min_size",
+            "max_size",
+            "gateway_type",
+            "public_ip_count",
+            "associated",
             "attached_server_name",
             "high_availability",
             "multi_zone",

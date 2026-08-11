@@ -34,6 +34,13 @@
         </label>
         <button class="primary" type="submit">{{ '로고 교체' if tenant.branding else '로고 등록' }}</button>
       </form>
+      <form class="branding-upload" method="post" action="{{ url_for('update_customer_logo', tenant_id=tenant.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>로고 이미지 URL
+          <input type="url" name="logo_url" required maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.com/logo.png">
+        </label>
+        <button class="secondary" type="submit">HTTPS URL에서 가져오기</button>
+      </form>
       {% if tenant.branding %}
       <form method="post" action="{{ url_for('delete_customer_logo', tenant_id=tenant.id) }}" onsubmit="return confirm('새로 생성하는 보고서에서 고객사 로고를 제거하시겠습니까?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -42,6 +49,7 @@
       <small>{{ tenant.branding.content_type }} · {{ tenant.branding.width }}×{{ tenant.branding.height }} · 최근 변경 {{ tenant.branding.updated_at|kst }}</small>
       {% endif %}
       <p class="settings-note">PNG, JPEG, WebP · 최대 512KB · 최대 4,096px · 투명 배경 PNG 권장</p>
+      <p class="settings-note">URL 이미지는 등록할 때 한 번만 안전하게 내려받아 저장하며 외부 원본을 계속 참조하지 않습니다.</p>
       <p class="settings-warning">SVG는 스크립트 삽입 위험을 차단하기 위해 지원하지 않습니다. 로고의 종횡비는 보고서에서 변경하지 않습니다.</p>
     </div>
   </div>
@@ -108,7 +116,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>대표 인프라 자원</legend>
+      <legend>자원 현황 대상</legend>
       <div class="option-actions"><button class="text-action" type="button" data-check-group="resource-option" data-check-value="true">전체 선택</button><button class="text-action" type="button" data-check-group="resource-option" data-check-value="false">전체 해제</button></div>
       <div class="option-grid resource-options">
         {% for option in resource_category_options %}

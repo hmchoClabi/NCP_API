@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 import requests
@@ -19,6 +20,10 @@ class InfrastructureCollector:
     PAGE_SIZE = 100
     MAX_PAGES = 10_000
     WARNING_HTTP_STATUSES = frozenset({401, 403, 404, 405, 501})
+    _SUB_ACCOUNT_PERMISSION_CODE = "X00004"
+    _REQUIRED_ACTION_PATTERN = re.compile(
+        r"\b(?:View|Change)/[A-Za-z][A-Za-z0-9_-]{0,99}\b"
+    )
     LEGACY_DEFAULT_CATEGORIES = frozenset({
         "SERVER",
         "LOAD_BALANCER",
@@ -1235,19 +1240,33 @@ class InfrastructureCollector:
         optional: bool = False,
     ) -> None:
         status_code = None
+        provider_code = None
+        required_actions: tuple[str, ...] = ()
+        is_sub_account_permission_error = False
         if isinstance(exc, requests.HTTPError) and exc.response is not None:
             status_code = exc.response.status_code
+            provider_code = self._provider_error_code(exc.response)
+            required_actions = self._provider_required_actions(exc.response)
+            is_sub_account_permission_error = (
+                status_code == 400
+                and provider_code == self._SUB_ACCOUNT_PERMISSION_CODE
+                and self._is_sub_account_permission_response(exc.response)
+            )
 
         is_warning = (
             optional
             or status_code in self.WARNING_HTTP_STATUSES
+            or is_sub_account_permission_error
             or isinstance(exc, (AttributeError, KeyError, NotImplementedError))
         )
-        message = (
-            "권한이 없거나 현재 환경에서 지원되지 않는 API입니다."
-            if is_warning
-            else "API 응답을 수집하거나 처리하지 못했습니다."
-        )
+        if is_sub_account_permission_error:
+            message = "Sub Account에 자원 조회 권한이 없습니다."
+            if required_actions:
+                message += " 필요한 권한: " + ", ".join(required_actions)
+        elif is_warning:
+            message = "권한이 없거나 현재 환경에서 지원되지 않는 API입니다."
+        else:
+            message = "API 응답을 수집하거나 처리하지 못했습니다."
         issue = {
             "collector": self.__class__.__name__,
             "stage": stage,
@@ -1260,9 +1279,10 @@ class InfrastructureCollector:
             issue["page_no"] = page_no
         if status_code is not None:
             issue["status_code"] = status_code
-            provider_code = self._provider_error_code(exc.response)
             if provider_code:
                 issue["error_code"] = provider_code
+            if required_actions:
+                issue["required_actions"] = list(required_actions)
 
         if is_warning:
             issue["severity"] = "warning"
@@ -1306,6 +1326,54 @@ class InfrastructureCollector:
                 return str(value)[:100]
         value = payload.get("errorCode") or payload.get("code")
         return str(value)[:100] if value is not None else None
+
+    @classmethod
+    def _provider_required_actions(
+        cls,
+        response: requests.Response,
+    ) -> tuple[str, ...]:
+        """공급자 오류에서 안전한 Sub Account 액션명만 추출한다."""
+
+        error_text = cls._provider_error_text(response)
+        if not error_text:
+            return ()
+        return tuple(dict.fromkeys(cls._REQUIRED_ACTION_PATTERN.findall(error_text)))
+
+    @classmethod
+    def _is_sub_account_permission_response(
+        cls,
+        response: requests.Response,
+    ) -> bool:
+        """HTTP 400으로 반환되는 NCP Sub Account 권한 오류를 식별한다."""
+
+        error_text = cls._provider_error_text(response)
+        if not error_text:
+            return False
+        normalized_text = error_text.casefold()
+        return (
+            "sub-account" in normalized_text
+            or "sub account" in normalized_text
+            or "additional rights" in normalized_text
+            or bool(cls._REQUIRED_ACTION_PATTERN.search(error_text))
+        )
+
+    @staticmethod
+    def _provider_error_text(response: requests.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            return ""
+        if not isinstance(payload, Mapping):
+            return ""
+        error = payload.get("error")
+        sources = (error, payload) if isinstance(error, Mapping) else (payload,)
+        values: list[str] = []
+        for source in sources:
+            for key in ("message", "devMessage", "errorMessage"):
+                value = source.get(key)
+                if isinstance(value, str) and value:
+                    values.append(value[:2_000])
+        return " ".join(values)
 
     @staticmethod
     def _dict_items(value: Any) -> List[Dict[str, Any]]:

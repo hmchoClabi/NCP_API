@@ -2,7 +2,9 @@ import base64
 import io
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
+from app.report_branding import validate_customer_logo
 from webapp.app import CSRF_COOKIE, SESSION_COOKIE, create_app
 from webapp.security import token_hash
 
@@ -19,6 +21,8 @@ class FakePortalRepository:
         self.permanently_deleted_tenants = []
         self.deleted_reports = []
         self.created_msp_users = []
+        self.updated_msp_users = []
+        self.msp_status_error = None
         self.updated_report_settings = []
         self.updated_logos = []
         self.deleted_logos = []
@@ -144,12 +148,19 @@ class FakePortalRepository:
         return "customer-user-1"
 
     def create_msp_user(
-        self, email, password, display_name, role, environment_scope=None
+        self, email, password, display_name, role, environment_scope=None,
+        actor_id=None,
     ):
         self.created_msp_users.append(
-            (email, password, display_name, role, environment_scope)
+            (email, password, display_name, role, environment_scope, actor_id)
         )
         return "msp-user-2"
+
+    def set_msp_user_enabled(self, user_id, actor_id, enabled):
+        if self.msp_status_error:
+            raise ValueError(self.msp_status_error)
+        self.updated_msp_users.append((user_id, actor_id, enabled))
+        return "MSP Operator"
 
     def msp_users(self):
         return [{
@@ -341,6 +352,10 @@ class WebAppTests(unittest.TestCase):
                 "msp_users": ("/msp/users", ("GET",)),
                 "create_portal_user": ("/msp/users", ("POST",)),
                 "create_msp_user": ("/msp/users/platform", ("POST",)),
+                "set_msp_user_enabled": (
+                    "/msp/users/platform/<user_id>/enabled",
+                    ("POST",),
+                ),
                 "assign_portal_user": ("/msp/users/memberships", ("POST",)),
                 "set_schedule_enabled": (
                     "/msp/schedules/<schedule_id>/enabled",
@@ -410,7 +425,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(self.repository.allowed_tenants, ["tenant-1"])
         self.assertIn(
             (
-                "<span>대표 인프라</span><strong>1</strong>"
+                "<span>자원</span><strong>1</strong>"
                 "<small>수집 대상</small>"
             ).encode("utf-8"),
             response.data,
@@ -488,14 +503,20 @@ class WebAppTests(unittest.TestCase):
             "/msp/users/platform",
             data={"csrf_token": "csrf-token"},
         )
+        status_response = self.client.post(
+            "/msp/users/platform/msp-user-1/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "false"},
+        )
         schedule_response = self.client.post(
             "/msp/schedules/bulk",
             data={"csrf_token": "csrf-token"},
         )
 
         self.assertEqual(msp_response.status_code, 403)
+        self.assertEqual(status_response.status_code, 403)
         self.assertEqual(schedule_response.status_code, 403)
         self.assertEqual(self.repository.created_msp_users, [])
+        self.assertEqual(self.repository.updated_msp_users, [])
         self.assertEqual(self.jobs.bulk_upserts, [])
 
     def test_customer_viewer_cannot_delete_report(self):
@@ -533,6 +554,35 @@ class WebAppTests(unittest.TestCase):
             self.repository.deleted_reports,
             [("report-1", "user-1")],
         )
+
+    def test_msp_operator_cannot_manage_msp_accounts(self):
+        original_session_user = self.repository.session_user
+
+        def msp_operator(session_token):
+            user = original_session_user(session_token)
+            if user:
+                user["platform_roles"] = ["MSP_OPERATOR"]
+            return user
+
+        self.repository.session_user = msp_operator
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        listing = self.client.get("/msp/users")
+        creation = self.client.post(
+            "/msp/users/platform",
+            data={"csrf_token": "csrf-token"},
+        )
+        status_change = self.client.post(
+            "/msp/users/platform/msp-user-2/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "false"},
+        )
+
+        self.assertEqual(listing.status_code, 403)
+        self.assertEqual(creation.status_code, 403)
+        self.assertEqual(status_change.status_code, 403)
+        self.assertEqual(self.repository.created_msp_users, [])
+        self.assertEqual(self.repository.updated_msp_users, [])
 
     def test_customer_viewer_cannot_delete_credentials_or_customer(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -757,6 +807,50 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual((logo.width, logo.height), (1, 1))
         self.assertTrue(logo.data_uri.startswith("data:image/png;base64,"))
 
+    def test_msp_admin_can_import_customer_logo_from_https_url(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
+            "AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        fetched_logo = validate_customer_logo(png, "image/png")
+
+        with patch(
+            "webapp.msp_routes.fetch_customer_logo_from_url",
+            return_value=fetched_logo,
+        ) as fetch_logo:
+            response = self.client.post(
+                "/msp/customer/tenant-1/logo",
+                data={
+                    "csrf_token": "csrf-token",
+                    "logo_url": "https://assets.example.com/customer.png",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        fetch_logo.assert_called_once_with(
+            "https://assets.example.com/customer.png"
+        )
+        self.assertEqual(
+            self.repository.updated_logos[0],
+            ("tenant-1", fetched_logo, "user-1"),
+        )
+
+    def test_customer_logo_file_and_url_cannot_be_submitted_together(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/customer/tenant-1/logo",
+            data={
+                "csrf_token": "csrf-token",
+                "logo_url": "https://assets.example.com/customer.png",
+                "logo": (io.BytesIO(b"not-used"), "customer.png", "image/png"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.updated_logos, [])
+
     def test_svg_customer_logo_is_rejected(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
 
@@ -853,7 +947,8 @@ class MspCustomerDetailTests(unittest.TestCase):
         response = self.client.get("/msp/users")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("사용자 관리".encode("utf-8"), response.data)
+        self.assertIn("MSP 계정·사용자 관리".encode("utf-8"), response.data)
+        self.assertIn("신규 MSP 계정".encode("utf-8"), response.data)
         self.assertIn(b"customer@example.com", response.data)
 
     def test_msp_admin_can_register_portal_user(self):
@@ -891,8 +986,53 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.repository.created_msp_users, [(
             "operator@example.com", "temporary-password", "Operator",
-            "MSP_OPERATOR", None,
+            "MSP_OPERATOR", None, "user-1",
         )])
+
+    def test_msp_admin_can_disable_and_enable_another_msp_user(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        disabled = self.client.post(
+            "/msp/users/platform/msp-user-2/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "false"},
+        )
+        enabled = self.client.post(
+            "/msp/users/platform/msp-user-2/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "true"},
+        )
+
+        self.assertEqual(disabled.status_code, 302)
+        self.assertEqual(enabled.status_code, 302)
+        self.assertEqual(self.repository.updated_msp_users, [
+            ("msp-user-2", "user-1", False),
+            ("msp-user-2", "user-1", True),
+        ])
+
+    def test_msp_admin_cannot_change_own_account_status(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/users/platform/user-1/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "false"},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("자신의 MSP 계정 상태".encode("utf-8"), response.data)
+        self.assertEqual(self.repository.updated_msp_users, [])
+
+    def test_msp_status_change_rejects_invalid_boolean(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/users/platform/msp-user-2/enabled",
+            data={"csrf_token": "csrf-token", "enabled": "yes"},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("상태 요청이 올바르지 않습니다".encode("utf-8"), response.data)
+        self.assertEqual(self.repository.updated_msp_users, [])
 
     def test_msp_admin_can_assign_customer_membership(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

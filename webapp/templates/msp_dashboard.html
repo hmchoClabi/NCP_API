@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}MSP 통합 대시보드{% endblock %}
 {% block content %}
-<header class="page-header"><div><span class="eyebrow">MSP CONTROL CENTER</span><h1>통합 대시보드</h1><p>확인이 필요한 고객을 우선순위대로 살펴보세요.</p></div><span class="live-badge">운영 데이터</span></header>
+<header class="page-header"><div><span class="eyebrow">MSP CONTROL CENTER</span><h1>통합 대시보드</h1><p>확인이 필요한 고객을 우선순위대로 살펴보세요.</p></div>{% if 'MSP_ADMIN' in current_user.platform_roles %}<a class="secondary" href="{{ url_for('msp_users') }}">MSP 계정 관리</a>{% else %}<span class="live-badge">운영 데이터</span>{% endif %}</header>
 <section class="stat-grid">
   <article class="stat-card"><span>전체 고객</span><strong>{{ summary.customer_count }}</strong><small>활성·온보딩 고객사</small></article>
   <article class="stat-card blue"><span>민간 고객</span><strong>{{ summary.public_count }}</strong><small>Public 환경</small></article>

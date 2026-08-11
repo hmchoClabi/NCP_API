@@ -53,7 +53,8 @@
   font-size: 12px;
 }
 
-.branding-upload input[type="file"] {
+.branding-upload input[type="file"],
+.branding-upload input[type="url"] {
   width: 100%;
   padding: 9px;
   border: 1px solid #cdd9e7;

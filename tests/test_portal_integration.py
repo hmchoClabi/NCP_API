@@ -25,6 +25,8 @@ from webapp.security import (
 class PortalIntegrationTests(unittest.TestCase):
     TENANT_CODE = "portal-integration"
     ADMIN_EMAIL = "portal-admin-integration@example.invalid"
+    SECOND_ADMIN_EMAIL = "portal-admin-2-integration@example.invalid"
+    OPERATOR_EMAIL = "portal-operator-integration@example.invalid"
     USER_EMAIL = "portal-user-integration@example.invalid"
 
     def setUp(self):
@@ -79,8 +81,13 @@ class PortalIntegrationTests(unittest.TestCase):
                         (self.created_user_ids,),
                     )
                 cursor.execute(
-                    "DELETE FROM control.users WHERE email IN (%s, %s)",
-                    (self.ADMIN_EMAIL, self.USER_EMAIL),
+                    "DELETE FROM control.users WHERE email = ANY(%s)",
+                    ([
+                        self.ADMIN_EMAIL,
+                        self.SECOND_ADMIN_EMAIL,
+                        self.OPERATOR_EMAIL,
+                        self.USER_EMAIL,
+                    ],),
                 )
                 cursor.execute(
                     "DELETE FROM control.customer_deletion_tombstones "
@@ -92,6 +99,59 @@ class PortalIntegrationTests(unittest.TestCase):
                         ).hexdigest(),
                     ),
                 )
+
+    def test_msp_accounts_are_created_listed_and_independently_disabled(self):
+        admin_id = self.repository.bootstrap_msp_admin(
+            self.ADMIN_EMAIL,
+            "integration admin password",
+            "Portal Admin",
+        )
+        second_admin_id = self.repository.create_msp_user(
+            self.SECOND_ADMIN_EMAIL,
+            "integration second admin password",
+            "Second Admin",
+            "MSP_ADMIN",
+            actor_id=admin_id,
+        )
+        operator_id = self.repository.create_msp_user(
+            self.OPERATOR_EMAIL,
+            "integration operator password",
+            "Portal Operator",
+            "MSP_OPERATOR",
+            actor_id=admin_id,
+        )
+        self.created_user_ids.extend([admin_id, second_admin_id, operator_id])
+
+        users = self.repository.msp_users()
+        managed_ids = {
+            str(user["id"])
+            for user in users
+            if user["email"] in {
+                self.ADMIN_EMAIL,
+                self.SECOND_ADMIN_EMAIL,
+                self.OPERATOR_EMAIL,
+            }
+        }
+        self.assertEqual(
+            managed_ids,
+            {admin_id, second_admin_id, operator_id},
+        )
+
+        session_token, _ = self.repository.create_session(operator_id)
+        self.assertIsNotNone(self.repository.session_user(session_token))
+        self.repository.set_msp_user_enabled(operator_id, admin_id, False)
+        self.assertIsNone(self.repository.session_user(session_token))
+        self.assertEqual(
+            self.repository.authenticate(self.OPERATOR_EMAIL)["status"],
+            "DISABLED",
+        )
+        self.repository.set_msp_user_enabled(operator_id, admin_id, True)
+        self.assertEqual(
+            self.repository.authenticate(self.OPERATOR_EMAIL)["status"],
+            "ACTIVE",
+        )
+        with self.assertRaisesRegex(ValueError, "자신의 MSP 계정"):
+            self.repository.set_msp_user_enabled(admin_id, admin_id, False)
 
     def test_users_multi_account_and_encrypted_credentials(self):
         tenant_id = self.repository.create_tenant(

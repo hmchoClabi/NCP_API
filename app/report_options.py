@@ -21,7 +21,7 @@ REPORT_SECTION_LABELS = {
     "executive_summary": "주요 요약",
     "billing": "청구·예상 비용",
     "organization_billing": "Organization 계정별 비용",
-    "infrastructure_inventory": "대표 인프라 목록",
+    "infrastructure_inventory": "자원 현황",
     "monitoring": "모니터링 그래프",
     "insight_events": "Cloud Insight 이벤트",
     "activity_history": "Cloud Activity Tracer 이력",
@@ -210,7 +210,7 @@ def normalize_report_options(value: Any) -> dict[str, Any]:
         isinstance(raw_sections, (list, tuple, set))
         and "infrastructure_diagram" in raw_sections
     ):
-        # 기존 구성도 전용 설정은 대표 인프라 목록으로 안전하게 승계한다.
+        # 기존 구성도 전용 설정은 자원 현황으로 안전하게 승계한다.
         sections_value = dict(value)
         sections_value["sections"] = [
             *raw_sections,

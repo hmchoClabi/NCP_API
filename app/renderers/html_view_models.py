@@ -50,7 +50,6 @@ class InfrastructureSectionHtml:
     inventory: str = ""
     network_configuration: str = ""
     target_groups: str = ""
-    server_details: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,11 +66,9 @@ class ReportSectionHtml:
     """최종 HTML 본문에 삽입되는 모든 섹션."""
 
     summary: str = ""
-    historical_notice: str = ""
     inventory: str = ""
     network_configuration: str = ""
     target_groups: str = ""
-    server_details: str = ""
     monitoring: str = ""
     billing: str = ""
     organization_billing: str = ""

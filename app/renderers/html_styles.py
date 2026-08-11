@@ -122,32 +122,6 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
   border-radius: 16px;
 }
 .report-section.warning { border-color: #fed7aa; }
-.historical-basis-notice { background: #fff7ed; }
-.historical-basis-notice .count {
-  color: #9a3412;
-  background: #ffedd5;
-}
-.historical-basis-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.historical-basis-grid div {
-  display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1px solid #fed7aa;
-  border-radius: 10px;
-}
-.historical-basis-grid span { color: #9a3412; font-size: .76rem; }
-.historical-basis-grid strong { color: #431407; font-size: .86rem; }
-.historical-basis-caveat {
-  margin: 14px 0 0;
-  color: #7c2d12;
-  font-size: .82rem;
-  font-weight: 700;
-}
 .network-snapshot-basis {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -297,7 +271,7 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
-  .summary-grid, .billing-facts, .infra-summary-grid, .historical-basis-grid, .network-snapshot-basis { grid-template-columns: 1fr; gap: 10px; }
+  .summary-grid, .billing-facts, .infra-summary-grid, .network-snapshot-basis { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
   .report-identity { align-items: flex-start; flex-direction: column; }
   .customer-logo-plate { width: min(100%, 220px); height: 100px; }

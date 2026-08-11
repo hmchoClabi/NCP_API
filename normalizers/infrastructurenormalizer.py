@@ -107,6 +107,18 @@ class InfrastructureNormalizer:
                             "cpuCount",
                         ),
                         "memory_gb": self._value(server, "memory_gb"),
+                        "server_product_code": self._value(
+                            server,
+                            "server_product_code",
+                            "serverProductCode",
+                        )
+                        or raw_server.get("serverProductCode"),
+                        "server_product_name": self._value(
+                            server,
+                            "server_product_name",
+                            "serverProductName",
+                        )
+                        or raw_server.get("serverProductName"),
                         "hypervisor_type": self._value(
                             server,
                             "hypervisor_type",
@@ -124,6 +136,12 @@ class InfrastructureNormalizer:
                         ),
                         "storage_count": len(
                             self._as_list(server.get("storages"))
+                        ),
+                        "storage_size_gb_total": self._sum_numbers(
+                            self._value(storage, "size_gb")
+                            for storage in self._dict_items(
+                                server.get("storages")
+                            )
                         ),
                         "server_instance_no": self._value(
                             server,
@@ -1117,6 +1135,7 @@ class InfrastructureNormalizer:
                         ),
                         "public_ips": public_ips,
                         "private_ips": private_ips,
+                        "public_ip_count": len(public_ips),
                         "public_ip_instance_nos": public_ip_instance_nos,
                     },
                 )

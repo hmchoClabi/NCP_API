@@ -38,7 +38,7 @@
         <a href="{{ url_for('msp_customers', environment='public') }}">민간 고객</a>
         <a href="{{ url_for('msp_customers', environment='gov') }}">공공 고객</a>
         <a href="{{ url_for('msp_schedules') }}">전체 실행 일정</a>
-        {% if 'MSP_ADMIN' in current_user.platform_roles %}<a href="{{ url_for('msp_users') }}">사용자 관리</a>{% endif %}
+        {% if 'MSP_ADMIN' in current_user.platform_roles %}<a href="{{ url_for('msp_users') }}">MSP 계정·사용자 관리</a>{% endif %}
         {% endif %}
         <p class="nav-label">보고서</p>
         <a href="{{ url_for('customer_portal') }}">{{ '전체 고객 보고서' if current_user.platform_roles else '내 고객 포털' }}</a>

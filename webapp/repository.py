@@ -30,6 +30,7 @@ _PERSONAL_DATA_KEYS = {
     "member_no", "member_number", "user", "user_id", "user_name",
 }
 _ACTIVE_REPORT_STATUSES = {"QUEUED", "RUNNING", "RETRYING"}
+_MSP_ACCOUNT_MANAGEMENT_LOCK_ID = 1_311_787_345
 
 
 def _remove_local_report_artifacts(storage_uris: list[str]) -> tuple[int, int]:
@@ -83,6 +84,32 @@ def _validate_user_fields(email: str, display_name: str) -> tuple[str, str]:
     if not display_name or len(display_name) > 200:
         raise ValueError("Display name must contain 1-200 characters.")
     return email, display_name
+
+
+def _validate_msp_status_change(
+    *,
+    target_user_id: str,
+    actor_id: str,
+    current_status: str,
+    enabled: bool,
+    is_admin: bool,
+    active_admin_count: int | None,
+) -> None:
+    """MSP 계정 상태 변경으로 관리 접근이 끊기지 않도록 검증한다."""
+
+    if target_user_id == actor_id:
+        raise ValueError("현재 로그인한 자신의 MSP 계정 상태는 변경할 수 없습니다.")
+    if current_status not in {"ACTIVE", "DISABLED"}:
+        raise ValueError(
+            "잠김 또는 초대 상태의 계정은 이 화면에서 활성화·비활성화할 수 없습니다."
+        )
+    if (
+        not enabled
+        and current_status == "ACTIVE"
+        and is_admin
+        and (active_admin_count or 0) <= 1
+    ):
+        raise ValueError("마지막 활성 MSP 관리자는 비활성화할 수 없습니다.")
 
 
 class PortalRepository:
@@ -323,6 +350,7 @@ class PortalRepository:
         display_name: str,
         role: str,
         environment_scope: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> str:
         if role not in {"MSP_ADMIN", "MSP_OPERATOR"}:
             raise ValueError("지원하지 않는 MSP 권한입니다.")
@@ -331,6 +359,16 @@ class PortalRepository:
         email, display_name = _validate_user_fields(email, display_name)
         password_hash = hash_password(password)
         with self._connect() as connection, connection.cursor() as cursor:
+            if actor_id is not None:
+                try:
+                    actor_id = str(UUID(actor_id))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("MSP 계정 등록 요청자가 올바르지 않습니다.") from exc
+            # 계정 생성과 상태 변경을 직렬화해 관리자 수 안전장치의 경쟁 조건을 막는다.
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s::bigint)",
+                (_MSP_ACCOUNT_MANAGEMENT_LOCK_ID,),
+            )
             cursor.execute(
                 "SELECT id FROM control.users WHERE lower(email) = lower(%s)",
                 (email,),
@@ -355,6 +393,25 @@ class PortalRepository:
                 """,
                 (user_id, role, environment_scope),
             )
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    actor_id, table_name, record_id, operation, changed_fields
+                ) VALUES (%s, 'control.users', %s, 'INSERT', %s::jsonb)
+                """,
+                (
+                    actor_id,
+                    str(user_id),
+                    json.dumps(
+                        {
+                            "status": "ACTIVE",
+                            "platform_role": role,
+                            "environment_scope": environment_scope,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
             return str(user_id)
 
     def msp_users(self) -> list[dict[str, Any]]:
@@ -363,14 +420,131 @@ class PortalRepository:
                 """
                 SELECT users.id, users.email, users.display_name,
                        users.status AS user_status, users.last_login_at,
-                       users.created_at, role.role, role.environment_scope
+                       users.created_at,
+                       CASE
+                           WHEN bool_or(role.role = 'MSP_ADMIN')
+                           THEN 'MSP_ADMIN'
+                           ELSE 'MSP_OPERATOR'
+                       END AS role,
+                       CASE
+                           WHEN bool_or(role.environment_scope IS NULL)
+                                OR count(DISTINCT role.environment_scope) > 1
+                           THEN NULL
+                           ELSE min(role.environment_scope)
+                       END AS environment_scope
                 FROM control.users users
                 JOIN control.platform_roles role ON role.user_id = users.id
                 WHERE role.role IN ('MSP_ADMIN', 'MSP_OPERATOR')
-                ORDER BY users.display_name, users.email, role.role
+                GROUP BY users.id
+                ORDER BY users.display_name, users.email
                 """
             )
             return cursor.fetchall()
+
+    def set_msp_user_enabled(
+        self,
+        user_id: str,
+        actor_id: str,
+        enabled: bool,
+    ) -> str:
+        """다른 MSP 계정을 활성화하거나 비활성화하고 세션을 회수한다."""
+
+        try:
+            user_id = str(UUID(user_id))
+            actor_id = str(UUID(actor_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MSP 사용자 식별자가 올바르지 않습니다.") from exc
+        desired_status = "ACTIVE" if enabled else "DISABLED"
+        with self._connect() as connection, connection.cursor() as cursor:
+            # 두 관리자가 동시에 서로를 비활성화해 관리자 0명이 되는 상황을 방지한다.
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s::bigint)",
+                (_MSP_ACCOUNT_MANAGEMENT_LOCK_ID,),
+            )
+            cursor.execute(
+                """
+                SELECT users.id, users.display_name, users.status,
+                       EXISTS (
+                           SELECT 1
+                           FROM control.platform_roles admin_role
+                           WHERE admin_role.user_id = users.id
+                             AND admin_role.role = 'MSP_ADMIN'
+                       ) AS is_admin
+                FROM control.users users
+                WHERE users.id = %s
+                  AND EXISTS (
+                      SELECT 1
+                      FROM control.platform_roles msp_role
+                      WHERE msp_role.user_id = users.id
+                        AND msp_role.role IN ('MSP_ADMIN', 'MSP_OPERATOR')
+                  )
+                FOR UPDATE
+                """,
+                (user_id,),
+            )
+            target = cursor.fetchone()
+            if not target:
+                raise ValueError("변경할 MSP 계정을 찾을 수 없습니다.")
+
+            active_admin_count: int | None = None
+            if not enabled and target["is_admin"]:
+                cursor.execute(
+                    """
+                    SELECT count(DISTINCT users.id) AS active_admin_count
+                    FROM control.users users
+                    JOIN control.platform_roles role ON role.user_id = users.id
+                    WHERE users.status = 'ACTIVE'
+                      AND role.role = 'MSP_ADMIN'
+                    """
+                )
+                active_admin_count = int(
+                    cursor.fetchone()["active_admin_count"]
+                )
+            _validate_msp_status_change(
+                target_user_id=user_id,
+                actor_id=actor_id,
+                current_status=target["status"],
+                enabled=enabled,
+                is_admin=bool(target["is_admin"]),
+                active_admin_count=active_admin_count,
+            )
+            if target["status"] == desired_status:
+                return str(target["display_name"])
+
+            cursor.execute(
+                """
+                UPDATE control.users
+                SET status = %s, updated_at = clock_timestamp()
+                WHERE id = %s
+                """,
+                (desired_status, user_id),
+            )
+            if not enabled:
+                cursor.execute(
+                    "DELETE FROM control.user_sessions WHERE user_id = %s",
+                    (user_id,),
+                )
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    actor_id, table_name, record_id, operation, changed_fields
+                ) VALUES (%s, 'control.users', %s, 'UPDATE', %s::jsonb)
+                """,
+                (
+                    actor_id,
+                    user_id,
+                    json.dumps(
+                        {
+                            "status": {
+                                "from": target["status"],
+                                "to": desired_status,
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            return str(target["display_name"])
 
     def assign_customer_membership(
         self, user_id: str, tenant_id: str, role: str

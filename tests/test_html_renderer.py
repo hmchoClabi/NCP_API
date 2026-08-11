@@ -227,7 +227,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         ]
 
         html = HtmlReportRenderer().render(report)
-        inventory = html.split("<h2>대표 인프라 현황</h2>", 1)[1].split(
+        inventory = html.split("<h2>자원 현황</h2>", 1)[1].split(
             "</section>",
             1,
         )[0]
@@ -240,17 +240,63 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("excluded-cdn", html)
         self.assertNotIn("excluded-alarm-instance", html)
         self.assertNotIn("excluded-sub-account", html)
+        self.assertIn("규모 / 과금 관련 지표", inventory)
+        self.assertIn("주소 / 연결", inventory)
 
         details = HtmlReportRenderer()._infrastructure_details_text({
-            "engine": "POSTGRESQL",
-            "server_count": 2,
-            "cpu_count_total": 8,
-            "memory_gb_total": 32,
-            "data_storage_gb_total": 500,
+            "kubernetes_version": "1.32",
+            "high_availability": True,
+            "encrypted": False,
         })
-        self.assertIn("DB 서버: 2개", details)
-        self.assertIn("총 메모리: 32 GB", details)
-        self.assertIn("데이터 용량: 500 GB", details)
+        self.assertIn("Kubernetes: 1.32", details)
+        self.assertIn("HA: 사용", details)
+        self.assertIn("암호화: 미사용", details)
+
+    def test_server_details_are_merged_into_resource_inventory(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["SERVER", "BLOCK_STORAGE"],
+            "monitoring_categories": [],
+        }
+        report.servers = [{
+            "server_id": "server-1",
+            "server_name": "web-01",
+            "cpu_count": 4,
+            "memory_gb": 16,
+            "private_ip": "10.0.1.10",
+            "public_ip": "203.0.113.10",
+            "raw_server": {
+                "serverProductCode": "SVR.VSVR.STAND.C002.M008.NET.SSD.B050.G002",
+                "serverProductName": "Standard 4 vCPU, 16 GB",
+            },
+        }]
+        report.infrastructure = [{
+            "category": "SERVER",
+            "category_label": "서버",
+            "service_name": "Server",
+            "resource_type": "ServerInstance",
+            "resource_id": "server-1",
+            "resource_name": "web-01",
+            "status": "RUN",
+            "region_code": "KR",
+            "zone_code": "KR-1",
+            "details": {},
+        }]
+
+        html = HtmlReportRenderer().render(report)
+        inventory = html.split("<h2>자원 현황</h2>", 1)[1].split(
+            "</section>",
+            1,
+        )[0]
+
+        self.assertEqual(html.count("<h2>자원 현황</h2>"), 1)
+        self.assertNotIn("<h2>서버 상세</h2>", html)
+        self.assertIn("상품: Standard 4 vCPU, 16 GB", inventory)
+        self.assertIn("vCPU: 4개", inventory)
+        self.assertIn("메모리: 16 GB", inventory)
+        self.assertIn("Private: 10.0.1.10", inventory)
+        self.assertIn("Public: 203.0.113.10", inventory)
 
     def test_network_snapshot_marks_generation_time_and_renders_rules(self):
         report = self._sample_report()
@@ -774,7 +820,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         html = HtmlReportRenderer().render(report)
 
         self.assertIn("<h2>Cloud Activity Tracer</h2>", html)
-        self.assertNotIn("<h2>대표 인프라 현황</h2>", html)
+        self.assertNotIn("<h2>자원 현황</h2>", html)
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)

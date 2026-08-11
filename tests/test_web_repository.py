@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.report_branding import validate_customer_logo
-from webapp.repository import PortalRepository, _remove_local_report_artifacts
+from webapp.repository import (
+    PortalRepository,
+    _remove_local_report_artifacts,
+    _validate_msp_status_change,
+)
 
 
 class ReportArtifactCleanupTests(unittest.TestCase):
@@ -95,6 +99,51 @@ class TenantBrandingRepositoryTests(unittest.TestCase):
             "DELETE FROM control.tenant_branding" in statement
             for statement in statements
         ))
+
+
+class MspAccountStatusSafetyTests(unittest.TestCase):
+    def test_rejects_self_deactivation(self):
+        with self.assertRaisesRegex(ValueError, "자신의 MSP 계정"):
+            _validate_msp_status_change(
+                target_user_id="admin-1",
+                actor_id="admin-1",
+                current_status="ACTIVE",
+                enabled=False,
+                is_admin=True,
+                active_admin_count=2,
+            )
+
+    def test_rejects_last_active_admin_deactivation(self):
+        with self.assertRaisesRegex(ValueError, "마지막 활성 MSP 관리자"):
+            _validate_msp_status_change(
+                target_user_id="admin-2",
+                actor_id="admin-1",
+                current_status="ACTIVE",
+                enabled=False,
+                is_admin=True,
+                active_admin_count=1,
+            )
+
+    def test_allows_other_admin_when_another_active_admin_remains(self):
+        _validate_msp_status_change(
+            target_user_id="admin-2",
+            actor_id="admin-1",
+            current_status="ACTIVE",
+            enabled=False,
+            is_admin=True,
+            active_admin_count=2,
+        )
+
+    def test_rejects_unlocking_security_locked_account(self):
+        with self.assertRaisesRegex(ValueError, "잠김 또는 초대"):
+            _validate_msp_status_change(
+                target_user_id="operator-1",
+                actor_id="admin-1",
+                current_status="LOCKED",
+                enabled=True,
+                is_admin=False,
+                active_admin_count=None,
+            )
 
 
 if __name__ == "__main__":
