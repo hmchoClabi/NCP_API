@@ -94,7 +94,19 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 "monitoring_categories": ["LOAD_BALANCER"],
             },
             infrastructure=[
-                {"category": "LOAD_BALANCER", "resource_id": "lb-1"},
+                {
+                    "category": "LOAD_BALANCER",
+                    "resource_id": "lb-1",
+                    "details": {
+                        "target_group_count": 1,
+                        "registered_target_count": 2,
+                        "ready_target_count": 2,
+                        "unready_target_count": 0,
+                        "unused_target_count": 0,
+                        "unknown_target_count": 0,
+                        "target_health_snapshot_available": True,
+                    },
+                },
                 {
                     "category": "TARGET_GROUP",
                     "resource_id": "tg-1",
@@ -118,8 +130,10 @@ class ReportResultSnapshotTests(unittest.TestCase):
             ["LOAD_BALANCER", "TARGET_GROUP"],
         )
         self.assertEqual(
-            report.display_load_balancer_target_groups[0]["resource_id"],
-            "tg-1",
+            public_snapshot["infrastructure"][0]["details"].get(
+                "ready_target_count"
+            ),
+            2,
         )
 
     def test_public_json_exposes_only_safe_inventory_fields(self):

@@ -34,12 +34,10 @@ class ReportDisplayData:
     billing: BillingDisplayData
     activity_events: List[Dict[str, Any]]
     infrastructure: List[Dict[str, Any]]
-    load_balancer_target_groups: List[Dict[str, Any]]
     inventory_enabled: bool
     monitoring_enabled: bool
     billing_enabled: bool
     organization_billing_enabled: bool
-    infrastructure_metadata: Dict[str, Any]
     network_configuration_metadata: Dict[str, Any]
 
 
@@ -49,7 +47,6 @@ class InfrastructureSectionHtml:
 
     inventory: str = ""
     network_configuration: str = ""
-    target_groups: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +65,6 @@ class ReportSectionHtml:
     summary: str = ""
     inventory: str = ""
     network_configuration: str = ""
-    target_groups: str = ""
     monitoring: str = ""
     billing: str = ""
     organization_billing: str = ""

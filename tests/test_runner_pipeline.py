@@ -515,6 +515,39 @@ class RunnerPipelineTests(unittest.TestCase):
             ["LOAD_BALANCER", "TARGET_GROUP"],
         )
 
+    def test_load_balancer_collection_keeps_target_group_resources(self):
+        runner = self._runner_without_factory_init()
+
+        class TargetGroupInfrastructureCollector:
+            def __init__(self, api_factory):
+                self.last_errors = []
+                self.last_warnings = []
+
+            def collect(self, servers, server_raw_data, categories=None):
+                del servers, server_raw_data, categories
+                return [
+                    {"category": "LOAD_BALANCER", "resource_id": "lb-1"},
+                    {"category": "TARGET_GROUP", "resource_id": "tg-1"},
+                    {"category": "NAS", "resource_id": "nas-1"},
+                ]
+
+        with patch(
+            "app.runner.InfrastructureCollector",
+            TargetGroupInfrastructureCollector,
+        ):
+            inventory, errors, warnings = runner.collect_infrastructure(
+                servers=[],
+                server_raw_data={},
+                categories={"LOAD_BALANCER"},
+            )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [item["category"] for item in inventory],
+            ["LOAD_BALANCER", "TARGET_GROUP"],
+        )
+
     def test_optional_infrastructure_collectors_are_failure_isolated(self):
         runner = self._runner_without_factory_init()
 

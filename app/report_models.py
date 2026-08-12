@@ -161,24 +161,6 @@ class ReportResult:
         ]
 
     @property
-    def display_load_balancer_target_groups(self) -> List[Dict[str, Any]]:
-        """Return supporting Target Group health snapshots for the report."""
-        options = self.selected_report_options
-        if (
-            not options.section_enabled("infrastructure_inventory")
-            or not options.resource_enabled("LOAD_BALANCER")
-        ):
-            return []
-        return [
-            item for item in self.infrastructure
-            if (
-                isinstance(item, dict)
-                and str(item.get("category") or "").upper()
-                == "TARGET_GROUP"
-            )
-        ]
-
-    @property
     def persisted_infrastructure(self) -> List[Dict[str, Any]]:
         """Keep collected resources needed for later period-accurate reuse."""
         return [
@@ -292,6 +274,13 @@ class ReportResult:
             "iops",
             "throughput_mbps",
             "throughput_type",
+            "target_group_count",
+            "registered_target_count",
+            "ready_target_count",
+            "unready_target_count",
+            "unused_target_count",
+            "unknown_target_count",
+            "target_health_snapshot_available",
             "snapshot_volume_size_gb",
             "block_storage_size_gb",
             "kubernetes_version",

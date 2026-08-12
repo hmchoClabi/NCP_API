@@ -2238,10 +2238,15 @@ class ReportRunner:
             data = collector.collect(**collect_kwargs)
             normalized_data = self._dict_records(data)
             if normalized_categories:
+                retained_categories = set(normalized_categories)
+                # Target Group은 사용자 선택 항목이 아니라 LB 상태와 기간
+                # 메트릭을 구성하는 내부 보조 자원이므로 LB와 함께 보존한다.
+                if "LOAD_BALANCER" in retained_categories:
+                    retained_categories.add("TARGET_GROUP")
                 normalized_data = [
                     item for item in normalized_data
                     if str(item.get("category") or "").upper()
-                    in normalized_categories
+                    in retained_categories
                 ]
             return (
                 normalized_data,

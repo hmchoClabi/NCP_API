@@ -238,6 +238,33 @@ def resource_connection_summary(
     elif normalized_category == "LOAD_BALANCER":
         _append_value(parts, "IP", details.get("ip_addresses"))
         _append_value(parts, "Target Group", details.get("target_group_count"))
+        if (
+            details.get("target_group_count")
+            and details.get("target_health_snapshot_available") is True
+        ):
+            _append_value(
+                parts,
+                "등록 Target",
+                details.get("registered_target_count"),
+            )
+            _append_value(parts, "Ready", details.get("ready_target_count"))
+            _append_value(
+                parts,
+                "Unready",
+                details.get("unready_target_count"),
+            )
+            _append_value(
+                parts,
+                "미평가",
+                details.get("unused_target_count"),
+            )
+            _append_value(
+                parts,
+                "알 수 없음",
+                details.get("unknown_target_count"),
+            )
+        elif details.get("target_group_count"):
+            parts.append("Target 상태: 수집 실패 또는 권한 없음")
     elif normalized_category == "BLOCK_STORAGE":
         _append_value(
             parts,

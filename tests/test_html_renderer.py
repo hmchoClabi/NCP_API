@@ -711,7 +711,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         )
         self.assertNotIn("PRIMARY · PRIMARY", monitoring)
 
-    def test_target_group_ready_snapshot_and_period_metrics_are_rendered(self):
+    def test_target_group_ready_data_is_integrated_with_load_balancer(self):
         report = self._sample_report()
         report.collection_metadata = {
             "infrastructure": {
@@ -723,6 +723,15 @@ class HtmlReportRendererTests(unittest.TestCase):
                 "category": "LOAD_BALANCER",
                 "resource_id": "lb-1",
                 "resource_name": "public-alb",
+                "details": {
+                    "target_group_count": 1,
+                    "target_health_snapshot_available": True,
+                    "registered_target_count": 4,
+                    "ready_target_count": 2,
+                    "unready_target_count": 1,
+                    "unused_target_count": 1,
+                    "unknown_target_count": 0,
+                },
             },
             {
                 "category": "TARGET_GROUP",
@@ -762,16 +771,16 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
 
-        self.assertIn("LB Target Group 상태", html)
-        self.assertIn("Ready (UP)", html)
-        self.assertIn("Unready (DOWN)", html)
-        self.assertIn("미평가 (UNUSED)", html)
-        self.assertIn("web-targets", html)
-        self.assertIn("2026-07-01 00:05 KST", html)
+        self.assertNotIn("LB Target Group 상태", html)
+        self.assertIn("Target Group: 1", html)
+        self.assertIn("등록 Target: 4", html)
+        self.assertIn("Ready: 2", html)
+        self.assertIn("Unready: 1", html)
         self.assertIn(
-            "LB Target Group · Ready Target 수 (구간 최소)",
+            "Load Balancer · Ready Target 수 (구간 최소)",
             html,
         )
+        self.assertNotIn("LB Target Group ·", html)
         self.assertIn("MIN", html)
 
     def test_insight_event_detail_fields_are_rendered_and_escaped(self):

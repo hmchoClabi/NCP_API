@@ -143,6 +143,43 @@ class InfrastructurePresenterTests(unittest.TestCase):
 
         self.assertEqual(merged["details"], {})
 
+    def test_load_balancer_connection_summary_includes_target_health(self):
+        summary = resource_connection_summary(
+            "LOAD_BALANCER",
+            {
+                "ip_addresses": ["203.0.113.10"],
+                "target_group_count": 2,
+                "target_health_snapshot_available": True,
+                "registered_target_count": 4,
+                "ready_target_count": 3,
+                "unready_target_count": 1,
+                "unused_target_count": 0,
+                "unknown_target_count": 0,
+                "vpc_no": "vpc-1",
+            },
+        )
+
+        self.assertEqual(
+            summary,
+            (
+                "IP: 203.0.113.10 · Target Group: 2 · 등록 Target: 4 · "
+                "Ready: 3 · Unready: 1 · 미평가: 0 · 알 수 없음: 0 · "
+                "VPC: vpc-1"
+            ),
+        )
+
+    def test_load_balancer_connection_summary_marks_missing_health(self):
+        summary = resource_connection_summary(
+            "LOAD_BALANCER",
+            {
+                "target_group_count": 1,
+                "target_health_snapshot_available": False,
+            },
+        )
+
+        self.assertIn("Target Group: 1", summary)
+        self.assertIn("Target 상태: 수집 실패 또는 권한 없음", summary)
+
 
 if __name__ == "__main__":
     unittest.main()

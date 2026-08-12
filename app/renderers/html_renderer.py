@@ -86,9 +86,6 @@ class HtmlReportRenderer:
         )
         activity_events = self._flatten_grouped(report.activity_events)
         infrastructure = report.display_infrastructure
-        load_balancer_target_groups = (
-            report.display_load_balancer_target_groups
-        )
         inventory_enabled = report_options.section_enabled(
             "infrastructure_inventory"
         )
@@ -98,9 +95,6 @@ class HtmlReportRenderer:
             "organization_billing"
         )
         collection_metadata = self._mapping(report.collection_metadata)
-        infrastructure_metadata = self._mapping(
-            collection_metadata.get("infrastructure")
-        )
         network_configuration_metadata = self._mapping(
             collection_metadata.get("network_configuration")
         )
@@ -117,12 +111,10 @@ class HtmlReportRenderer:
             billing=billing_display,
             activity_events=activity_events,
             infrastructure=infrastructure,
-            load_balancer_target_groups=load_balancer_target_groups,
             inventory_enabled=inventory_enabled,
             monitoring_enabled=monitoring_enabled,
             billing_enabled=billing_enabled,
             organization_billing_enabled=organization_billing_enabled,
-            infrastructure_metadata=infrastructure_metadata,
             network_configuration_metadata=(
                 network_configuration_metadata
             ),
@@ -355,23 +347,9 @@ class HtmlReportRenderer:
             )
             else ""
         )
-        target_group_html = ""
-        if display.inventory_enabled and (
-            display.load_balancer_target_groups
-            or any(
-                str(resource.get("category") or "").upper()
-                == "LOAD_BALANCER"
-                for resource in display.infrastructure
-            )
-        ):
-            target_group_html = self._load_balancer_target_group_section(
-                display.load_balancer_target_groups,
-                display.infrastructure_metadata,
-            )
         return InfrastructureSectionHtml(
             inventory=inventory_html,
             network_configuration=network_configuration_html,
-            target_groups=target_group_html,
         )
 
     def _render_monitoring_sections(
@@ -540,7 +518,6 @@ class HtmlReportRenderer:
             network_configuration=(
                 infrastructure.network_configuration
             ),
-            target_groups=infrastructure.target_groups,
             monitoring=monitoring,
             billing=billing,
             organization_billing=organization_billing,
@@ -600,7 +577,6 @@ class HtmlReportRenderer:
     {sections.summary}
     {sections.inventory}
     {sections.network_configuration}
-    {sections.target_groups}
     {sections.monitoring}
     {sections.billing}
     {sections.organization_billing}
@@ -1074,96 +1050,6 @@ class HtmlReportRenderer:
             warning=not in_period,
         )
 
-    def _load_balancer_target_group_section(
-        self,
-        target_groups: List[Dict[str, Any]],
-        infrastructure_metadata: Mapping[str, Any],
-    ) -> str:
-        collected_at = self._infrastructure_create_time(
-            infrastructure_metadata.get("completed_at")
-            or infrastructure_metadata.get("started_at")
-        )
-        rows = []
-        for target_group in self._records(target_groups):
-            details = self._mapping(target_group.get("details"))
-            snapshot_available = details.get("health_snapshot_available")
-            rows.append({
-                "target_group_name": (
-                    target_group.get("resource_name") or "-"
-                ),
-                "target_group_no": (
-                    details.get("target_group_no")
-                    or target_group.get("resource_id")
-                ),
-                "load_balancer_no": details.get(
-                    "load_balancer_instance_no"
-                ),
-                "protocol_port": " / ".join(
-                    str(value)
-                    for value in (
-                        details.get("protocol"),
-                        details.get("port"),
-                    )
-                    if value is not None and str(value).strip()
-                ) or "-",
-                "registered": details.get("registered_target_count"),
-                "ready": (
-                    details.get("ready_target_count")
-                    if snapshot_available is True else None
-                ),
-                "unready": (
-                    details.get("unready_target_count")
-                    if snapshot_available is True else None
-                ),
-                "unused": (
-                    details.get("unused_target_count")
-                    if snapshot_available is True else None
-                ),
-                "unknown": (
-                    details.get("unknown_target_count")
-                    if snapshot_available is True else None
-                ),
-                "snapshot_status": (
-                    "수집됨"
-                    if snapshot_available is True
-                    else "수집 실패 또는 권한 없음"
-                ),
-                "collected_at": collected_at,
-            })
-
-        return self._section(
-            "LB Target Group 상태",
-            (
-                "getTargetList의 현재 헬스체크 결과입니다. UP만 Ready, "
-                "DOWN은 Unready, UNUSED는 헬스체크 미사용·미평가로 "
-                "구분합니다. 보고 기간 추이는 아래 Cloud Insight 그래프의 "
-                "Ready 최소값과 Unready 최대값으로 표시합니다."
-            ),
-            self._table(
-                rows,
-                (
-                    ("target_group_name", "Target Group"),
-                    ("target_group_no", "Target Group No."),
-                    ("load_balancer_no", "LB No."),
-                    ("protocol_port", "프로토콜 / 포트"),
-                    ("registered", "등록", "number0"),
-                    ("ready", "Ready (UP)", "number0"),
-                    ("unready", "Unready (DOWN)", "number0"),
-                    ("unused", "미평가 (UNUSED)", "number0"),
-                    ("unknown", "알 수 없음", "number0"),
-                    ("snapshot_status", "상태 수집"),
-                    ("collected_at", "관측 시각"),
-                ),
-            ),
-            len(rows),
-            warning=any(
-                self._mapping(group.get("details")).get(
-                    "health_snapshot_available"
-                ) is not True
-                for group in self._records(target_groups)
-            ),
-        )
-
     def _infrastructure_details_text(self, value: Any) -> str:
         if not isinstance(value, dict):
             return "-"
@@ -1267,7 +1153,7 @@ class HtmlReportRenderer:
             product_name_value = str(group.get("product_name") or "").strip()
             product_name = product_name_value or "Cloud Insight"
             resource_label = (
-                "LB Target Group"
+                "Load Balancer"
                 if str(group.get("metric_scope") or "").upper()
                 == "TARGET_GROUP"
                 else (
