@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
+from app.collection_diagnostics import (
+    diagnostic_service_name,
+    normalize_collection_issue,
+)
 from app.renderers.html_styles import HTML_REPORT_STYLES
 from app.renderers.html_view_models import (
     BillingDisplayData,
@@ -271,12 +275,16 @@ class HtmlReportRenderer:
                     )
                 )
             if report_options.section_enabled("collection_diagnostics"):
+                diagnostic_count = (
+                    len(report.collection_errors)
+                    + len(report.collection_warnings)
+                )
                 summary_cards.append(
                     self._summary_card(
-                        "수집 오류",
-                        len(report.collection_errors),
+                        "수집 진단",
+                        diagnostic_count,
                         "건",
-                        warning=bool(report.collection_errors),
+                        warning=bool(diagnostic_count),
                     )
                 )
             if (
@@ -488,22 +496,22 @@ class HtmlReportRenderer:
         )
         diagnostics_html = ""
         if display.report_options.section_enabled("collection_diagnostics"):
-            diagnostics_html = "".join((
-                self._section(
-                    "수집 경고",
-                    "보고서 생성을 중단하지 않는 제한 사항입니다.",
-                    self._error_table(report.collection_warnings),
-                    len(report.collection_warnings),
-                    warning=bool(report.collection_warnings),
+            diagnostics = self._collection_diagnostics(
+                warnings=report.collection_warnings,
+                errors=report.collection_errors,
+            )
+            diagnostics_html = self._section(
+                "수집 진단",
+                (
+                    "수집 중 발생한 경고와 오류를 함께 표시합니다. "
+                    "NCP 응답에 명시된 권한과 호출 API 기준 권고 권한을 "
+                    "구분해 표시합니다. 일반 403의 권고 권한은 지원 환경도 "
+                    "함께 확인해야 합니다."
                 ),
-                self._section(
-                    "수집 오류",
-                    "부분 실패가 발생해도 완료된 데이터는 보고서에 포함합니다.",
-                    self._error_table(report.collection_errors),
-                    len(report.collection_errors),
-                    warning=bool(report.collection_errors),
-                ),
-            ))
+                self._diagnostic_table(diagnostics),
+                len(diagnostics),
+                warning=bool(diagnostics),
+            )
         return EventDiagnosticSectionHtml(
             insight_events=insight_events_html,
             activity=activity_html,
@@ -1256,14 +1264,22 @@ class HtmlReportRenderer:
                 or group.get("metric")
                 or "Metric"
             )
+            product_name_value = str(group.get("product_name") or "").strip()
+            product_name = product_name_value or "Cloud Insight"
             resource_label = (
                 "LB Target Group"
                 if str(group.get("metric_scope") or "").upper()
                 == "TARGET_GROUP"
-                else monitored_categories[category]
+                else (
+                    diagnostic_service_name({
+                        "product_name": product_name_value,
+                        "category": category,
+                    })
+                    if category == "CLOUD_DB" and product_name_value
+                    else monitored_categories[category]
+                )
             )
             title = f"{resource_label} · {metric_label}"
-            product_name = str(group.get("product_name") or "Cloud Insight")
             description = (
                 f"{product_name} · {self._metric_interval_label(interval)} "
                 f"{aggregation}"
@@ -1341,8 +1357,12 @@ class HtmlReportRenderer:
                     or dimensions.get("controller")
                     or dimensions.get("role")
                 )
-                if qualifier:
-                    label = f"{label} · {qualifier}"
+                qualifier_text = str(qualifier or "").strip()
+                if (
+                    qualifier_text
+                    and qualifier_text.casefold() not in label.casefold()
+                ):
+                    label = f"{label} · {qualifier_text}"
             unique_label = label
             suffix = 2
             while unique_label in result:
@@ -2108,21 +2128,40 @@ class HtmlReportRenderer:
             + "</dl></details>"
         )
 
-    def _error_table(self, rows: Any) -> str:
+    def _collection_diagnostics(
+        self,
+        *,
+        warnings: Any,
+        errors: Any,
+    ) -> List[Dict[str, Any]]:
+        """구형·신형 스냅샷의 경고와 오류를 하나의 표시 목록으로 합친다."""
+        prepared = [
+            normalize_collection_issue(row, default_severity="error")
+            for row in self._records(errors)
+        ]
+        prepared.extend(
+            normalize_collection_issue(row, default_severity="warning")
+            for row in self._records(warnings)
+        )
+        return prepared
+
+    def _diagnostic_table(self, rows: Any) -> str:
+        """수집 진단을 심각도와 NCP 상품/대상 중심으로 표시한다."""
         prepared = []
         for row in self._records(rows):
             prepared.append(
                 {
+                    "severity": row.get("severity_label"),
+                    "target": row.get("target"),
                     "collector": row.get("collector"),
                     "stage": row.get("stage"),
-                    "target": self._first(
-                        row,
-                        "target_name",
-                        "target_id",
-                        "resource_id",
-                    ),
+                    "api": row.get("called_api")
+                    or row.get("api")
+                    or row.get("source")
+                    or "API 미확인 (구형 진단 데이터)",
                     "status": row.get("status_code"),
-                    "code": row.get("error_code"),
+                    "code": row.get("error_code") or row.get("code"),
+                    "permission": self._diagnostic_permission(row),
                     "message": row.get("message"),
                 }
             )
@@ -2130,14 +2169,81 @@ class HtmlReportRenderer:
         return self._table(
             prepared,
             (
+                ("severity", "구분"),
+                ("target", "NCP 상품 / 대상"),
                 ("collector", "수집기"),
                 ("stage", "단계"),
-                ("target", "대상"),
-                ("status", "상태"),
+                ("api", "호출 API"),
+                ("status", "HTTP 상태"),
                 ("code", "코드"),
+                ("permission", "확인할 권한 / 근거"),
                 ("message", "메시지"),
             ),
         )
+
+    @staticmethod
+    def _diagnostic_permission(row: Mapping[str, Any]) -> str:
+        """확정 응답과 API 카탈로그 권고를 혼동하지 않게 표시한다."""
+
+        source = str(row.get("permission_source") or "not_applicable")
+        if source == "not_applicable":
+            return "-"
+        if source == "unknown" and not row.get("permission_write_actions"):
+            return "권한명 미확인 · NCP 응답에 액션 없음"
+
+        actions = row.get("permission_actions")
+        safe_actions = (
+            [str(action) for action in actions]
+            if isinstance(actions, (list, tuple))
+            else []
+        )
+        service_name = str(
+            row.get("permission_service_name")
+            or row.get("service_name")
+            or "NCP"
+        )
+        if source == "provider_response":
+            basis = "NCP 응답 확인"
+        else:
+            catalog_basis = str(row.get("permission_basis") or "")
+            basis_detail = {
+                "parent_detail_inference": "부모 상세 권한 추정",
+                "operation_semantics": "공식 권한표 기능 대응",
+                "official_action_table": "공식 권한표 대응",
+            }.get(catalog_basis, "공식 권한표 대응")
+            basis = f"호출 API 기준 권고 · {basis_detail}"
+
+        parts = []
+        if safe_actions:
+            parts.append(f"{service_name}: {', '.join(safe_actions)} ({basis})")
+
+        write_actions = row.get("permission_write_actions")
+        if isinstance(write_actions, (list, tuple)) and write_actions:
+            parts.append(
+                "NCP 응답 쓰기 권한 감지: "
+                + ", ".join(str(action) for action in write_actions)
+                + " (부여 권고 안 함)"
+            )
+
+        related_actions = row.get("permission_related_actions")
+        if isinstance(related_actions, (list, tuple)) and related_actions:
+            parts.append(
+                "연관 권한(공식 권한표 기준): "
+                + ", ".join(str(action) for action in related_actions)
+            )
+
+        managed_policy = row.get("permission_managed_policy")
+        if managed_policy:
+            parts.append(
+                "관리형 대안(공식 권한표 기준): "
+                + str(managed_policy)
+            )
+
+        security_note = row.get("permission_security_note")
+        if security_note:
+            parts.append(f"보안 주의: {security_note}")
+
+        return " · ".join(parts) or "권한명 미확인 · NCP 응답에 액션 없음"
 
     def _activity_table(self, rows: Any) -> str:
         prepared = []

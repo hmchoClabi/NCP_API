@@ -15,7 +15,7 @@
 | Resource Manager 기반 목록·생성 시각 | `View/getResourceList` | `NCP_RESOURCE_MANAGER_VIEWER` |
 | Cloud Insight 그래프 | `View/getMetric`, `View/getProductSchema`, `View/getSystemSchemaKeyList` | `NCP_CLOUD_INSIGHT_VIEWER` |
 | Cloud Insight 이벤트 | `View/getEventList` | `NCP_CLOUD_INSIGHT_VIEWER` |
-| Server·NIC·Block Storage·Public IP | `View/getServerInstanceList`, `View/getNetworkInterfaceList`, `View/getBlockStorageInstanceList`, `View/getPublicIPInstanceList` | `NCP_VPC_SERVER_VIEWER` |
+| Server·NIC·Block Storage·Public IP | `View/getServerInstanceList`, `View/getServerInstanceDetail`, `View/getPlacementGroupList`, `View/getNetworkInterfaceList`, `View/getNetworkInterfaceDetail`, `View/getBlockStorageInstanceList`, `View/getPublicIPInstanceList` | `NCP_VPC_SERVER_VIEWER` |
 | Block Storage Snapshot·Server Image | `View/getBlockStorageSnapshotInstanceList`, `View/getMemberServerImageList` | `NCP_VPC_SERVER_VIEWER` |
 | Load Balancer·Target Group·Target | `View/getLoadBalancerInstanceList`, `View/getTargetGroupList`, `View/getTargetGroupDetail`, `View/getTargetList` | `NCP_VPC_LOAD_BALANCER_VIEWER` |
 | VPC·Subnet·NAT Gateway·VPC Peering | `View/getVPCList`, `View/getSubnetList`, `View/getNATGatewayList`, `View/getVPCPeeringList` | User Created 정책 사용 |
@@ -23,7 +23,7 @@
 | Network ACL·규칙 | `View/getNetworkACLList`, `View/getNetworkACLDetail` 및 콘솔이 자동 추가하는 연관 View 액션 | User Created 정책 사용 |
 | ACG·규칙 | `View/getACGList`, `View/getACGDetail` | `NCP_VPC_SERVER_VIEWER` |
 | VPC NAS | `View/getNASVolumeInstanceList` | `NCP_VPC_NAS_VIEWER` |
-| NKS | `View/getClusterList`와 콘솔이 자동 추가하는 연관 View 액션 | User Created 정책 사용 |
+| NKS | `View/getClusterList`, `View/getWorkerNodeList`, `View/getNodePoolList`, `View/getServerInstancesList`, `View/getVPCList`, `View/getSubnetList` | User Created 정책 사용 |
 | Global DNS | `View/getDomainList` | `NCP_GLOBAL_DNS_VIEWER` |
 | Certificate Manager | `View/getCertificateList` | `NCP_CERTIFICATE_MANAGER_VIEWER` |
 
@@ -106,6 +106,10 @@ CDN과 Container Registry 직접 조회는 제거했다. 고객 설정 화면에
 
 ## 주의할 관리형 정책
 
+- Network Interface의 공식 권한표는 `View/getNetworkInterfaceList`의 연관
+  액션으로 `Change/setSecondaryIP`를 제시한다. 보고서 수집기는 쓰기 API를
+  호출하지 않으므로 이 액션을 자동으로 권고하지 않는다. 콘솔에서 자동 선택된
+  쓰기 액션은 그대로 승인하지 말고 보안 검토와 실제 목록 API 테스트를 거친다.
 - `NCP_VPC_KUBERNETES_SERVICE_VIEWER`는 공식 설명상 NAS `MANAGER` 권한을
   포함하므로 엄격한 최소 권한 계정에는 사용하지 않는다. NKS User Created
   정책에서 `View/getClusterList`를 선택한다.
@@ -113,6 +117,18 @@ CDN과 Container Registry 직접 조회는 제거했다. 고객 설정 화면에
   User Created 정책으로 만든다. 규칙 조회 때문에 `Change/*`는 필요하지 않다.
 - Load Balancer/NAS의 네이티브 모니터 액션은 보고서 그래프에 필요하지 않다.
 - DB 대시보드, 로그, 백업, 복원 액션은 보고서 수집에 필요하지 않다.
+
+## 보고서의 권한 진단 표시 기준
+
+- NCP 오류 응답이 `View/getDomainList` 같은 액션을 직접 포함하면
+  **NCP 응답 확인**으로 표시한다.
+- 일반 403처럼 액션이 없는 응답은 실제 **호출 API**와 이 문서의 권한표를
+  연결해 **호출 API 기준 권고**로 표시한다. 이는 실제 누락 권한 확정값이
+  아니며 서비스 제공 환경, 리전, 접근 가능 소스도 함께 점검한다.
+- `Change/*`가 응답에 포함돼도 조회 권한으로 권고하지 않고 쓰기 권한 감지
+  경고로 분리한다.
+- 과거 스냅샷에 호출 API가 저장되지 않은 경우 `API 미확인 (구형 진단 데이터)`로
+  표시하며 권한명을 추측하지 않는다.
 
 ## 민간·공공 공통 적용과 접근 소스
 

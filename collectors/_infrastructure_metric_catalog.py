@@ -143,59 +143,256 @@ TARGET_GROUP_METRICS = {
     },
 }
 
+# Cloud DB 지표는 같은 의미군 안에서도 서로 다른 운영 정보를 담는다.
+# 예를 들어 전체 연결 수와 실행 중 연결 수를 하나로 축약하지 않고 각각
+# 선택한다. SearchMetricList가 실제로 반환한 이름만 이 허용 목록과 대조하므로
+# 상품 세대나 계정에서 제공하지 않는 지표를 임의로 조회하지 않는다.
 CDB_CATALOG = {
-    "mysql": {
-        "cpu": ("cpu_total", "cpu_pct"),
-        "memory": ("mem_pct",),
-        "storage": ("disk_mysql_used", "disk_mysql_free"),
-        "connection": ("mysql_totalconn", "mysql_runconn"),
-    },
-    "postgresql": {
-        "cpu": ("cpu_total",),
-        "memory": ("mem_used",),
-        "storage": ("disk_usage",),
-        "connection": (
-            "total_session_count",
-            "active_session_count",
-        ),
-    },
-    "cache": {
-        "cpu": ("cpu_user", "cpu_sys"),
-        "memory": (
-            "cache_memory_pct",
-            "redis_memory_pct",
-            "mem_pct",
-        ),
-        "storage": ("disk_data_pct",),
-        "connection": (
-            "cache_connected_clients",
-            "redis_connected_clients",
-        ),
-    },
-    "mssql": {
-        "cpu": ("cpu",),
-        "memory": ("memory_available",),
-        "storage": ("disk_free_percent", "disk_free"),
-        "connection": ("mssql_user_connection",),
-    },
-    "mongodb": {
-        "cpu": ("cpu_total", "cpu_pct"),
-        "memory": ("mem_pct",),
-        "storage": ("disk_mongodb_used", "disk_mongodb_free"),
-        "connection": (
-            "connections_current",
-            "connections_active",
-        ),
-    },
-    "serverless": {
-        "cpu": ("cpu_total",),
-        "memory": ("mem_used",),
-        "storage": ("disk_used",),
-        "connection": (
-            "mysql_total_connections",
-            "mysql_running_threads",
-        ),
-    },
+    "mysql": (
+        {
+            "key": "cpu",
+            "aliases": ("cpu_total", "cpu_pct"),
+            "label": "CPU 사용률",
+        },
+        {
+            "key": "memory_ratio",
+            "aliases": ("mem_pct",),
+            "label": "메모리 사용률",
+        },
+        {
+            "key": "memory_used",
+            "aliases": ("mem_used",),
+            "label": "메모리 사용량",
+        },
+        {
+            "key": "storage_used",
+            "aliases": ("disk_mysql_used",),
+            "label": "스토리지 사용량",
+        },
+        {
+            "key": "storage_free",
+            "aliases": ("disk_mysql_free",),
+            "label": "스토리지 여유 공간",
+        },
+        {
+            "key": "connections_total",
+            "aliases": ("mysql_totalconn",),
+            "label": "전체 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "connections_active",
+            "aliases": ("mysql_runconn",),
+            "label": "실행 중 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "replication_lag",
+            "aliases": ("mysql_slavedelay",),
+            "label": "복제 지연 (구간 최대)",
+            "aggregations": ("MAX", "AVG", "MIN"),
+        },
+        {
+            "key": "slow_query",
+            "aliases": ("mysql_slow",),
+            "label": "Slow Query",
+        },
+    ),
+    "postgresql": (
+        {
+            "key": "cpu",
+            "aliases": ("cpu_total", "cpu_pct"),
+            "label": "CPU 사용률",
+        },
+        {
+            "key": "memory_ratio",
+            "aliases": ("mem_pct",),
+            "label": "메모리 사용률",
+        },
+        {
+            "key": "memory_used",
+            "aliases": ("mem_used",),
+            "label": "메모리 사용량",
+        },
+        {
+            "key": "storage_used",
+            "aliases": ("disk_usage",),
+            "label": "스토리지 사용량",
+        },
+        {
+            "key": "sessions_total",
+            "aliases": ("total_session_count",),
+            "label": "전체 세션 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "sessions_active",
+            "aliases": ("active_session_count",),
+            "label": "활성 세션 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "replication_lag",
+            "aliases": (
+                "replication_lag",
+                "replication_lag_seconds",
+                "replication_delay",
+            ),
+            "label": "복제 지연 (구간 최대)",
+            "aggregations": ("MAX", "AVG", "MIN"),
+        },
+        {
+            "key": "slow_query",
+            "aliases": ("slowquery", "slow_query_count"),
+            "label": "Slow Query",
+        },
+    ),
+    "cache": (
+        {
+            "key": "cpu_user",
+            "aliases": ("cpu_user",),
+            "label": "CPU 사용자 사용률",
+        },
+        {
+            "key": "cpu_system",
+            "aliases": ("cpu_sys",),
+            "label": "CPU 시스템 사용률",
+        },
+        {
+            "key": "memory_ratio",
+            "aliases": (
+                "cache_memory_pct",
+                "redis_memory_pct",
+                "mem_pct",
+            ),
+            "label": "메모리 사용률",
+        },
+        {
+            "key": "storage_ratio",
+            "aliases": ("disk_data_pct",),
+            "label": "스토리지 사용률",
+        },
+        {
+            "key": "connections_current",
+            "aliases": (
+                "cache_connected_clients",
+                "redis_connected_clients",
+            ),
+            "label": "현재 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+    ),
+    "mssql": (
+        {
+            "key": "cpu",
+            "aliases": ("cpu", "cpu_total"),
+            "label": "CPU 사용률",
+        },
+        {
+            "key": "memory_available",
+            "aliases": ("memory_available",),
+            "label": "가용 메모리",
+        },
+        {
+            "key": "storage_free_ratio",
+            "aliases": ("disk_free_percent",),
+            "label": "스토리지 여유율",
+        },
+        {
+            "key": "storage_free",
+            "aliases": ("disk_free",),
+            "label": "스토리지 여유 공간",
+        },
+        {
+            "key": "connections_current",
+            "aliases": ("mssql_user_connection",),
+            "label": "현재 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+    ),
+    "mongodb": (
+        {
+            "key": "cpu",
+            "aliases": ("cpu_total", "cpu_pct"),
+            "label": "CPU 사용률",
+        },
+        {
+            "key": "memory_ratio",
+            "aliases": ("mem_pct",),
+            "label": "메모리 사용률",
+        },
+        {
+            "key": "storage_used",
+            "aliases": ("disk_mongodb_used",),
+            "label": "스토리지 사용량",
+        },
+        {
+            "key": "storage_free",
+            "aliases": ("disk_mongodb_free",),
+            "label": "스토리지 여유 공간",
+        },
+        {
+            "key": "connections_current",
+            "aliases": ("connections_current",),
+            "label": "현재 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "connections_active",
+            "aliases": ("connections_active",),
+            "label": "활성 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+    ),
+    "serverless": (
+        {
+            "key": "unit_utilization",
+            "aliases": ("unit_utilization",),
+            "label": "DB Unit 사용률",
+        },
+        {
+            "key": "cpu",
+            "aliases": ("cpu_total",),
+            "label": "CPU 사용량",
+        },
+        {
+            "key": "memory_used",
+            "aliases": ("mem_used",),
+            "label": "메모리 사용량",
+        },
+        {
+            "key": "storage_used",
+            "aliases": ("disk_mysql_used", "disk_used"),
+            "label": "스토리지 사용량",
+        },
+        {
+            "key": "connections_total",
+            "aliases": ("mysql_totalconn", "mysql_total_connections"),
+            "label": "전체 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "connections_active",
+            "aliases": ("mysql_runconn", "mysql_running_threads"),
+            "label": "실행 중 연결 수",
+            "unit": "count",
+            "force_unit": True,
+        },
+        {
+            "key": "slow_query",
+            "aliases": ("mysql_slow",),
+            "label": "Slow Query",
+        },
+    ),
 }
 CDB_LABELS = {
     "cpu": "CPU",

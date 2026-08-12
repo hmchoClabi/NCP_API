@@ -162,13 +162,14 @@ class DiscoveryAPI:
             ("disk_usage", "byte"),
             ("total_session_count", "count"),
             ("active_session_count", "count"),
+            ("replication_lag", "sec"),
             ("slowquery", "count"),
         ):
             result.append(
                 {
                     "metric": metric,
                     "unit": unit,
-                    "options": self._options("AVG"),
+                    "options": self._options("AVG", "MAX"),
                     "dimensions": {"instanceNo": "db-node-1"},
                 }
             )
@@ -545,7 +546,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             by_category.setdefault(group["category"], []).append(group)
 
         self.assertEqual(len(by_category["LOAD_BALANCER"]), 4)
-        self.assertEqual(len(by_category["CLOUD_DB"]), 4)
+        self.assertEqual(len(by_category["CLOUD_DB"]), 7)
         self.assertEqual(len(by_category["KUBERNETES"]), 3)
         self.assertEqual(
             {group["metric"] for group in by_category["CLOUD_DB"]},
@@ -554,18 +555,36 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
                 "mem_used",
                 "disk_usage",
                 "total_session_count",
+                "active_session_count",
+                "replication_lag",
+                "slowquery",
             },
         )
         self.assertEqual(
             {group["aggregation"] for group in by_category["CLOUD_DB"]},
-            {"AVG"},
+            {"AVG", "MAX"},
         )
-        connection_group = next(
+        total_session_group = next(
             group
             for group in by_category["CLOUD_DB"]
             if group["metric"] == "total_session_count"
         )
-        self.assertEqual(connection_group["unit"], "count")
+        active_session_group = next(
+            group
+            for group in by_category["CLOUD_DB"]
+            if group["metric"] == "active_session_count"
+        )
+        replication_group = next(
+            group
+            for group in by_category["CLOUD_DB"]
+            if group["metric"] == "replication_lag"
+        )
+        self.assertEqual(total_session_group["unit"], "count")
+        self.assertEqual(total_session_group["metric_label"], "전체 세션 수")
+        self.assertEqual(active_session_group["unit"], "count")
+        self.assertEqual(active_session_group["metric_label"], "활성 세션 수")
+        self.assertEqual(replication_group["unit"], "sec")
+        self.assertEqual(replication_group["aggregation"], "MAX")
         self.assertTrue(
             all(
                 group["aggregation"] == "AVG"
@@ -1444,6 +1463,187 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["metric"], "mssql_user_connection")
         self.assertEqual(groups[0]["unit"], "count")
+
+    def test_known_cdb_products_use_explicit_runtime_metric_catalog(self):
+        collector = self._collector(DiscoveryAPI())
+        cases = (
+            (
+                "Cloud DB for MongoDB(VPC)",
+                {
+                    "cpu_total",
+                    "mem_pct",
+                    "disk_mongodb_used",
+                    "connections_current",
+                    "connections_active",
+                    "cpu_private_internal",
+                },
+                {
+                    "cpu_total",
+                    "mem_pct",
+                    "disk_mongodb_used",
+                    "connections_current",
+                    "connections_active",
+                },
+            ),
+            (
+                "Cloud DB for Cache(VPC)",
+                {
+                    "cpu_user",
+                    "cpu_sys",
+                    "redis_memory_pct",
+                    "redis_connected_clients",
+                    "memory_private_internal",
+                },
+                {
+                    "cpu_user",
+                    "cpu_sys",
+                    "redis_memory_pct",
+                    "redis_connected_clients",
+                },
+            ),
+            (
+                "Cloud DB for MSSQL(VPC)",
+                {
+                    "cpu",
+                    "memory_available",
+                    "disk_free_percent",
+                    "mssql_user_connection",
+                    "connection_private_internal",
+                },
+                {
+                    "cpu",
+                    "memory_available",
+                    "disk_free_percent",
+                    "mssql_user_connection",
+                },
+            ),
+            (
+                "Cloud DB Serverless(VPC)",
+                {
+                    "unit_utilization",
+                    "cpu_total",
+                    "mem_used",
+                    "disk_mysql_used",
+                    "mysql_totalconn",
+                    "mysql_runconn",
+                    "mysql_slow",
+                    "disk_private_internal",
+                },
+                {
+                    "unit_utilization",
+                    "cpu_total",
+                    "mem_used",
+                    "disk_mysql_used",
+                    "mysql_totalconn",
+                    "mysql_runconn",
+                    "mysql_slow",
+                },
+            ),
+        )
+
+        for product_name, metric_names, expected in cases:
+            with self.subTest(product_name=product_name):
+                selected = collector._select_metric_names(
+                    category="CDB",
+                    product_name=product_name,
+                    metric_items=[
+                        {"metric": metric_name}
+                        for metric_name in metric_names
+                    ],
+                )
+                self.assertEqual(selected, expected)
+
+    def test_mysql_metrics_keep_node_identity_and_role_in_series_name(self):
+        api = DiscoveryAPI()
+        api.schemas = [
+            {"prodName": "Cloud DB for MySQL(VPC)", "cwKey": "mysql"}
+        ]
+        metrics = (
+            ("cpu_total", "%"),
+            ("mem_pct", "%"),
+            ("disk_mysql_used", "bytes"),
+            ("mysql_totalconn", "num"),
+            ("mysql_runconn", "num"),
+            ("mysql_slavedelay", "sec"),
+            ("mysql_slow", "query/sec"),
+            ("cpu_private_internal", "%"),
+        )
+        api.metrics = {
+            "mysql": [
+                {
+                    "metric": metric_name,
+                    "unit": unit,
+                    "options": api._options("AVG", "MAX"),
+                    "dimensions": {"instanceNo": node_id},
+                }
+                for node_id in ("node-a", "node-b")
+                for metric_name, unit in metrics
+            ]
+        }
+        collector = self._collector(api)
+
+        groups = collector.collect(
+            [
+                {
+                    "category": "CLOUD_DB",
+                    "resource_id": "mysql-service-1",
+                    "resource_name": "orders-mysql",
+                    "platform": "MYSQL",
+                    "details": {
+                        "server_instance_nos": ["node-a", "node-b"],
+                        "server_names": ["mysql-a", "mysql-b"],
+                        "server_roles": ["MASTER", "STANDBY MASTER"],
+                    },
+                }
+            ],
+            1,
+            2,
+        )
+
+        self.assertEqual(
+            {group["metric"] for group in groups},
+            {
+                "cpu_total",
+                "mem_pct",
+                "disk_mysql_used",
+                "mysql_totalconn",
+                "mysql_runconn",
+                "mysql_slavedelay",
+                "mysql_slow",
+            },
+        )
+        self.assertFalse(
+            any(
+                payload["metric"] == "cpu_private_internal"
+                for call in api.query_calls
+                for payload in call["payloads"]
+            )
+        )
+        self.assertTrue(all(len(group["series"]) == 2 for group in groups))
+        self.assertEqual(
+            {
+                series["resource_name"]
+                for group in groups
+                for series in group["series"]
+            },
+            {
+                "orders-mysql · mysql-a (node-a) · MASTER",
+                "orders-mysql · mysql-b (node-b) · STANDBY MASTER",
+            },
+        )
+        lag_group = next(
+            group for group in groups if group["metric"] == "mysql_slavedelay"
+        )
+        self.assertEqual(lag_group["metric_label"], "복제 지연 (구간 최대)")
+        self.assertEqual(lag_group["unit"], "sec")
+        self.assertEqual(lag_group["aggregation"], "MAX")
+        self.assertTrue(
+            all(
+                group["unit"] == "count"
+                for group in groups
+                if group["metric"] in {"mysql_totalconn", "mysql_runconn"}
+            )
+        )
 
     def test_target_group_metrics_use_target_group_numbers_without_lb_mixup(self):
         api = DiscoveryAPI()

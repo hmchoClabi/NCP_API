@@ -1,4 +1,5 @@
 from app.apifactory import APIFactory
+from app.collection_diagnostics import normalize_collection_issue
 from app.customer import CustomerProfile
 from app.renderers import HtmlReportRenderer
 from app.network_configuration import (
@@ -2509,8 +2510,9 @@ class ReportRunner:
 
         for error_list in error_lists:
             for error in self._dict_records(error_list):
+                normalized_error = normalize_collection_issue(error)
                 identity = json.dumps(
-                    error,
+                    normalized_error,
                     ensure_ascii=False,
                     sort_keys=True,
                     default=str,
@@ -2520,7 +2522,7 @@ class ReportRunner:
                     continue
 
                 seen.add(identity)
-                result.append(error)
+                result.append(normalized_error)
 
         return result
 

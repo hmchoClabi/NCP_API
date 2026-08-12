@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.collection_diagnostics import normalize_collection_issue
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
 
@@ -653,7 +654,7 @@ class HtmlReportRendererTests(unittest.TestCase):
             1,
         )[1].split("</article>", 1)[0]
         cdb_chart = monitoring.split(
-            "<h3>Cloud DB · CPU 사용률</h3>",
+            "<h3>Cloud DB for MySQL · CPU 사용률</h3>",
             1,
         )[1].split("</article>", 1)[0]
         nks_chart = monitoring.split(
@@ -674,6 +675,41 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("3%", nks_chart)
         self.assertIn("40%", nas_chart)
         self.assertIn("45%", nas_chart)
+
+    def test_cdb_chart_does_not_repeat_node_role_in_legend(self):
+        report = self._sample_report()
+        report.infrastructure = [{
+            "category": "CLOUD_DB",
+            "resource_name": "postgres-service",
+        }]
+        report.infrastructure_metrics = [{
+            "category": "CLOUD_DB",
+            "product_name": "System/Cloud DB for PostgreSQL(VPC)",
+            "metric": "active_session_count",
+            "metric_label": "활성 세션 수",
+            "unit": "count",
+            "interval": "Min5",
+            "aggregation": "AVG",
+            "series": [{
+                "resource_id": "db-1",
+                "resource_name": "postgres-service · pg-node-1 (1001) · PRIMARY",
+                "dimensions": {"role": "PRIMARY"},
+                "points": [[1780272000000, 3]],
+            }],
+        }]
+
+        html = HtmlReportRenderer().render(report)
+        monitoring = html.split("<h2>주요 인프라 모니터링</h2>", 1)[1]
+
+        self.assertIn(
+            "<h3>Cloud DB for PostgreSQL · 활성 세션 수</h3>",
+            monitoring,
+        )
+        self.assertIn(
+            "postgres-service · pg-node-1 (1001) · PRIMARY",
+            monitoring,
+        )
+        self.assertNotIn("PRIMARY · PRIMARY", monitoring)
 
     def test_target_group_ready_snapshot_and_period_metrics_are_rendered(self):
         report = self._sample_report()
@@ -963,6 +999,98 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
+
+    def test_collection_diagnostics_merge_warnings_and_errors_with_targets(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["collection_diagnostics"],
+            "resource_categories": [],
+            "monitoring_categories": [],
+        }
+        report.collection_warnings = [{
+            "collector": "InfrastructureCollector",
+            "stage": "collection",
+            "target_type": "cdb_postgresql",
+            "api": "get_cloud_postgresql_instance_list",
+            "status_code": 403,
+            "error_code": "2300",
+            "message": "권한이 없습니다.",
+        }]
+        report.collection_errors = [{
+            "collector": "ServerCollector",
+            "stage": "pagination",
+            "target_type": "server",
+            "target_id": "server-123",
+            "api": "get_server_instance_list",
+            "status_code": 500,
+            "message": "수집에 실패했습니다.",
+        }]
+
+        html = HtmlReportRenderer().render(report)
+        diagnostics = html.split("<h2>수집 진단</h2>", 1)[1].split(
+            "</section>",
+            1,
+        )[0]
+
+        self.assertEqual(html.count("<h2>수집 진단</h2>"), 1)
+        self.assertNotIn("<h2>수집 경고</h2>", html)
+        self.assertNotIn("<h2>수집 오류</h2>", html)
+        for heading in (
+            "구분",
+            "NCP 상품 / 대상",
+            "수집기",
+            "단계",
+            "호출 API",
+            "HTTP 상태",
+            "코드",
+            "확인할 권한 / 근거",
+            "메시지",
+        ):
+            self.assertIn(f">{heading}</th>", diagnostics)
+        self.assertIn(">경고</td>", diagnostics)
+        self.assertIn("Cloud DB for PostgreSQL", diagnostics)
+        self.assertIn("get_cloud_postgresql_instance_list", diagnostics)
+        self.assertIn("View/getDBServiceList", diagnostics)
+        self.assertIn("호출 API 기준 권고", diagnostics)
+        self.assertIn(
+            "NCP_VPC_CLOUD_DB_FOR_POSTGRESQL_VIEWER",
+            diagnostics,
+        )
+        self.assertIn(">오류</td>", diagnostics)
+        self.assertIn("Server · server-123", diagnostics)
+        self.assertIn("get_server_instance_list", diagnostics)
+        self.assertIn(">-</td>", diagnostics)
+
+    def test_permission_cell_separates_provider_and_catalog_evidence(self):
+        row = normalize_collection_issue({
+            "target_type": "server",
+            "api": "get_server_instance_list",
+            "status_code": 400,
+            "error_code": "X00004",
+            "required_actions": ["View/getServerInstanceList"],
+        })
+
+        cell = HtmlReportRenderer._diagnostic_permission(row)
+
+        self.assertEqual(cell.count("NCP 응답 확인"), 1)
+        self.assertIn("View/getServerInstanceList (NCP 응답 확인)", cell)
+        self.assertIn("연관 권한(공식 권한표 기준)", cell)
+        self.assertIn("관리형 대안(공식 권한표 기준)", cell)
+
+    def test_permission_cell_warns_instead_of_recommending_write_action(self):
+        row = normalize_collection_issue({
+            "target_type": "network_interface",
+            "api": "get_network_interface_instance_list",
+            "status_code": 400,
+            "error_code": "X00004",
+            "required_actions": ["Change/setSecondaryIP"],
+        })
+
+        cell = HtmlReportRenderer._diagnostic_permission(row)
+
+        self.assertIn("NCP 응답 쓰기 권한 감지", cell)
+        self.assertIn("Change/setSecondaryIP", cell)
+        self.assertIn("부여 권고 안 함", cell)
 
     def test_write_creates_utf8_html_file(self):
         report = self._sample_report()

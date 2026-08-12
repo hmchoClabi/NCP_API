@@ -684,6 +684,12 @@ class InfrastructureMetricCollector:
                 dimensions=dimensions,
                 metric_item=item,
             )
+            if category == "CDB":
+                resource_name = self._cdb_series_name(
+                    resource=resource,
+                    dimensions=dimensions,
+                    service_name=resource_name,
+                )
             result.append(
                 {
                     "category": category,
@@ -737,13 +743,22 @@ class InfrastructureMetricCollector:
 
         if category == "CDB":
             variant = self._cdb_variant(product_name)
-            catalog = self.CDB_CATALOG.get(variant, {})
+            catalog = self.CDB_CATALOG.get(variant, ())
             selected = set()
+            for metric_config in catalog:
+                chosen = self._first_matching_metric(
+                    names,
+                    metric_config["aliases"],
+                )
+                if chosen is not None:
+                    selected.add(chosen)
+            if variant != "unknown":
+                return selected
+
+            # 아직 카탈로그에 등록되지 않은 Cloud DB 상품만 제한된 의미
+            # 규칙으로 대체한다. 알려진 상품에서는 임의 이름을 선택하지 않는다.
             for semantic in ("cpu", "memory", "storage", "connection"):
-                candidates = catalog.get(semantic, ())
-                chosen = self._first_matching_metric(names, candidates)
-                if chosen is None:
-                    chosen = self._generic_cdb_metric(names, semantic)
+                chosen = self._generic_cdb_metric(names, semantic)
                 if chosen is not None:
                     selected.add(chosen)
             return selected
@@ -837,6 +852,18 @@ class InfrastructureMetricCollector:
             return dict(metric_config) if metric_config is not None else None
 
         if category == "CDB":
+            metric_config = self._cdb_metric_config(product_name, token)
+            if metric_config is not None:
+                return {
+                    "label": metric_config["label"],
+                    "unit": metric_config.get("unit"),
+                    "force_unit": bool(metric_config.get("force_unit")),
+                    "aggregations": metric_config.get(
+                        "aggregations",
+                        ("AVG", "MAX", "MIN"),
+                    ),
+                }
+
             semantic = self._cdb_semantic(product_name, token)
             if semantic is None:
                 return None
@@ -861,7 +888,7 @@ class InfrastructureMetricCollector:
                 "label": label,
                 "unit": "count" if semantic == "connection" else None,
                 "force_unit": semantic == "connection",
-                "aggregations": ("AVG", "MAX", "SUM", "MIN", "COUNT"),
+                "aggregations": ("AVG", "MAX", "MIN"),
             }
 
         if category == "NKS":
@@ -906,7 +933,10 @@ class InfrastructureMetricCollector:
             return "mongodb"
         if "mssql" in normalized or "sqlserver" in normalized:
             return "mssql"
-        if "cache" in normalized or "redis" in normalized or "valkey" in normalized:
+        if any(
+            product in normalized
+            for product in ("cache", "redis", "valkey")
+        ):
             return "cache"
         if "mysql" in normalized or "mariadb" in normalized:
             return "mysql"
@@ -917,14 +947,23 @@ class InfrastructureMetricCollector:
         product_name: str,
         metric_token: str,
     ) -> Optional[str]:
-        catalog = self.CDB_CATALOG.get(self._cdb_variant(product_name), {})
-        for semantic, aliases in catalog.items():
-            if metric_token in aliases:
-                return semantic
+        if self._cdb_variant(product_name) != "unknown":
+            return None
 
         for semantic in ("cpu", "memory", "storage", "connection"):
             if self._generic_cdb_metric({metric_token}, semantic):
                 return semantic
+        return None
+
+    def _cdb_metric_config(
+        self,
+        product_name: str,
+        metric_token: str,
+    ) -> Optional[Dict[str, Any]]:
+        catalog = self.CDB_CATALOG.get(self._cdb_variant(product_name), ())
+        for metric_config in catalog:
+            if metric_token in metric_config["aliases"]:
+                return metric_config
         return None
 
     def _metric_name(self, item: Dict[str, Any]) -> Optional[str]:
@@ -1077,6 +1116,91 @@ class InfrastructureMetricCollector:
         if resource_name is None:
             resource_name = self._dimension_name(dimensions)
         return resource_id, str(resource_name or resource_id)
+
+    def _cdb_series_name(
+        self,
+        resource: Optional[Dict[str, Any]],
+        dimensions: Dict[str, str],
+        service_name: str,
+    ) -> str:
+        """Cloud DB 서비스 아래의 실제 DB 노드와 역할을 범례에 구분한다."""
+
+        normalized_dimensions = {
+            self._normalize_dimension_name(name): str(value).strip()
+            for name, value in dimensions.items()
+            if str(value).strip()
+        }
+
+        def dimension_value(*names: str) -> Optional[str]:
+            return next(
+                (
+                    normalized_dimensions[name]
+                    for name in names
+                    if normalized_dimensions.get(name)
+                ),
+                None,
+            )
+
+        node_id = dimension_value(
+            "instanceno",
+            "serverinstanceno",
+            "dbinstanceno",
+            "clouddbinstanceno",
+        )
+        node_name = dimension_value(
+            "dbservername",
+            "servername",
+            "instancename",
+            "resourcename",
+        )
+        role = dimension_value(
+            "dbserverrole",
+            "serverrole",
+            "dbrole",
+            "role",
+        )
+
+        details = resource.get("details") if resource is not None else None
+        if isinstance(details, dict) and node_id:
+            instance_nos = self._string_list(
+                details.get("server_instance_nos")
+            )
+            try:
+                node_index = instance_nos.index(node_id)
+            except ValueError:
+                node_index = None
+
+            if node_index is not None:
+                server_names = self._string_list(details.get("server_names"))
+                server_roles = self._string_list(details.get("server_roles"))
+                # 정규화 목록의 순서가 보존될 때만 위치 기반으로 보완한다.
+                if not node_name and len(server_names) == len(instance_nos):
+                    node_name = server_names[node_index]
+                if not role and len(server_roles) == len(instance_nos):
+                    role = server_roles[node_index]
+
+        node_label = node_name
+        if node_id:
+            node_label = (
+                f"{node_name} ({node_id})"
+                if node_name and node_name.casefold() != node_id.casefold()
+                else f"노드 {node_id}"
+            )
+
+        qualifiers = [value for value in (node_label, role) if value]
+        if not qualifiers:
+            return service_name
+        return " · ".join((service_name, *qualifiers))
+
+    @staticmethod
+    def _string_list(value: Any) -> List[str]:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        ]
 
     def _dimension_identity(self, dimensions: Dict[str, str]) -> str:
         for name, value in dimensions.items():

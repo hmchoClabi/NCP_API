@@ -25,7 +25,7 @@ REPORT_SECTION_LABELS = {
     "monitoring": "모니터링 그래프",
     "insight_events": "Cloud Insight 이벤트",
     "activity_history": "Cloud Activity Tracer 이력",
-    "collection_diagnostics": "수집 경고·오류",
+    "collection_diagnostics": "수집 진단",
 }
 
 NETWORK_CONFIGURATION_CATEGORY_OPTIONS = (
