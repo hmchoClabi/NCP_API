@@ -880,6 +880,171 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("NCP 서비스별 누적 사용금액", html)
         self.assertNotIn("보고 기간 추정 데이터", html)
 
+    def test_unavailable_daily_billing_uses_labeled_month_to_date_tables(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "day",
+            "start_dt": "2026-08-12 00:00:00",
+            "end_dt": "2026-08-12 23:59:59",
+            "is_closed_month": False,
+            "calculated_at": "2026-08-13T00:20:20+09:00",
+        })
+        report.billing = {
+            "summary": {"expected_total_amount": 0},
+            "period_estimate": {
+                "status": "UNAVAILABLE",
+                "total_amount": 0,
+            },
+            "month_to_date_estimate": {
+                "status": "AVAILABLE",
+                "coverage_start": "2026-08-01",
+                "coverage_end": "2026-08-11",
+                "total_amount": 4321,
+                "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            },
+            "daily_usage_rows": [],
+            "month_to_date_usage_rows": [{"usage": {}}],
+            "month_to_date_by_service": [{
+                "service_name": "Server",
+                "expected_amount": 4321,
+                "row_count": 2,
+            }],
+            "month_to_date_network_usage_summary": [{
+                "service_name": "Server",
+                "direction": "Outbound",
+                "name": "Internet Outbound",
+                "usage_gb": 12.5,
+                "row_count": 1,
+            }],
+            "month_to_date_usage_summary": [{
+                "service_name": "Server",
+                "item_name": "Network Outbound",
+                "usage_quantity": 12.5,
+                "unit_code": "GBYTE",
+                "row_count": 1,
+            }],
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("월 누적 서비스별 예상 비용", html)
+        self.assertIn("월 누적 네트워크 사용량", html)
+        self.assertIn("월 누적 서비스별 사용량", html)
+        self.assertIn("2026-08-01 ~ 2026-08-11", html)
+        self.assertIn("4,321", html)
+        self.assertIn("12.500", html)
+        self.assertIn("실제 사용량 0이거나 아직 반영 전일 수 있어", html)
+
+    def test_past_zero_usage_does_not_use_unrelated_month_to_date_data(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "day",
+            "start_dt": "2026-08-05 00:00:00",
+            "end_dt": "2026-08-05 23:59:59",
+            "is_closed_month": False,
+            "calculated_at": "2026-08-13T09:00:00+09:00",
+        })
+        report.billing = {
+            "summary": {"expected_total_amount": 0},
+            "period_estimate": {"status": "UNAVAILABLE"},
+            "month_to_date_estimate": {
+                "status": "AVAILABLE",
+                "coverage_start": "2026-08-01",
+                "coverage_end": "2026-08-11",
+                "total_amount": 4321,
+            },
+            "daily_usage_rows": [],
+            "month_to_date_usage_rows": [{"usage": {}}],
+            "month_to_date_by_service": [{
+                "service_name": "Server",
+                "expected_amount": 4321,
+                "row_count": 2,
+            }],
+            "month_to_date_usage_summary": [{
+                "service_name": "Server",
+                "item_name": "CPU",
+                "usage_quantity": 100,
+                "unit_code": "HOUR",
+                "row_count": 1,
+            }],
+        }
+
+        html = HtmlReportRenderer().render(report)
+        billing_display = HtmlReportRenderer()._prepare_billing_display(
+            report.period,
+            report.billing,
+        )
+
+        self.assertNotIn("월 누적 서비스별 예상 비용", html)
+        self.assertNotIn("월 누적 서비스별 사용량", html)
+        self.assertIn("NCP가 선택 기간의 일별 사용량 데이터를", html)
+        self.assertEqual(billing_display.service_summary, [])
+        self.assertIsNone(billing_display.card_amount)
+        self.assertIn("조회 불가", html)
+
+    def test_month_end_daily_delay_can_use_previous_month_to_date_data(self):
+        renderer = HtmlReportRenderer()
+        use_fallback = renderer._use_delayed_month_to_date_usage(
+            period={
+                "period_type": "day",
+                "start_dt": "2026-08-31 00:00:00",
+                "end_dt": "2026-08-31 23:59:59",
+                "is_closed_month": False,
+                "calculated_at": "2026-09-01T00:20:20+09:00",
+            },
+            period_usage_rows=[],
+            month_to_date_usage_rows=[{"usage": {}}],
+            month_to_date_estimate={
+                "status": "AVAILABLE",
+                "coverage_end": "2026-08-30",
+            },
+            daily_usage_failed=False,
+        )
+
+        self.assertTrue(use_fallback)
+
+    def test_daily_usage_error_does_not_use_month_to_date_fallback(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "day",
+            "start_dt": "2026-08-12 00:00:00",
+            "end_dt": "2026-08-12 23:59:59",
+            "is_closed_month": False,
+            "calculated_at": "2026-08-13T00:20:20+09:00",
+        })
+        report.billing = {
+            "summary": {"expected_total_amount": 0},
+            "period_estimate": {"status": "UNAVAILABLE"},
+            "month_to_date_estimate": {
+                "status": "AVAILABLE",
+                "coverage_start": "2026-08-01",
+                "coverage_end": "2026-08-11",
+                "total_amount": 4321,
+            },
+            "daily_usage_rows": [],
+            "month_to_date_usage_rows": [{"usage": {}}],
+            "month_to_date_by_service": [{
+                "service_name": "Server",
+                "expected_amount": 4321,
+                "row_count": 2,
+            }],
+        }
+        report.collection_errors = [{
+            "source": "daily_usage",
+            "api": "daily_usage",
+        }]
+
+        html = HtmlReportRenderer().render(report)
+        billing_display = HtmlReportRenderer()._prepare_display_data(
+            report
+        ).billing
+
+        self.assertNotIn("월 누적 서비스별 예상 비용", html)
+        self.assertIn("getContractUsageListByDaily 수집 오류", html)
+        self.assertEqual(billing_display.service_summary, [])
+        self.assertIsNone(billing_display.card_amount)
+        self.assertIn("조회 불가", html)
+
     def test_monthly_header_uses_inclusive_last_day(self):
         report = self._sample_report()
         report.period = {

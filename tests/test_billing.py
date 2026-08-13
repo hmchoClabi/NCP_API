@@ -552,6 +552,47 @@ class BillingNormalizerTests(unittest.TestCase):
         )
         self.assertEqual(result["comparison_summary"], [])
 
+    def test_month_to_date_usage_summaries_are_kept_separate(self):
+        month_to_date_row = {
+            "contract": {"contractType": {"codeName": "Server"}},
+            "contractProduct": {
+                "productRatingType": {
+                    "code": "NET_OUT",
+                    "codeName": "Network Outbound",
+                }
+            },
+            "usage": {
+                "userUsageQuantity": 12.5,
+                "userUnit": {"code": "GBYTE", "codeName": "GB"},
+            },
+        }
+
+        result = self.normalizer.normalize(
+            {
+                "daily_usage": [],
+                "month_to_date_usage": [{
+                    "contractUsageListByDaily": [month_to_date_row]
+                }],
+            },
+            billing_month="202608",
+            comparison_enabled=False,
+        )
+
+        self.assertEqual(result["usage_summary"], [])
+        self.assertEqual(result["network_usage_summary"], [])
+        self.assertEqual(
+            result["month_to_date_usage_summary"][0]["usage_quantity"],
+            12.5,
+        )
+        self.assertEqual(
+            result["month_to_date_network_usage_summary"][0]["usage_gb"],
+            12.5,
+        )
+        self.assertEqual(
+            result["summary"]["month_to_date_usage_summary_count"],
+            1,
+        )
+
     def test_cost_facts_keep_confirmed_and_estimated_periods_separate(self):
         usage_row = {
             "useDate": {

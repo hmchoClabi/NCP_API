@@ -34,6 +34,8 @@ class _BillingSummaries:
     discount_summary: List[Dict[str, Any]]
     usage_summary: List[Dict[str, Any]]
     network_usage_summary: List[Dict[str, Any]]
+    month_to_date_usage_summary: List[Dict[str, Any]]
+    month_to_date_network_usage_summary: List[Dict[str, Any]]
     expected_cost_summary: List[Dict[str, Any]]
     month_to_date_cost_summary: List[Dict[str, Any]]
     expected_by_service: List[Dict[str, Any]]
@@ -227,6 +229,14 @@ class BillingNormalizer:
         network_usage_summary = self.summarize_network_usage(
             inputs.daily_usage_rows
         )
+        # NCP 일별 과금 데이터는 자정 직후 아직 반영되지 않을 수 있다.
+        # 월 누적 값은 보고 기간 결과와 섞지 않고 대체 표시에만 사용한다.
+        month_to_date_usage_summary = self.summarize_usage(
+            inputs.month_to_date_usage_rows
+        )
+        month_to_date_network_usage_summary = self.summarize_network_usage(
+            inputs.month_to_date_usage_rows
+        )
         expected_cost_summary = self.summarize_expected_cost(
             usage_rows=inputs.daily_usage_rows,
             price_rows=inputs.price_rows,
@@ -263,6 +273,10 @@ class BillingNormalizer:
             discount_summary=discount_summary,
             usage_summary=usage_summary,
             network_usage_summary=network_usage_summary,
+            month_to_date_usage_summary=month_to_date_usage_summary,
+            month_to_date_network_usage_summary=(
+                month_to_date_network_usage_summary
+            ),
             expected_cost_summary=expected_cost_summary,
             month_to_date_cost_summary=month_to_date_cost_summary,
             expected_by_service=expected_by_service,
@@ -588,6 +602,12 @@ class BillingNormalizer:
                 "service_count": len(summaries.service_summary),
                 "usage_summary_count": len(summaries.usage_summary),
                 "network_usage_count": len(summaries.network_usage_summary),
+                "month_to_date_usage_summary_count": len(
+                    summaries.month_to_date_usage_summary
+                ),
+                "month_to_date_network_usage_count": len(
+                    summaries.month_to_date_network_usage_summary
+                ),
                 "expected_cost_count": len(summaries.expected_cost_summary),
                 "discount_count": len(inputs.discount_rows),
                 "collection_error_count": len(inputs.collection_errors),
@@ -601,6 +621,12 @@ class BillingNormalizer:
             "discount_summary": summaries.discount_summary,
             "usage_summary": summaries.usage_summary,
             "network_usage_summary": summaries.network_usage_summary,
+            "month_to_date_usage_summary": (
+                summaries.month_to_date_usage_summary
+            ),
+            "month_to_date_network_usage_summary": (
+                summaries.month_to_date_network_usage_summary
+            ),
             "expected_cost_summary": summaries.expected_cost_summary,
             "month_to_date_cost_summary": summaries.month_to_date_cost_summary,
             "projected_cost_summary": estimates.projected_cost_summary,

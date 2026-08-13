@@ -19,6 +19,10 @@ class BillingDisplayData:
     section_description: str
     usage_summary: List[Dict[str, Any]]
     network_summary: List[Dict[str, Any]]
+    usage_section_title: str
+    usage_section_description: str
+    network_section_title: str
+    network_section_description: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,7 @@
 import json
 import math
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
@@ -80,10 +80,11 @@ class HtmlReportRenderer:
             if customer_name
             else "NCP 이용 보고서"
         )
-        billing_display = self._prepare_billing_display(
-            period,
-            report.billing or {},
-        )
+        billing = dict(report.billing or {})
+        billing["collection_errors"] = self._records(
+            billing.get("collection_errors")
+        ) + self._records(report.collection_errors)
+        billing_display = self._prepare_billing_display(period, billing)
         activity_events = self._flatten_grouped(report.activity_events)
         infrastructure = report.display_infrastructure
         inventory_enabled = report_options.section_enabled(
@@ -152,11 +153,62 @@ class HtmlReportRenderer:
         confirmed_service_summary = self._records(
             billing.get("service_summary")
         )
+        period_usage_rows = self._records(billing.get("daily_usage_rows"))
+        month_to_date_usage_rows = self._records(
+            billing.get("month_to_date_usage_rows")
+        )
+        daily_usage_failed = self._billing_source_failed(
+            billing,
+            "daily_usage",
+        )
+        month_to_date_usage_summary = self._records(
+            billing.get("month_to_date_usage_summary")
+        )
+        month_to_date_network_summary = self._records(
+            billing.get("month_to_date_network_usage_summary")
+        )
+        month_to_date_reference_available = bool(
+            month_to_date_usage_summary
+            or month_to_date_network_summary
+        )
+        delayed_daily_usage = self._use_delayed_month_to_date_usage(
+            period=period,
+            period_usage_rows=period_usage_rows,
+            month_to_date_usage_rows=month_to_date_usage_rows,
+            month_to_date_estimate=month_to_date_estimate,
+            daily_usage_failed=daily_usage_failed,
+        )
+        use_month_to_date_usage = (
+            delayed_daily_usage and month_to_date_reference_available
+        )
         use_estimated_cost = period.get("is_closed_month") is False
         if use_estimated_cost:
+            period_estimate_status = period_estimate.get("status")
+            month_to_date_service_costs = self._records(
+                billing.get("month_to_date_by_service")
+            )
+            month_to_date_current_costs = self._records(
+                billing.get("target_service_summary")
+            )
+            month_to_date_basis = month_to_date_estimate.get("amount_basis")
+            month_to_date_cost_rows_available = bool(
+                month_to_date_current_costs
+                if month_to_date_basis in {
+                    "NCP_PRODUCT_DEMAND_USE_AMOUNT",
+                    "NCP_CURRENT_USE_AMOUNT_FALLBACK",
+                }
+                else month_to_date_service_costs
+            )
             use_month_to_date = (
-                period_estimate.get("status") == "NOT_APPLICABLE"
-                and month_to_date_estimate.get("status") == "AVAILABLE"
+                month_to_date_estimate.get("status") == "AVAILABLE"
+                and (
+                    period_estimate_status == "NOT_APPLICABLE"
+                    or (
+                        period_estimate_status == "UNAVAILABLE"
+                        and delayed_daily_usage
+                        and month_to_date_cost_rows_available
+                    )
+                )
             )
             if use_month_to_date and month_to_date_estimate.get(
                 "amount_basis"
@@ -170,9 +222,7 @@ class HtmlReportRenderer:
                         "amount": row.get("use_amount"),
                         "row_count": row.get("row_count"),
                     }
-                    for row in self._records(
-                        billing.get("target_service_summary")
-                    )
+                    for row in month_to_date_current_costs
                 ]
             elif use_month_to_date:
                 service_summary = [
@@ -181,9 +231,7 @@ class HtmlReportRenderer:
                         "amount": row.get("expected_amount"),
                         "row_count": row.get("row_count"),
                     }
-                    for row in self._records(
-                        billing.get("month_to_date_by_service")
-                    )
+                    for row in month_to_date_service_costs
                 ]
             else:
                 service_summary = [
@@ -208,14 +256,40 @@ class HtmlReportRenderer:
                 billing_card_amount = billing_summary.get(
                     "expected_total_amount"
                 )
-            billing_section_title = "서비스별 예상 비용"
-            billing_section_description = (
-                "보고 기준일까지 수집한 사용량과 단가로 계산한 미확정 예상 비용입니다. "
-                if use_month_to_date
-                else "선택한 기간의 사용량과 단가로 계산한 미확정 예상 비용입니다. "
-            ) + (
-                "시간 범위 보고서도 비용 API의 일 단위 사용량을 기준으로 합니다."
-            )
+            if use_month_to_date:
+                billing_section_title = "월 누적 서비스별 예상 비용"
+                coverage_text = self._billing_coverage_text(
+                    month_to_date_estimate
+                )
+                if delayed_daily_usage:
+                    billing_section_description = (
+                        "NCP 일별 사용량 응답이 0건입니다. 실제 사용량 "
+                        f"0이거나 아직 반영 전일 수 있어 {coverage_text} "
+                        "월 누적 참고 데이터를 표시합니다. 보고 대상일 "
+                        "데이터와는 별도 범위입니다."
+                    )
+                else:
+                    billing_section_description = (
+                        f"{coverage_text} 월 누적 사용량과 단가로 계산한 "
+                        "미확정 예상 비용입니다."
+                    )
+            else:
+                billing_section_title = "서비스별 예상 비용"
+                if period_estimate.get("status") == "UNAVAILABLE":
+                    billing_card_amount = None
+                    billing_section_description = (
+                        "getContractUsageListByDaily 수집 오류로 기간 예상 "
+                        "비용을 계산할 수 없습니다. 수집 진단을 확인하세요."
+                        if daily_usage_failed
+                        else "NCP가 선택 기간의 일별 사용량 데이터를 아직 "
+                        "반환하지 않아 예상 비용을 계산할 수 없습니다."
+                    )
+                else:
+                    billing_section_description = (
+                        "선택한 기간의 사용량과 단가로 계산한 미확정 예상 "
+                        "비용입니다. 시간 범위 보고서도 비용 API의 일 단위 "
+                        "사용량을 기준으로 합니다."
+                    )
         else:
             service_summary = confirmed_service_summary
             billing_card_title = "확정 청구 금액"
@@ -226,10 +300,47 @@ class HtmlReportRenderer:
             billing_section_description = (
                 "NCP 서비스 단위로 집계한 확정 청구 금액입니다."
             )
-        usage_summary = self._records(billing.get("usage_summary"))
-        network_summary = self._records(
-            billing.get("network_usage_summary")
-        )
+        if use_month_to_date_usage:
+            usage_summary = month_to_date_usage_summary
+            network_summary = month_to_date_network_summary
+            coverage_start = (
+                month_to_date_estimate.get("coverage_start") or "-"
+            )
+            coverage_end = month_to_date_estimate.get("coverage_end") or "-"
+            fallback_description = (
+                "NCP 일별 사용량 응답이 0건입니다. 실제 사용량 0이거나 "
+                "아직 반영 전일 수 있어 "
+                f"{coverage_start} ~ {coverage_end} 월 누적 참고 데이터를 "
+                "별도 범위로 표시합니다."
+            )
+            usage_section_title = "월 누적 서비스별 사용량 (참고)"
+            usage_section_description = fallback_description
+            network_section_title = "월 누적 네트워크 사용량 (참고)"
+            network_section_description = fallback_description
+        else:
+            empty_usage_description = ""
+            if not period_usage_rows:
+                empty_usage_description = (
+                    "getContractUsageListByDaily 수집 오류로 표시할 수 "
+                    "없습니다. 수집 진단을 확인하세요."
+                    if daily_usage_failed
+                    else "NCP가 선택 기간의 일별 사용량 데이터를 "
+                    "반환하지 않았습니다."
+                )
+            usage_summary = self._records(billing.get("usage_summary"))
+            network_summary = self._records(
+                billing.get("network_usage_summary")
+            )
+            usage_section_title = "서비스별 사용량"
+            usage_section_description = (
+                empty_usage_description
+                or "서비스 및 과금 항목별 사용량입니다."
+            )
+            network_section_title = "네트워크 사용량"
+            network_section_description = (
+                empty_usage_description
+                or "서비스와 전송 방향별 네트워크 사용량입니다."
+            )
         return BillingDisplayData(
             cost_facts=cost_facts,
             account_costs=account_costs,
@@ -240,6 +351,85 @@ class HtmlReportRenderer:
             section_description=billing_section_description,
             usage_summary=usage_summary,
             network_summary=network_summary,
+            usage_section_title=usage_section_title,
+            usage_section_description=usage_section_description,
+            network_section_title=network_section_title,
+            network_section_description=network_section_description,
+        )
+
+    def _use_delayed_month_to_date_usage(
+        self,
+        *,
+        period: Mapping[str, Any],
+        period_usage_rows: Sequence[Mapping[str, Any]],
+        month_to_date_usage_rows: Sequence[Mapping[str, Any]],
+        month_to_date_estimate: Mapping[str, Any],
+        daily_usage_failed: bool,
+    ) -> bool:
+        """객관적인 NCP 일별 반영 지연일 때만 월 누적 표를 대신 쓴다."""
+        if (
+            period.get("is_closed_month") is not False
+            or period.get("period_type") != "day"
+            or period_usage_rows
+            or not month_to_date_usage_rows
+            or daily_usage_failed
+            or month_to_date_estimate.get("status") != "AVAILABLE"
+        ):
+            return False
+
+        report_start = self._billing_date(period.get("start_dt"))
+        report_end = self._billing_date(period.get("end_dt"))
+        coverage_end = self._billing_date(
+            month_to_date_estimate.get("coverage_end")
+        )
+        calculated_date = self._billing_date(period.get("calculated_at"))
+        if (
+            not report_start
+            or not report_end
+            or not coverage_end
+            or not calculated_date
+        ):
+            return False
+        report_age_days = (calculated_date - report_start).days
+        return (
+            report_start == report_end
+            and 0 <= report_age_days <= 1
+            and (report_start - coverage_end).days == 1
+        )
+
+    def _billing_source_failed(
+        self,
+        billing: Mapping[str, Any],
+        source: str,
+    ) -> bool:
+        expected = str(source).strip().casefold()
+        return any(
+            str(error.get("source") or error.get("api") or "")
+            .strip()
+            .casefold()
+            == expected
+            for error in self._records(billing.get("collection_errors"))
+        )
+
+    @staticmethod
+    def _billing_date(value: Any) -> date | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized).date()
+        except ValueError:
+            try:
+                return datetime.strptime(text[:8], "%Y%m%d").date()
+            except ValueError:
+                return None
+
+    @staticmethod
+    def _billing_coverage_text(fact: Mapping[str, Any]) -> str:
+        return (
+            f"{fact.get('coverage_start') or '-'} ~ "
+            f"{fact.get('coverage_end') or '-'}"
         )
 
     def _render_summary_section(
@@ -283,14 +473,22 @@ class HtmlReportRenderer:
                 display.billing_enabled
                 or display.organization_billing_enabled
             ):
+                billing_card_available = (
+                    display.billing.card_amount is not None
+                    and display.billing.card_amount != ""
+                )
                 summary_cards.append(
                     self._summary_card(
                         display.billing.card_title,
-                        self._number(
-                            display.billing.card_amount,
-                            decimals=0,
+                        (
+                            self._number(
+                                display.billing.card_amount,
+                                decimals=0,
+                            )
+                            if billing_card_available
+                            else "조회 불가"
                         ),
-                        "원",
+                        "원" if billing_card_available else "",
                     )
                 )
             return (
@@ -410,8 +608,8 @@ class HtmlReportRenderer:
                     len(billing.service_summary),
                 ),
                 self._section(
-                    "네트워크 사용량",
-                    "서비스와 전송 방향별 네트워크 사용량입니다.",
+                    billing.network_section_title,
+                    billing.network_section_description,
                     self._table(
                         billing.network_summary,
                         (
@@ -425,8 +623,8 @@ class HtmlReportRenderer:
                     len(billing.network_summary),
                 ),
                 self._section(
-                    "서비스별 사용량",
-                    "서비스 및 과금 항목별 사용량입니다.",
+                    billing.usage_section_title,
+                    billing.usage_section_description,
                     self._table(
                         billing.usage_summary,
                         (
