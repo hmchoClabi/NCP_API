@@ -637,6 +637,10 @@ class InfrastructureCollectorTests(unittest.TestCase):
             route_table_no="rt-1",
             vpc_no="vpc-1",
         )
+        vserver.get_access_control_group_list.assert_called_once_with(
+            page_no=1,
+            page_size=collector.PAGE_SIZE,
+        )
 
     def test_network_configuration_apis_are_selected_independently(self):
         cases = (

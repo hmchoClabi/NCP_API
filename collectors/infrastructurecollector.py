@@ -282,7 +282,6 @@ class InfrastructureCollector:
                 list_key="accessControlGroupList",
                 identity_fields=("accessControlGroupNo",),
                 target_type="access_control_group",
-                page_start=0,
                 request_kwargs=self._region_kwargs(),
             )
             rules_by_group = self._collect_child_lists(

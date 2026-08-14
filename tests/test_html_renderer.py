@@ -524,6 +524,32 @@ class HtmlReportRendererTests(unittest.TestCase):
                     }],
                 },
             },
+            {
+                "category": "ACCESS_CONTROL_GROUP",
+                "category_label": "ACG",
+                "resource_id": "acg-2",
+                "resource_name": "empty-acg",
+                "status": "RUN",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_snapshot_available": True,
+                    "rule_count": 0,
+                    "rules": [],
+                },
+            },
+            {
+                "category": "NETWORK_ACL",
+                "category_label": "Network ACL",
+                "resource_id": "nacl-2",
+                "resource_name": "empty-nacl",
+                "status": "RUN",
+                "details": {
+                    "vpc_no": "vpc-1",
+                    "rule_snapshot_available": True,
+                    "rule_count": 0,
+                    "rules": [],
+                },
+            },
         ]
 
         html = HtmlReportRenderer().render(report)
@@ -553,6 +579,9 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("Network ACL 규칙", section)
         self.assertIn("private-nacl", section)
         self.assertIn("ALLOW", section)
+        self.assertIn("empty-acg", section)
+        self.assertIn("empty-nacl", section)
+        self.assertEqual(section.count("설정된 규칙 없음"), 2)
 
     def test_infrastructure_charts_preserve_metric_units(self):
         report = self._sample_report()

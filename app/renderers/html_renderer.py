@@ -1735,7 +1735,18 @@ class HtmlReportRenderer:
                         "default": "기본" if route.get("default") is True else "-",
                     })
             elif category == "ACCESS_CONTROL_GROUP":
-                for rule in self._records(details.get("rules")):
+                rules = self._records(details.get("rules"))
+                if not rules:
+                    acg_rule_rows.append({
+                        "group": resource.get("resource_name"),
+                        "vpc_no": details.get("vpc_no"),
+                        "description": (
+                            "설정된 규칙 없음"
+                            if details.get("rule_snapshot_available") is True
+                            else "규칙 수집 결과 없음"
+                        ),
+                    })
+                for rule in rules:
                     acg_rule_rows.append({
                         "group": resource.get("resource_name"),
                         "vpc_no": details.get("vpc_no"),
@@ -1747,7 +1758,18 @@ class HtmlReportRenderer:
                         "description": rule.get("description"),
                     })
             elif category == "NETWORK_ACL":
-                for rule in self._records(details.get("rules")):
+                rules = self._records(details.get("rules"))
+                if not rules:
+                    network_acl_rule_rows.append({
+                        "network_acl": resource.get("resource_name"),
+                        "vpc_no": details.get("vpc_no"),
+                        "description": (
+                            "설정된 규칙 없음"
+                            if details.get("rule_snapshot_available") is True
+                            else "규칙 수집 결과 없음"
+                        ),
+                    })
+                for rule in rules:
                     network_acl_rule_rows.append({
                         "network_acl": resource.get("resource_name"),
                         "vpc_no": details.get("vpc_no"),
