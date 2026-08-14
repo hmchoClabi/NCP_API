@@ -32,6 +32,23 @@ def format_kst(
     return f"{parsed.astimezone(KST).strftime(format_string)} KST"
 
 
+def format_kst_datetime_local(value: Any) -> str:
+    """DB 시각을 KST datetime-local 입력값으로 변환한다."""
+    if value is None:
+        return ""
+    parsed = value
+    if isinstance(parsed, str):
+        try:
+            parsed = datetime.fromisoformat(parsed.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+    if not isinstance(parsed, datetime):
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(KST).strftime("%Y-%m-%dT%H:%M")
+
+
 def format_duration(value: Any) -> str:
     """초 단위 값을 사람이 읽기 쉬운 한국어 기간으로 표시한다."""
     if value is None:
@@ -84,6 +101,7 @@ def register_presentation(app: Flask) -> None:
     템플릿 호환 계약이므로 그대로 유지한다.
     """
     app.add_template_filter(format_kst, "kst")
+    app.add_template_filter(format_kst_datetime_local, "kst_datetime_local")
     app.add_template_filter(format_duration, "duration")
     app.add_template_filter(inclusive_period_end, "inclusive_end")
 

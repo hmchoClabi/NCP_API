@@ -45,6 +45,8 @@ PostgreSQL stores searchable and transactional data:
   snapshots captured when a report is generated;
 - Insight and Activity events, metric summaries and cost details;
 - daily MSP dashboard facts, email delivery and audit history.
+- deterministic operational findings, action ownership and expiring policy
+  exceptions.
 
 Large HTML/PDF files, raw API payloads and long metric series should move to
 Object Storage in production. Their URI, checksum and metadata stay in the DB.
@@ -69,8 +71,9 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | `daily_customer_facts` | Fast MSP daily dashboard aggregates |
 | `email_recipients` | Tenant report and event recipient preferences |
 | `email_deliveries` | Delivery attempts, provider IDs and failures |
-| `event_cases` | MSP acknowledgement, assignment and resolution workflow |
+| `event_cases` | Deterministic finding acknowledgement, assignment, due date and resolution workflow |
 | `event_case_comments` | Operations comments attached to a case |
+| `policy_exceptions` | Tenant-scoped, approved and expiring rule exceptions |
 | `customer_deletion_tombstones` | Hashed customer-code deletion ledger, archive reference and forced-test-deletion flag |
 | `schema_versions` | Applied baseline schema components |
 
@@ -159,6 +162,25 @@ SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
 
 RLS denies tenant-scoped access when this value is missing. Worker access is
 also restricted to tenants matching its `public` or `gov` environment.
+
+MSP access to operational cases and policy exceptions additionally requires an
+environment context in the same transaction:
+
+```sql
+SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
+SET LOCAL app.environment_scope = 'public'; -- or 'gov'
+```
+
+`control.event_cases` and `control.policy_exceptions` deny the MSP role when
+either setting is absent or when the tenant environment does not match. A
+policy exception with a null `cloud_account_id` applies to every cloud account
+of that tenant; otherwise it applies only to the selected account.
+
+Residual hardening scope: older MSP policies on other control/data tables still
+allow broader database-level reads and currently rely on application route
+authorization for environment separation. Extending the environment predicate
+to every legacy MSP policy, or using separate Public/GOV MSP database roles,
+requires a dedicated compatibility migration and remains follow-up work.
 
 ## Cloud migration
 

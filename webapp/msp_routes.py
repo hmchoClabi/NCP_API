@@ -8,6 +8,7 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, ur
 
 from app.report_branding import MAX_CUSTOMER_LOGO_BYTES, validate_customer_logo
 from app.report_options import (
+    ANALYSIS_POLICY_OPTIONS,
     MONITORING_CATEGORY_OPTIONS,
     REPORT_SECTION_LABELS,
     REPORT_SECTION_OPTIONS,
@@ -16,7 +17,15 @@ from app.report_options import (
     default_report_options,
 )
 from webapp.logo_fetcher import fetch_customer_logo_from_url
-from webapp.route_access import _can_manage_tenant, _msp_admin_required, _msp_required
+from webapp.route_access import (
+    _can_access_environment,
+    _can_access_tenant,
+    _can_manage_tenant,
+    _msp_admin_environment_scopes,
+    _msp_admin_required,
+    _msp_environment_scopes,
+    _msp_required,
+)
 from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
 
@@ -26,45 +35,69 @@ CUSTOMER_DETAIL_RECENT_LIMIT = 10
 def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     """MSP 역할 경계가 필요한 관리 라우트를 기존 endpoint로 등록한다."""
 
+    def tenant_for_request(tenant_id: str, *, manage: bool = False) -> dict[str, Any]:
+        tenant = repository.tenant_detail(tenant_id)
+        permission_check = _can_manage_tenant if manage else _can_access_tenant
+        if not tenant or not permission_check(
+            g.user, tenant_id, tenant.get("environment")
+        ):
+            abort(404)
+        return tenant
+
     @app.get("/msp")
     @_msp_required
     def msp_dashboard():
-        return render_template("msp_dashboard.html", **repository.dashboard())
+        return render_template(
+            "msp_dashboard.html",
+            **repository.dashboard(_msp_environment_scopes(g.user)),
+        )
 
     @app.get("/msp/customers/<environment>")
     @_msp_required
     def msp_customers(environment: str):
         if environment not in {"public", "gov"}:
             abort(404)
+        if not _can_access_environment(g.user, environment):
+            abort(404)
         return render_template(
             "customers.html",
-            customers=repository.tenants(environment),
+            customers=repository.tenants(
+                environment,
+                allowed_environments=_msp_environment_scopes(g.user),
+            ),
             environment=environment,
         )
 
     @app.get("/msp/schedules")
     @_msp_required
     def msp_schedules():
+        scopes = _msp_environment_scopes(g.user)
+        admin_scopes = _msp_admin_environment_scopes(g.user)
         return render_template(
             "schedules.html",
-            schedules=repository.schedules(),
-            schedule_accounts=repository.schedulable_accounts(),
+            schedules=repository.schedules(scopes),
+            schedule_accounts=repository.schedulable_accounts(admin_scopes),
+            manageable_environment_scopes=admin_scopes,
         )
 
     @app.get("/msp/users")
     @_msp_admin_required
     def msp_users():
+        scopes = _msp_admin_environment_scopes(g.user)
         return render_template(
             "users.html",
-            users=repository.customer_users(),
-            msp_users=repository.msp_users(),
-            customers=repository.tenants(),
+            users=repository.customer_users(scopes),
+            msp_users=repository.msp_users(scopes),
+            customers=repository.tenants(allowed_environments=scopes),
             selected_tenant_id=request.args.get("tenant_id", ""),
+            allowed_environment_scopes=scopes,
         )
 
     @app.post("/msp/users")
     @_msp_admin_required
     def create_portal_user():
+        if _msp_admin_environment_scopes(g.user) is not None:
+            abort(403)
         try:
             password = request.form.get("password", "")
             if password != request.form.get("password_confirmation", ""):
@@ -89,11 +122,18 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             password = request.form.get("password", "")
             if password != request.form.get("password_confirmation", ""):
                 raise ValueError("비밀번호 확인이 일치하지 않습니다.")
+            requested_scope = request.form.get(
+                "environment_scope", ""
+            ).strip().casefold() or None
+            actor_scopes = _msp_admin_environment_scopes(g.user)
+            if actor_scopes is not None and requested_scope not in actor_scopes:
+                abort(403)
             repository.create_msp_user(
                 request.form.get("email", ""),
                 password,
                 request.form.get("display_name", ""),
                 request.form.get("role", "MSP_OPERATOR"),
+                environment_scope=requested_scope,
                 actor_id=str(g.user["id"]),
             )
             flash("MSP 계정을 등록했습니다.", "success")
@@ -105,6 +145,11 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_msp_admin_required
     def set_msp_user_enabled(user_id: str):
         try:
+            actor_scopes = _msp_admin_environment_scopes(g.user)
+            if actor_scopes is not None:
+                target_scopes = repository.msp_user_environment_scopes(user_id)
+                if target_scopes is None or not target_scopes.issubset(actor_scopes):
+                    abort(404)
             enabled_value = request.form.get("enabled", "").strip().casefold()
             if enabled_value not in {"true", "false"}:
                 raise ValueError("MSP 계정 상태 요청이 올바르지 않습니다.")
@@ -127,9 +172,20 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_msp_admin_required
     def assign_portal_user():
         try:
+            tenant_id = request.form.get("tenant_id", "")
+            tenant_for_request(tenant_id, manage=True)
+            actor_scopes = _msp_admin_environment_scopes(g.user)
+            user_id = request.form.get("user_id", "")
+            if (
+                actor_scopes is not None
+                and not repository.customer_user_accessible_in_environments(
+                    user_id, actor_scopes
+                )
+            ):
+                abort(404)
             repository.assign_customer_membership(
-                request.form.get("user_id", ""),
-                request.form.get("tenant_id", ""),
+                user_id,
+                tenant_id,
                 request.form.get("role", "CUSTOMER_VIEWER"),
             )
             flash("사용자와 고객사를 연결했습니다.", "success")
@@ -140,6 +196,11 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/schedules/<schedule_id>/enabled")
     @_msp_admin_required
     def set_schedule_enabled(schedule_id: str):
+        scopes = _msp_admin_environment_scopes(g.user)
+        if scopes is not None:
+            environment = repository.schedule_environment(schedule_id)
+            if environment not in scopes:
+                abort(404)
         enabled = request.form.get("enabled") == "true"
         if not jobs.set_schedule_enabled(schedule_id, enabled):
             abort(404)
@@ -152,6 +213,16 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
         try:
             action = request.form.get("action", "create")
             account_ids = request.form.getlist("account_id")
+            scopes = _msp_admin_environment_scopes(g.user)
+            if scopes is not None:
+                allowed_account_ids = {
+                    str(item["id"])
+                    for item in repository.schedulable_accounts(scopes)
+                }
+                if not account_ids or not set(account_ids).issubset(
+                    allowed_account_ids
+                ):
+                    abort(403)
             report_type = request.form.get("report_type", "DAILY")
             if action == "delete":
                 count = jobs.bulk_delete_schedules(account_ids, report_type)
@@ -184,6 +255,11 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customers/<environment>")
     @_msp_admin_required
     def create_customer(environment: str):
+        if environment not in {"public", "gov"}:
+            abort(404)
+        admin_scopes = _msp_admin_environment_scopes(g.user)
+        if admin_scopes is not None and environment not in admin_scopes:
+            abort(404)
         try:
             tenant_id = repository.create_tenant(
                 request.form.get("customer_code", ""),
@@ -203,16 +279,16 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.get("/msp/customer/<tenant_id>")
     @_msp_required
     def msp_customer(tenant_id: str):
-        tenant = repository.tenant_detail(tenant_id)
-        if not tenant:
-            abort(404)
+        tenant = tenant_for_request(tenant_id)
         tenant.setdefault("report_options", default_report_options())
         return render_template(
             "customer_detail.html",
             tenant=tenant,
             tenant_users=(
                 repository.users_for_tenant(tenant_id)
-                if "MSP_ADMIN" in set(g.user.get("platform_roles", []))
+                if _can_manage_tenant(
+                    g.user, tenant_id, tenant["environment"]
+                )
                 else []
             ),
             reports=tenant["reports"][:CUSTOMER_DETAIL_RECENT_LIMIT],
@@ -220,18 +296,32 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 :CUSTOMER_DETAIL_RECENT_LIMIT
             ],
             recent_item_limit=CUSTOMER_DETAIL_RECENT_LIMIT,
-            can_manage_schedules=_can_manage_tenant(g.user, tenant_id),
+            can_manage_schedules=_can_manage_tenant(
+                g.user, tenant_id, tenant["environment"]
+            ),
             can_delete_reports=True,
             report_section_options=REPORT_SECTION_OPTIONS,
             report_section_labels=REPORT_SECTION_LABELS,
             resource_category_options=RESOURCE_CATEGORY_OPTIONS,
             resource_category_labels=RESOURCE_CATEGORY_LABELS,
             monitoring_category_options=MONITORING_CATEGORY_OPTIONS,
+            analysis_policy_options=ANALYSIS_POLICY_OPTIONS,
+            action_cases=(
+                repository.action_cases(tenant_id)
+                if hasattr(repository, "action_cases")
+                else []
+            ),
+            policy_exceptions=(
+                repository.policy_exceptions(tenant_id)
+                if hasattr(repository, "policy_exceptions")
+                else []
+            ),
         )
 
     @app.post("/msp/customer/<tenant_id>/report-settings")
     @_msp_admin_required
     def update_customer_report_settings(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             repository.update_tenant_report_settings(
                 tenant_id,
@@ -243,6 +333,39 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                     "monitoring_categories": request.form.getlist(
                         "monitoring_categories"
                     ),
+                    "operational_analysis": {
+                        "enabled": request.form.get(
+                            "analysis_enabled"
+                        ) == "true",
+                        "collect_wms": request.form.get(
+                            "collect_wms"
+                        ) == "true",
+                        "collect_security_monitoring": request.form.get(
+                            "collect_security_monitoring"
+                        ) == "true",
+                        "thresholds": {
+                            name: request.form.get(name)
+                            for name in (
+                                "cpu_warning_percent",
+                                "cpu_critical_percent",
+                                "memory_warning_percent",
+                                "memory_critical_percent",
+                                "disk_warning_percent",
+                                "disk_critical_percent",
+                                "sustained_minutes",
+                                "cost_increase_warning_percent",
+                                "availability_warning_percent",
+                                "availability_critical_percent",
+                                "response_time_warning_ms",
+                            )
+                        },
+                        "policies": {
+                            name: name in request.form.getlist(
+                                "analysis_policies"
+                            )
+                            for name in ANALYSIS_POLICY_OPTIONS
+                        },
+                    },
                 },
                 str(g.user["id"]),
             )
@@ -251,9 +374,78 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             flash(str(exc), "error")
         return redirect(url_for("msp_customer", tenant_id=tenant_id))
 
+    @app.post("/msp/customer/<tenant_id>/action-cases/<case_id>")
+    @_msp_admin_required
+    def update_customer_action_case(tenant_id: str, case_id: str):
+        tenant_for_request(tenant_id, manage=True)
+        if not hasattr(repository, "update_action_case"):
+            abort(404)
+        try:
+            repository.update_action_case(
+                tenant_id,
+                case_id,
+                status=request.form.get("status", ""),
+                assigned_to=request.form.get("assigned_to"),
+                due_at=request.form.get("due_at"),
+                actor_id=str(g.user["id"]),
+            )
+            flash("조치 항목을 갱신했습니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_customer", tenant_id=tenant_id))
+
+    @app.post("/msp/customer/<tenant_id>/policy-exceptions")
+    @_msp_admin_required
+    def create_customer_policy_exception(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
+        if not hasattr(repository, "create_policy_exception"):
+            abort(404)
+        try:
+            repository.create_policy_exception(
+                tenant_id,
+                cloud_account_id=(
+                    request.form.get("cloud_account_id", "").strip() or None
+                ),
+                rule_id=request.form.get("rule_id", ""),
+                resource_id=request.form.get("resource_id"),
+                reason=request.form.get("reason", ""),
+                expires_at=request.form.get("expires_at", ""),
+                actor_id=str(g.user["id"]),
+            )
+            flash("정책 예외를 등록했습니다. 다음 보고서부터 적용됩니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_customer", tenant_id=tenant_id))
+
+    @app.post(
+        "/msp/customer/<tenant_id>/policy-exceptions/"
+        "<exception_id>/deactivate"
+    )
+    @_msp_admin_required
+    def deactivate_customer_policy_exception(
+        tenant_id: str, exception_id: str
+    ):
+        tenant_for_request(tenant_id, manage=True)
+        if not hasattr(repository, "deactivate_policy_exception"):
+            abort(404)
+        try:
+            rule_id = repository.deactivate_policy_exception(
+                tenant_id,
+                exception_id,
+                str(g.user["id"]),
+            )
+            flash(
+                f"{rule_id} 정책 예외를 해제했습니다. 다음 보고서부터 적용됩니다.",
+                "success",
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_customer", tenant_id=tenant_id))
+
     @app.post("/msp/customer/<tenant_id>/logo")
     @_msp_admin_required
     def update_customer_logo(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             upload = request.files.get("logo")
             logo_url = request.form.get("logo_url", "").strip()
@@ -283,6 +475,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/logo/delete")
     @_msp_admin_required
     def delete_customer_logo(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             repository.delete_tenant_logo(tenant_id, str(g.user["id"]))
             flash(
@@ -296,6 +489,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/credentials")
     @_msp_admin_required
     def register_credential(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             provider = LocalKeyEncryptionProvider(
                 app.config["CREDENTIAL_MASTER_KEY_FILE"]
@@ -317,6 +511,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/credentials/<account_id>/delete")
     @_msp_admin_required
     def delete_credential(tenant_id: str, account_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             tenant = repository.tenant_detail(tenant_id)
             account = next(
@@ -346,6 +541,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/delete")
     @_msp_admin_required
     def delete_customer(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             tenant = repository.tenant_detail(tenant_id)
             confirmation = request.form.get("confirm_customer_code", "").strip()
@@ -369,6 +565,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/reactivate")
     @_msp_admin_required
     def reactivate_customer(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             tenant = repository.tenant_detail(tenant_id)
             confirmation = request.form.get("confirm_customer_code", "").strip()
@@ -392,6 +589,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/anonymize")
     @_msp_admin_required
     def anonymize_customer(tenant_id: str):
+        tenant_for_request(tenant_id, manage=True)
         try:
             tenant = repository.tenant_detail(tenant_id)
             code = request.form.get("confirm_customer_code", "").strip()
@@ -416,9 +614,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/msp/customer/<tenant_id>/permanent-delete")
     @_msp_admin_required
     def permanently_delete_customer(tenant_id: str):
-        tenant = repository.tenant_detail(tenant_id)
-        if not tenant:
-            abort(404)
+        tenant = tenant_for_request(tenant_id, manage=True)
         try:
             code = request.form.get("confirm_customer_code", "").strip()
             phrase = request.form.get("confirm_phrase", "").strip()

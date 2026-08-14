@@ -146,11 +146,24 @@ BEGIN
         );
 
         EXECUTE format('DROP POLICY IF EXISTS tenant_msp_access ON control.%I', table_name);
-        EXECUTE format(
-            'CREATE POLICY tenant_msp_access ON control.%I '
-            'FOR ALL TO ncp_msp_app USING (true) WITH CHECK (true)',
-            table_name
-        );
+        IF table_name = 'event_cases' THEN
+            -- 구버전 포털도 tenant 컨텍스트는 항상 설정한다. 환경은
+            -- tenant/environment FK로 고정되므로 tenant 범위만 강제해도
+            -- 교차 고객·교차 환경 노출 없이 코드 원복이 가능하다.
+            EXECUTE format(
+                'CREATE POLICY tenant_msp_access ON control.%I '
+                'FOR ALL TO ncp_msp_app '
+                'USING (tenant_id = control.current_tenant_id()) '
+                'WITH CHECK (tenant_id = control.current_tenant_id())',
+                table_name
+            );
+        ELSE
+            EXECUTE format(
+                'CREATE POLICY tenant_msp_access ON control.%I '
+                'FOR ALL TO ncp_msp_app USING (true) WITH CHECK (true)',
+                table_name
+            );
+        END IF;
 
         EXECUTE format('DROP POLICY IF EXISTS tenant_public_worker_access ON control.%I', table_name);
         EXECUTE format(

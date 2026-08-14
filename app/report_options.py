@@ -4,7 +4,52 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 
-REPORT_OPTIONS_SCHEMA_VERSION = "1.1"
+REPORT_OPTIONS_SCHEMA_VERSION = "1.2"
+
+DEFAULT_OPERATIONAL_ANALYSIS: dict[str, Any] = {
+    "enabled": True,
+    # 추가 권한이 필요한 데이터 원본은 기존 고객에게 자동 활성화하지 않는다.
+    "collect_wms": False,
+    "collect_security_monitoring": False,
+    "thresholds": {
+        "cpu_warning_percent": 80.0,
+        "cpu_critical_percent": 90.0,
+        "memory_warning_percent": 85.0,
+        "memory_critical_percent": 95.0,
+        "disk_warning_percent": 85.0,
+        "disk_critical_percent": 90.0,
+        "sustained_minutes": 15,
+        "cost_increase_warning_percent": 20.0,
+        "availability_warning_percent": 99.0,
+        "availability_critical_percent": 95.0,
+        "response_time_warning_ms": 3000.0,
+    },
+    "policies": {
+        "require_block_storage_encryption": True,
+        "require_kubernetes_termination_protection": False,
+        "flag_public_ip": False,
+        "require_owner_tag": False,
+        "require_backup": False,
+    },
+}
+
+ANALYSIS_THRESHOLD_LIMITS: dict[str, tuple[float, float]] = {
+    "cpu_warning_percent": (0.0, 100.0),
+    "cpu_critical_percent": (0.0, 100.0),
+    "memory_warning_percent": (0.0, 100.0),
+    "memory_critical_percent": (0.0, 100.0),
+    "disk_warning_percent": (0.0, 100.0),
+    "disk_critical_percent": (0.0, 100.0),
+    "sustained_minutes": (1.0, 1440.0),
+    "cost_increase_warning_percent": (0.0, 10000.0),
+    "availability_warning_percent": (0.0, 100.0),
+    "availability_critical_percent": (0.0, 100.0),
+    "response_time_warning_ms": (0.0, 3600000.0),
+}
+
+ANALYSIS_POLICY_OPTIONS = tuple(
+    DEFAULT_OPERATIONAL_ANALYSIS["policies"].keys()
+)
 
 REPORT_SECTION_OPTIONS = (
     "executive_summary",
@@ -128,6 +173,7 @@ DEFAULT_REPORT_OPTIONS: dict[str, Any] = {
     "sections": list(REPORT_SECTION_OPTIONS),
     "resource_categories": list(RESOURCE_CATEGORY_OPTIONS),
     "monitoring_categories": list(MONITORING_CATEGORY_OPTIONS),
+    "operational_analysis": deepcopy(DEFAULT_OPERATIONAL_ANALYSIS),
 }
 
 LEGACY_RESOURCE_CATEGORY_OPTIONS = (
@@ -166,6 +212,22 @@ class ReportOptions:
 
     def monitoring_enabled(self, category: str) -> bool:
         return str(category).upper() in self._value["monitoring_categories"]
+
+    def analysis_enabled(self) -> bool:
+        return bool(self._value["operational_analysis"]["enabled"])
+
+    def analysis_collector_enabled(self, name: str) -> bool:
+        key = {
+            "wms": "collect_wms",
+            "security_monitoring": "collect_security_monitoring",
+        }.get(str(name).strip().casefold())
+        return bool(
+            key and self._value["operational_analysis"].get(key, False)
+        )
+
+    @property
+    def operational_analysis(self) -> dict[str, Any]:
+        return deepcopy(self._value["operational_analysis"])
 
     def to_dict(self) -> dict[str, Any]:
         return deepcopy(self._value)
@@ -237,6 +299,9 @@ def normalize_report_options(value: Any) -> dict[str, Any]:
             MONITORING_CATEGORY_OPTIONS,
             defaults["monitoring_categories"],
         ),
+        "operational_analysis": _normalize_operational_analysis(
+            value.get("operational_analysis")
+        ),
     }
     return normalized
 
@@ -264,7 +329,92 @@ def validate_report_options(value: Any) -> dict[str, Any]:
         and not normalized["monitoring_categories"]
     ):
         raise ValueError("모니터링 그래프 대상을 하나 이상 선택하세요.")
+    thresholds = normalized["operational_analysis"]["thresholds"]
+    for prefix in ("cpu", "memory", "disk"):
+        if thresholds[f"{prefix}_critical_percent"] < thresholds[
+            f"{prefix}_warning_percent"
+        ]:
+            raise ValueError(
+                f"{prefix.upper()} 위험 임계치는 주의 임계치 이상이어야 합니다."
+            )
+    if (
+        thresholds["availability_critical_percent"]
+        > thresholds["availability_warning_percent"]
+    ):
+        raise ValueError(
+            "가용성 위험 임계치는 주의 임계치 이하여야 합니다."
+        )
     return normalized
+
+
+def _normalize_operational_analysis(value: Any) -> dict[str, Any]:
+    defaults = deepcopy(DEFAULT_OPERATIONAL_ANALYSIS)
+    if not isinstance(value, Mapping):
+        return defaults
+
+    normalized = {
+        "enabled": _as_bool(value.get("enabled"), defaults["enabled"]),
+        "collect_wms": _as_bool(
+            value.get("collect_wms"), defaults["collect_wms"]
+        ),
+        "collect_security_monitoring": _as_bool(
+            value.get("collect_security_monitoring"),
+            defaults["collect_security_monitoring"],
+        ),
+        "thresholds": {},
+        "policies": {},
+    }
+
+    raw_thresholds = value.get("thresholds")
+    if not isinstance(raw_thresholds, Mapping):
+        raw_thresholds = {}
+    for name, default in defaults["thresholds"].items():
+        minimum, maximum = ANALYSIS_THRESHOLD_LIMITS[name]
+        normalized["thresholds"][name] = _bounded_number(
+            raw_thresholds.get(name),
+            default=default,
+            minimum=minimum,
+            maximum=maximum,
+            integer=name == "sustained_minutes",
+        )
+
+    raw_policies = value.get("policies")
+    if not isinstance(raw_policies, Mapping):
+        raw_policies = {}
+    for name, default in defaults["policies"].items():
+        normalized["policies"][name] = _as_bool(
+            raw_policies.get(name), default
+        )
+    return normalized
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
+def _bounded_number(
+    value: Any,
+    *,
+    default: float | int,
+    minimum: float,
+    maximum: float,
+    integer: bool = False,
+) -> float | int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float(default)
+    if number < minimum or number > maximum:
+        number = float(default)
+    return int(round(number)) if integer else round(number, 2)
 
 
 def _allowed_list(

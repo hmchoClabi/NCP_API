@@ -42,6 +42,10 @@ class ReportResult:
     )
     activity_events: Any = field(default_factory=dict)
     billing: Dict[str, Any] = field(default_factory=dict)
+    service_availability: Dict[str, Any] = field(default_factory=dict)
+    security_monitoring: Dict[str, Any] = field(default_factory=dict)
+    dataset_statuses: List[Dict[str, Any]] = field(default_factory=list)
+    analysis: Dict[str, Any] = field(default_factory=dict)
     report_options: Dict[str, Any] = field(default_factory=dict)
     collection_metadata: Dict[str, Any] = field(default_factory=dict)
     collection_errors: List[Dict[str, Any]] = field(default_factory=list)
@@ -342,7 +346,7 @@ class ReportResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "schema_version": "1.4",
+            "schema_version": "1.5",
             "report_id": self.report_id,
             "generated_at": self.generated_at,
             "customer": self.public_customer,
@@ -355,6 +359,10 @@ class ReportResult:
             "grouped_insight_events": self.grouped_insight_events,
             "activity_events": self.activity_events,
             "billing": self.billing,
+            "service_availability": self.service_availability,
+            "security_monitoring": self.security_monitoring,
+            "dataset_statuses": self.dataset_statuses,
+            "analysis": self.analysis,
             "report_options": self.selected_report_options.to_dict(),
             "collection_metadata": self.collection_metadata,
             "collection_errors": self.collection_errors,
@@ -388,7 +396,7 @@ class ReportResult:
             report_options = (
                 legacy_report_options()
                 if str(payload.get("schema_version") or "")
-                not in {"1.3", "1.4"}
+                not in {"1.3", "1.4", "1.5"}
                 else {}
             )
         return cls(
@@ -406,6 +414,12 @@ class ReportResult:
             ),
             activity_events=payload.get("activity_events") or {},
             billing=payload.get("billing") or {},
+            service_availability=(
+                payload.get("service_availability") or {}
+            ),
+            security_monitoring=payload.get("security_monitoring") or {},
+            dataset_statuses=payload.get("dataset_statuses") or [],
+            analysis=payload.get("analysis") or {},
             report_options=report_options,
             collection_metadata=payload.get("collection_metadata") or {},
             collection_errors=payload.get("collection_errors") or [],

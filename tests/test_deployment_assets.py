@@ -88,8 +88,8 @@ def test_forced_test_customer_deletion_is_audited():
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "170"' in values
-    assert 'REPORT_SCHEMA_VERSION:-170' in (
+    assert 'schemaVersion: "180"' in values
+    assert 'REPORT_SCHEMA_VERSION:-180' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
 
@@ -153,7 +153,7 @@ def test_tenant_branding_is_size_limited_and_tenant_isolated():
         ROOT / "database" / "verify_database.sql"
     ).read_text(encoding="utf-8")
     assert "tenant_branding" in verification
-    assert "Expected at least 33 tables" in verification
+    assert "Expected at least 36 tables" in verification
 
 
 def test_report_topology_settings_are_removed_safely():
@@ -194,6 +194,70 @@ def test_network_configuration_snapshots_are_separate_and_tenant_isolated():
     assert "GRANT SELECT, INSERT, DELETE" in migration
     assert "GRANT SELECT, INSERT, UPDATE" not in migration
     assert "VALUES ('170'" in migration
+
+
+def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
+    migration = (
+        ROOT / "database" / "schema" / "180_operational_analysis.sql"
+    ).read_text(encoding="utf-8")
+    verification = (
+        ROOT / "database" / "verify_database.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'ANALYSIS'" in migration
+    assert "control.policy_exceptions" in migration
+    assert "cloud_account_id uuid" in migration
+    assert "event_cases_cloud_account_tenant_fk" in migration
+    assert "event_cases_tenant_environment_fk" in migration
+    assert "event_cases_latest_run_tenant_fk" in migration
+    assert "source_type <> 'ANALYSIS'" in migration
+    assert "cloud_account_id IS NOT NULL AND report_type IS NOT NULL" in migration
+    assert "policy_exceptions_cloud_account_tenant_fk" in migration
+    assert "event_cases_analysis_identity_uidx" in migration
+    assert "'NOT_DETECTED'" in migration
+    assert "report_type varchar(20)" in migration
+    assert "event_cases_tenant_id_source_type_source_event_id_key" not in migration
+    assert "ON DELETE SET NULL (latest_report_run_id)" in migration
+    assert "VALIDATE CONSTRAINT event_cases_analysis_account_check" in migration
+    assert "CREATE TABLE IF NOT EXISTS control.daily_account_facts" in migration
+    assert "daily_account_facts_cloud_account_tenant_fk" in migration
+    assert "daily_account_facts_latest_run_tenant_fk" in migration
+    assert "DROP CONSTRAINT IF EXISTS daily_customer_facts_pkey" not in migration
+    assert "CREATE OR REPLACE VIEW control.v_msp_customer_daily_status" not in migration
+    assert "sum(critical_count)::integer" in (
+        ROOT / "database" / "report_repository.py"
+    ).read_text(encoding="utf-8")
+    assert "policy_exceptions_active_account_idx" in migration
+    assert "policy_exceptions_cloud_account_idx" in migration
+    assert "expires_at timestamptz NOT NULL" in migration
+    assert "approved_by uuid NOT NULL" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "tenant_id = control.current_tenant_id()" in migration
+    assert "current_setting('app.environment_scope', true)" in migration
+    assert "environment = NULLIF" in migration
+    customer_policy = migration.split(
+        "CREATE POLICY policy_exceptions_customer_access", 1
+    )[1].split("DROP POLICY IF EXISTS policy_exceptions_msp_access", 1)[0]
+    assert "FOR SELECT TO ncp_control_app" in customer_policy
+    assert "FOR ALL TO ncp_control_app" not in customer_policy
+    base_rls = (
+        ROOT / "database" / "schema" / "050_security_rls.sql"
+    ).read_text(encoding="utf-8")
+    assert "IF table_name = 'event_cases'" in base_rls
+    event_case_branch = base_rls.split(
+        "IF table_name = 'event_cases'", 1
+    )[1].split("ELSE", 1)[0]
+    assert "tenant_id = control.current_tenant_id()" in event_case_branch
+    assert "app.environment_scope" not in event_case_branch
+    assert "VALUES ('180'" in migration
+    assert "policy_exceptions" in verification
+    assert "Event case MSP tenant RLS is missing" in verification
+    assert "Policy exception MSP environment RLS is missing" in verification
+    assert "Event case tenant boundary constraints are missing" in verification
+    assert "Customer role can mutate policy exceptions" in verification
+    assert "Daily fact account boundary constraints are missing" in verification
+    assert "Expected at least 36 tables" in verification
 
 
 def test_sourcebuild_deployment_waits_for_migration_job():
@@ -265,6 +329,10 @@ def test_migration_can_be_disabled_and_hpa_owns_web_replicas():
     assert "autoscaling/v2" in hpa
     assert "HorizontalPodAutoscaler" in hpa
     assert 'if not (and (hasKey $component "autoscaling")' in deployments
+    assert "REPORT_OPERATIONAL_ANALYSIS_ENABLED" in deployments
+    values = (CHART / "values.yaml").read_text(encoding="utf-8")
+    assert "operationalAnalysis:" in values
+    assert "enabled: true" in values
 
 
 def test_sourcedeploy_manifest_uses_latest_registry_placeholder():

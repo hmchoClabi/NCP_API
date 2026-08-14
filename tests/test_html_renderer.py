@@ -177,6 +177,8 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("customer-admin (Main)", html)
         self.assertIn("대상 객체", html)
         self.assertIn("Server: web-01", html)
+        self.assertIn("출처 상태", html)
+        self.assertIn("OBSERVED (관측)", html)
         self.assertIn("상세 2개", html)
         self.assertIn("&lt;target details&gt;", html)
         self.assertNotIn("must-not-be-rendered", html)
@@ -879,6 +881,210 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("9,999", html)
         self.assertIn("NCP 서비스별 누적 사용금액", html)
         self.assertNotIn("보고 기간 추정 데이터", html)
+
+    def test_operational_summary_uses_only_report_period_cost(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "month",
+            "start_dt": "2026-08-01 00:00:00",
+            "end_dt": "2026-08-31 23:59:59",
+            "use_start_date": "20260801",
+            "use_end_date": "20260831",
+        })
+        report.analysis = {
+            "period_type": "MONTHLY",
+            "overall_status": "NORMAL",
+            "overall_status_label": "정상",
+            "report_generation": {
+                "status": "SUCCESS",
+                "status_label": "성공",
+            },
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "datasets": [],
+            },
+            "key_findings": [],
+            "metrics": {},
+            "events": {"status": "COLLECTED_EMPTY"},
+            "changes": {"status": "COLLECTED_EMPTY"},
+            "availability": {},
+            "security": {},
+            "costs": {
+                "facts": [
+                    {
+                        "name": "invoice_summary",
+                        "period_start": "2026-07-01",
+                        "period_end": "2026-07-31",
+                        "total_amount": 825000,
+                    },
+                    {
+                        "name": "month_end_projection",
+                        "period_start": "2026-08-01",
+                        "period_end": "2026-08-31",
+                        "total_amount": 9999,
+                    },
+                ],
+                "comparison": {
+                    "status": "AVAILABLE",
+                    "current_amount": 9999,
+                    "baseline_amount": 8888,
+                    "amount_change": 1111,
+                    "rate_change": 12.5,
+                    "amount_basis": "PROJECTED_USAGE_RERATED",
+                    "current_period_start": "2026-08-01",
+                    "current_period_end": "2026-08-31",
+                    "current_coverage_start": "2026-08-01",
+                    "current_coverage_end": "2026-08-06",
+                    "baseline_period_start": "2026-07-01",
+                    "baseline_period_end": "2026-07-31",
+                    "baseline_coverage_start": "2026-07-01",
+                    "baseline_coverage_end": "2026-07-06",
+                    "reason": "동일 기준 비교",
+                },
+            },
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn(
+            "월말 추정 금액 · 2026-08-01~2026-08-31",
+            html,
+        )
+        self.assertNotIn(
+            "확정 청구 금액 · 2026-07-01~2026-07-31",
+            html,
+        )
+        self.assertIn(
+            "대상 2026-08-01 ~ 2026-08-31 · 수집 "
+            "2026-08-01 ~ 2026-08-06",
+            html,
+        )
+        self.assertIn(
+            "대상 2026-07-01 ~ 2026-07-31 · 수집 "
+            "2026-07-01 ~ 2026-07-06",
+            html,
+        )
+
+    def test_operational_analysis_displays_source_states(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "day",
+            "start_dt": "2026-08-12 00:00:00",
+            "end_dt": "2026-08-12 23:59:59",
+            "use_start_date": "20260812",
+            "use_end_date": "20260812",
+        })
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "overall_status": "CAUTION",
+            "overall_status_label": "주의",
+            "report_generation": {
+                "status": "SUCCESS",
+                "status_label": "성공",
+                "source_state": "OBSERVED",
+            },
+            "data_quality": {
+                "overall_status": "PARTIAL",
+                "source_state": "CALCULATED",
+                "datasets": [{
+                    "label": "보안 이벤트",
+                    "status": "FAILED",
+                    "status_label": "수집 실패",
+                    "source_state": "COLLECTION_FAILED",
+                    "record_count": 0,
+                    "error_count": 1,
+                    "warning_count": 0,
+                    "reason": "API 호출 실패",
+                }],
+            },
+            "key_findings": [
+                {
+                    "severity": "WARNING",
+                    "category": "PERFORMANCE",
+                    "title": "CPU 임계치 확인 필요",
+                    "source_state": "CALCULATED",
+                    "resource": {"name": "web-1"},
+                    "evidence": [],
+                },
+                {
+                    "severity": "WARNING",
+                    "category": "DATA_QUALITY",
+                    "title": "수집 상태 확인 필요",
+                    "source_state": "CALCULATED",
+                    "resource": {"name": "보안 이벤트"},
+                    "evidence": [],
+                },
+                {
+                    "severity": "WARNING",
+                    "category": "GOVERNANCE",
+                    "status": "EXCEPTION",
+                    "title": "승인된 정책 예외",
+                    "source_state": "CALCULATED",
+                    "resource": {"name": "disk-1"},
+                    "evidence": [],
+                },
+            ],
+            "metrics": {
+                "source_state": "CALCULATED",
+                "summaries": [{
+                    "category": "SERVER",
+                    "resource_name": "web-1",
+                    "metric_label": "CPU 사용률",
+                    "source_state": "CALCULATED",
+                    "average": 10,
+                    "p95": 20,
+                    "maximum": 30,
+                }],
+            },
+            "events": {
+                "status": "COLLECTED_EMPTY",
+                "source_state": "CALCULATED",
+            },
+            "changes": {
+                "status": "COLLECTED_EMPTY",
+                "source_state": "CALCULATED",
+            },
+            "availability": {
+                "source_state": "CALCULATED",
+                "items": [{
+                    "name": "homepage",
+                    "source_state": "OBSERVED",
+                    "availability_percent": 100,
+                }],
+            },
+            "security": {
+                "source_state": "COLLECTION_FAILED",
+                "items": [],
+            },
+            "costs": {
+                "source_state": "CALCULATED",
+                "facts": [{
+                    "name": "period_estimate",
+                    "source_state": "CALCULATED",
+                    "period_start": "2026-08-12",
+                    "period_end": "2026-08-12",
+                    "total_amount": 100,
+                }],
+                "comparison": {
+                    "status": "UNAVAILABLE",
+                    "source_state": "UNAVAILABLE",
+                    "reason": "이전 보고서 없음",
+                },
+            },
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("출처 상태", html)
+        self.assertIn("OBSERVED (관측)", html)
+        self.assertIn("CALCULATED (계산)", html)
+        self.assertIn("COLLECTION_FAILED (수집 실패)", html)
+        self.assertIn("UNAVAILABLE (미수집)", html)
+        self.assertIn("즉시 확인</span><strong>1건", html)
+        self.assertIn("CPU 임계치 확인 필요", html)
+        self.assertNotIn("승인된 정책 예외", html)
+        self.assertNotIn("수집 상태 확인 필요", html)
 
     def test_unavailable_daily_billing_uses_labeled_month_to_date_tables(self):
         report = self._sample_report()

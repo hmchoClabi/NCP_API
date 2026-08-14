@@ -41,6 +41,34 @@ Cloud DB는 사용하는 엔진별 서비스에 다음 목록 조회 액션만 �
 호출한다. 수집 경고 없이 모든 엔진을 지원하려면 다섯 서비스의 목록 View를
 모두 부여한다.
 
+## 선택 수집기: WMS와 Security Monitoring
+
+WMS 가용성과 Security Monitoring 이벤트 수집은 고객별 **선택 기능이며 기본값은
+비활성**이다. 사용하지 않는 고객에게는 아래 권한을 부여하지 않는다. 비활성
+상태는 이벤트 0건이나 정상 상태가 아니라 `수집 대상 아님`으로 처리한다.
+
+| 선택 수집기 | 실제 조회 범위 | 엄격한 최소 조회 권한 | 관리형 대안 |
+| --- | --- | --- | --- |
+| Web service Monitoring System | 시나리오 목록과 보고 기간의 시나리오 결과 | WMS 서비스의 `모든 조회` | `NCP_WMS_VIEWER` |
+| Security Monitoring(VPC) | Anti-Virus, Anti-DDoS, IDS, IPS, WAF 이벤트 목록 | `View/getAVList`, `View/getDDoSList`, `View/getIDSList`, `View/getIPSList`, `View/getWAFList` | `NCP_VPC_SECURITY_MONITORING_VIEWER` |
+
+WMS는 공식 서비스별 권한표에서 부여 가능한 최소 단위가 `모든 조회 또는 모든
+변경`으로 정의되어 있고, WMS 권한 관리 문서도 조회 전용 관리형 정책
+`NCP_WMS_VIEWER`를 제공한다. 세부 조회 액션 이름은 해당 공식 문서에 공개되어
+있지 않으므로 `View/get...` 형태의 액션명을 임의로 만들지 않는다. 정책 구성 시
+`NCP_WMS_VIEWER`를 사용하거나 WMS 서비스의 `모든 조회`만 선택하고,
+`NCP_WMS_MANAGER`와 변경 권한은 부여하지 않는다. 수집 전에 WMS 이용 신청과
+조회할 시나리오가 별도로 준비되어 있어야 한다.
+
+Security Monitoring은 현재 수집기가 목록 API만 호출하므로 위 다섯 개 User
+Created View 액션으로 제한할 수 있다. 이벤트 상세 조회,
+`View/getNotificationSetting`, 예외 요청, 통보 대상 관리, 상품 신청을 포함한
+모든 `Change/*` 액션은 필요하지 않다. 관리 편의를 위해 관리형 정책을 쓸 때도
+`NCP_VPC_SECURITY_MONITORING_MANAGER`가 아닌 조회 전용
+`NCP_VPC_SECURITY_MONITORING_VIEWER`를 사용한다. 이 수집기는 VPC 전용이며,
+계정·리전에서 신청하지 않았거나 제공되지 않는 보안 상품은 권한으로 활성화되지
+않으므로 해당 고객의 선택 수집기를 비활성화한다.
+
 ## Resource Manager 하나로 표시하는 범주
 
 다음 범주는 개별 서비스 API를 호출하지 않고 Resource Manager의 결과를
@@ -157,6 +185,9 @@ Server도 접근 가능 소스로 등록한다.
 - [NKS 권한 관리](https://guide.ncloud-docs.com/docs/compute-nks-nks-subaccount)
 - [Global DNS 권한 관리](https://guide.ncloud-docs.com/docs/globaldns-subaccount)
 - [Certificate Manager 권한 관리](https://guide.ncloud-docs.com/docs/security-security-15-2)
+- [Web service Monitoring System 권한 관리](https://guide.ncloud-docs.com/docs/wms-subaccount)
+- [서비스별 부여 가능한 최소 권한 단위](https://guide.ncloud-docs.com/docs/subaccount-servicelist)
+- [Security Monitoring 권한 관리(VPC)](https://guide.ncloud-docs.com/docs/securitymonitoring-subaccount-vpc)
 - [Sub Account 접근 가능 소스 안내](https://guide.ncloud-docs.com/docs/subaccount-use)
 - [공공 Resource Manager 권한 관리](https://guide-gov.ncloud-docs.com/docs/management-rmgr-subaccount)
 - [공공 Cloud Insight 권한 관리](https://guide-gov.ncloud-docs.com/docs/cloudinsight-cloudinsightsubaccount)

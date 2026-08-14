@@ -90,6 +90,16 @@ class ReportOptionsTests(unittest.TestCase):
         self.assertNotIn("access_key", serialized)
         self.assertNotIn("secret_key", serialized)
 
+    def test_availability_threshold_order_is_validated(self):
+        options = normalize_report_options(None)
+        options["operational_analysis"]["thresholds"].update({
+            "availability_warning_percent": 95,
+            "availability_critical_percent": 99,
+        })
+
+        with self.assertRaisesRegex(ValueError, "가용성 위험 임계치"):
+            validate_report_options(options)
+
 
 if __name__ == "__main__":
     unittest.main()

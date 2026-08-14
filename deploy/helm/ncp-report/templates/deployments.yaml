@@ -95,6 +95,8 @@ spec:
               value: Asia/Seoul
             - name: LOG_LEVEL
               value: INFO
+            - name: REPORT_OPERATIONAL_ANALYSIS_ENABLED
+              value: {{ ternary "true" "false" $root.Values.operationalAnalysis.enabled | quote }}
             {{- range $smtpName := list "SMTP_HOST" "SMTP_PORT" "SMTP_FROM" "SMTP_USERNAME" "SMTP_PASSWORD" "SMTP_USE_TLS" "SMTP_USE_SSL" }}
             - name: {{ $smtpName }}
               valueFrom:

@@ -609,6 +609,10 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertFalse(partial_range["is_closed_month"])
         self.assertTrue(current_month["is_full_month"])
         self.assertFalse(current_month["is_closed_month"])
+        self.assertEqual(
+            full_month["end_time"] - full_month["start_time"],
+            30 * 86_400_000 - 1,
+        )
 
     def test_previous_month_range_uses_injected_kst_today(self):
         runner = self._runner_without_factory_init()
@@ -1270,7 +1274,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 json.loads(json_path.read_text(encoding="utf-8"))[
                     "schema_version"
                 ],
-                "1.4",
+                "1.5",
             )
 
     def test_diagnostic_json_excludes_raw_network_configuration(self):

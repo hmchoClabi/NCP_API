@@ -67,6 +67,7 @@ class ReportSectionHtml:
     """최종 HTML 본문에 삽입되는 모든 섹션."""
 
     summary: str = ""
+    operational_analysis: str = ""
     inventory: str = ""
     network_configuration: str = ""
     monitoring: str = ""

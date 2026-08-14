@@ -6,6 +6,11 @@ from unittest.mock import patch
 
 from app.report_branding import validate_customer_logo
 from webapp.app import CSRF_COOKIE, SESSION_COOKIE, create_app
+from webapp.route_access import (
+    _can_access_tenant,
+    _can_manage_tenant,
+    _msp_environment_scopes,
+)
 from webapp.security import token_hash
 
 
@@ -26,6 +31,11 @@ class FakePortalRepository:
         self.updated_report_settings = []
         self.updated_logos = []
         self.deleted_logos = []
+        self.action_case_rows = []
+        self.policy_exception_rows = []
+        self.updated_action_cases = []
+        self.created_policy_exceptions = []
+        self.deactivated_policy_exceptions = []
 
     def session_user(self, session_token):
         if not session_token:
@@ -41,10 +51,12 @@ class FakePortalRepository:
 
     def report_detail(self, report_id, allowed_tenants):
         self.allowed_tenants = allowed_tenants
-        if allowed_tenants != ["tenant-1"]:
+        tenant_id = "tenant-gov" if report_id == "report-gov" else "tenant-1"
+        if allowed_tenants is not None and tenant_id not in allowed_tenants:
             return None
         return {
             "id": report_id,
+            "tenant_id": tenant_id,
             "customer_name": "Customer",
             "report_type": "DAILY",
             "period_start": datetime(2026, 8, 1),
@@ -70,6 +82,34 @@ class FakePortalRepository:
     def update_tenant_report_settings(self, tenant_id, options, actor_id):
         self.updated_report_settings.append((tenant_id, options, actor_id))
         return options
+
+    def action_cases(self, tenant_id):
+        return self.action_case_rows if tenant_id == "tenant-1" else []
+
+    def update_action_case(
+        self, tenant_id, case_id, *, status, assigned_to, due_at, actor_id
+    ):
+        self.updated_action_cases.append((
+            tenant_id, case_id, status, assigned_to, due_at, actor_id,
+        ))
+
+    def policy_exceptions(self, tenant_id):
+        return self.policy_exception_rows if tenant_id == "tenant-1" else []
+
+    def create_policy_exception(
+        self, tenant_id, *, cloud_account_id, rule_id, resource_id, reason,
+        expires_at, actor_id
+    ):
+        self.created_policy_exceptions.append((
+            tenant_id, cloud_account_id, rule_id, resource_id, reason,
+            expires_at, actor_id,
+        ))
+
+    def deactivate_policy_exception(self, tenant_id, exception_id, actor_id):
+        self.deactivated_policy_exceptions.append((
+            tenant_id, exception_id, actor_id,
+        ))
+        return "SECURITY_BLOCK_STORAGE_ENCRYPTION"
 
     def update_tenant_logo(self, tenant_id, logo, actor_id):
         self.updated_logos.append((tenant_id, logo, actor_id))
@@ -126,7 +166,7 @@ class FakePortalRepository:
             "membership_status": "ACTIVE",
         }]
 
-    def customer_users(self):
+    def customer_users(self, allowed_environments=None):
         return [{
             "id": "customer-user-1",
             "email": "customer@example.com",
@@ -162,7 +202,7 @@ class FakePortalRepository:
         self.updated_msp_users.append((user_id, actor_id, enabled))
         return "MSP Operator"
 
-    def msp_users(self):
+    def msp_users(self, allowed_environments=None):
         return [{
             "id": "msp-user-1",
             "email": "admin@example.com",
@@ -176,6 +216,11 @@ class FakePortalRepository:
 
     def assign_customer_membership(self, user_id, tenant_id, role):
         self.assigned_memberships.append((user_id, tenant_id, role))
+
+    def customer_user_accessible_in_environments(
+        self, user_id, allowed_environments
+    ):
+        return user_id == "customer-user-1" and "public" in allowed_environments
 
     def jobs_for_tenants(self, tenant_ids):
         return []
@@ -224,10 +269,16 @@ class FakePortalRepository:
             "failed_artifact_files": 0,
         }
 
-    def schedules(self):
+    def schedule_environment(self, schedule_id):
+        return "public" if schedule_id == "schedule-1" else None
+
+    def msp_user_environment_scopes(self, user_id):
+        return {"public"}
+
+    def schedules(self, allowed_environments=None):
         return []
 
-    def schedulable_accounts(self):
+    def schedulable_accounts(self, allowed_environments=None):
         return [{
             "id": "11111111-1111-1111-1111-111111111111",
             "tenant_id": "tenant-1",
@@ -238,7 +289,7 @@ class FakePortalRepository:
             "environment": "public",
         }]
 
-    def tenants(self, environment=None):
+    def tenants(self, environment=None, allowed_environments=None):
         return [{
             "id": "tenant-1",
             "customer_code": "customer",
@@ -249,6 +300,20 @@ class FakePortalRepository:
             "account_count": 1,
             "report_count": 1,
         }]
+
+    def tenant_ids_for_environments(self, allowed_environments):
+        return ["tenant-1"] if "public" in allowed_environments else []
+
+    def dashboard(self, allowed_environments=None):
+        return {
+            "summary": {
+                "customer_count": 1,
+                "public_count": 1,
+                "gov_count": 0,
+                "issue_count": 0,
+            },
+            "issue_customers": [],
+        }
 
     def accounts_for_tenants(self, tenant_ids):
         return []
@@ -293,6 +358,44 @@ class FakeReportJobRepository:
     def bulk_delete_schedules(self, account_ids, report_type):
         self.bulk_deletes.append((account_ids, report_type))
         return len(account_ids)
+
+
+class MspEnvironmentScopeTests(unittest.TestCase):
+    def test_scoped_msp_can_only_access_matching_environment(self):
+        user = {
+            "platform_roles": ["MSP_OPERATOR"],
+            "platform_role_bindings": [{
+                "role": "MSP_OPERATOR",
+                "environment_scope": "public",
+            }],
+            "memberships": [],
+        }
+
+        self.assertEqual(_msp_environment_scopes(user), {"public"})
+        self.assertTrue(_can_access_tenant(user, "tenant-1", "public"))
+        self.assertFalse(_can_access_tenant(user, "tenant-2", "gov"))
+        self.assertFalse(_can_access_tenant(user, "tenant-1"))
+
+    def test_admin_scope_is_not_widened_by_operator_scope(self):
+        user = {
+            "platform_roles": ["MSP_ADMIN", "MSP_OPERATOR"],
+            "platform_role_bindings": [
+                {"role": "MSP_ADMIN", "environment_scope": "public"},
+                {"role": "MSP_OPERATOR", "environment_scope": "gov"},
+            ],
+            "memberships": [],
+        }
+
+        self.assertEqual(_msp_environment_scopes(user), {"public", "gov"})
+        self.assertTrue(_can_manage_tenant(user, "tenant-1", "public"))
+        self.assertFalse(_can_manage_tenant(user, "tenant-2", "gov"))
+
+    def test_legacy_unscoped_msp_context_remains_global(self):
+        user = {"platform_roles": ["MSP_ADMIN"], "memberships": []}
+
+        self.assertIsNone(_msp_environment_scopes(user))
+        self.assertTrue(_can_access_tenant(user, "tenant-1", "public"))
+        self.assertTrue(_can_manage_tenant(user, "tenant-2", "gov"))
 
 
 class WebAppTests(unittest.TestCase):
@@ -366,6 +469,19 @@ class WebAppTests(unittest.TestCase):
                 "msp_customer": ("/msp/customer/<tenant_id>", ("GET",)),
                 "update_customer_report_settings": (
                     "/msp/customer/<tenant_id>/report-settings",
+                    ("POST",),
+                ),
+                "update_customer_action_case": (
+                    "/msp/customer/<tenant_id>/action-cases/<case_id>",
+                    ("POST",),
+                ),
+                "create_customer_policy_exception": (
+                    "/msp/customer/<tenant_id>/policy-exceptions",
+                    ("POST",),
+                ),
+                "deactivate_customer_policy_exception": (
+                    "/msp/customer/<tenant_id>/policy-exceptions/"
+                    "<exception_id>/deactivate",
                     ("POST",),
                 ),
                 "update_customer_logo": (
@@ -654,6 +770,15 @@ class WebAppTests(unittest.TestCase):
             "2026-08-04 09:30:00 KST",
         )
 
+    def test_kst_datetime_local_filter_converts_utc_for_form_input(self):
+        formatter = self.app.jinja_env.filters["kst_datetime_local"]
+
+        self.assertEqual(
+            formatter(datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc)),
+            "2026-08-20T18:00",
+        )
+        self.assertEqual(formatter(None), "")
+
     def test_duration_template_filter_formats_elapsed_seconds(self):
         formatter = self.app.jinja_env.filters["duration"]
 
@@ -692,6 +817,25 @@ class MspCustomerDetailTests(unittest.TestCase):
         })
         self.client = self.app.test_client()
         self.client.set_cookie(SESSION_COOKIE, "session-token")
+
+    def use_scoped_msp(self, role: str, environment: str) -> None:
+        def scoped_user(session_token):
+            if not session_token:
+                return None
+            return {
+                "id": "user-1",
+                "email": "scoped@example.com",
+                "display_name": "Scoped MSP",
+                "platform_roles": [role],
+                "platform_role_bindings": [{
+                    "role": role,
+                    "environment_scope": environment,
+                }],
+                "memberships": [],
+                "csrf_token_hash": token_hash("csrf-token"),
+            }
+
+        self.repository.session_user = scoped_user
 
     def test_customer_detail_renders_persisted_reports(self):
         response = self.client.get("/msp/customer/tenant-1")
@@ -784,6 +928,174 @@ class MspCustomerDetailTests(unittest.TestCase):
         ])
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
+
+    def test_action_case_renders_tenant_assignee_and_can_be_reassigned(self):
+        self.repository.action_case_rows = [{
+            "id": "case-1",
+            "priority": "P2",
+            "severity": "WARNING",
+            "title": "CPU 사용률 임계치 초과",
+            "category": "PERFORMANCE",
+            "resource_id": "server-1",
+            "impact": "응답 지연 가능성",
+            "recommendation": "용량을 점검하세요.",
+            "occurrence_count": 2,
+            "last_detected_at": datetime(2026, 8, 13, tzinfo=timezone.utc),
+            "status": "NEW",
+            "assigned_to": "customer-user-1",
+            "due_at": datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc),
+        }]
+
+        detail = self.client.get("/msp/customer/tenant-1")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(b'name="assigned_to"', detail.data)
+        self.assertIn(
+            b'<option value="customer-user-1" selected>',
+            detail.data,
+        )
+        self.assertIn(b"customer@example.com", detail.data)
+        self.assertIn(b'value="2026-08-20T18:00"', detail.data)
+        self.assertIn("마감 시각 (KST)".encode("utf-8"), detail.data)
+        self.assertIn("만료 시각 (KST)".encode("utf-8"), detail.data)
+
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        updated = self.client.post(
+            "/msp/customer/tenant-1/action-cases/case-1",
+            data={
+                "csrf_token": "csrf-token",
+                "assigned_to": "customer-user-1",
+                "status": "IN_PROGRESS",
+                "due_at": "2026-08-20T18:00",
+            },
+        )
+
+        self.assertEqual(updated.status_code, 302)
+        self.assertEqual(self.repository.updated_action_cases, [(
+            "tenant-1",
+            "case-1",
+            "IN_PROGRESS",
+            "customer-user-1",
+            "2026-08-20T18:00",
+            "user-1",
+        )])
+
+    def test_active_policy_exception_can_be_deactivated(self):
+        self.repository.policy_exception_rows = [
+            {
+                "id": "exception-active",
+                "account_display_name": "Primary",
+                "rule_id": "SECURITY_BLOCK_STORAGE_ENCRYPTION",
+                "resource_id": "volume-1",
+                "reason": "고객 승인 테스트",
+                "approved_by_name": "MSP Admin",
+                "expires_at": datetime(2026, 9, 1, tzinfo=timezone.utc),
+                "active": True,
+                "effective_active": True,
+            },
+            {
+                "id": "exception-inactive",
+                "account_display_name": None,
+                "rule_id": "SECURITY_PUBLIC_IP",
+                "resource_id": None,
+                "reason": "종료된 예외",
+                "approved_by_name": "MSP Admin",
+                "expires_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
+                "active": False,
+                "effective_active": False,
+            },
+        ]
+
+        detail = self.client.get("/msp/customer/tenant-1")
+        detail_text = detail.get_data(as_text=True)
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(
+            "/msp/customer/tenant-1/policy-exceptions/"
+            "exception-active/deactivate",
+            detail_text,
+        )
+        self.assertNotIn(
+            "/msp/customer/tenant-1/policy-exceptions/"
+            "exception-inactive/deactivate",
+            detail_text,
+        )
+        self.assertIn("예외 해제", detail_text)
+        self.assertIn("Primary", detail_text)
+        self.assertIn("고객 전체 계정", detail_text)
+
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        deactivated = self.client.post(
+            "/msp/customer/tenant-1/policy-exceptions/"
+            "exception-active/deactivate",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(deactivated.status_code, 302)
+        self.assertEqual(self.repository.deactivated_policy_exceptions, [(
+            "tenant-1", "exception-active", "user-1",
+        )])
+
+    def test_policy_exception_can_target_one_customer_account(self):
+        detail = self.client.get("/msp/customer/tenant-1")
+        detail_text = detail.get_data(as_text=True)
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn('<select name="cloud_account_id">', detail_text)
+        self.assertIn('<option value="">고객 전체 계정</option>', detail_text)
+        self.assertIn('<option value="account-1">Primary</option>', detail_text)
+
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/customer/tenant-1/policy-exceptions",
+            data={
+                "csrf_token": "csrf-token",
+                "cloud_account_id": "account-1",
+                "rule_id": "SECURITY_PUBLIC_IP",
+                "resource_id": "public-ip-1",
+                "expires_at": "2099-08-20T18:00",
+                "reason": "고객 승인 테스트",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.created_policy_exceptions, [(
+            "tenant-1",
+            "account-1",
+            "SECURITY_PUBLIC_IP",
+            "public-ip-1",
+            "고객 승인 테스트",
+            "2099-08-20T18:00",
+            "user-1",
+        )])
+
+    def test_policy_exception_empty_account_means_customer_wide(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/customer/tenant-1/policy-exceptions",
+            data={
+                "csrf_token": "csrf-token",
+                "cloud_account_id": "",
+                "rule_id": "SECURITY_PUBLIC_IP",
+                "expires_at": "2099-08-20T18:00",
+                "reason": "고객 전체 승인",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.created_policy_exceptions[0][1],
+            None,
+        )
+
+    def test_policy_exception_deactivation_requires_csrf(self):
+        response = self.client.post(
+            "/msp/customer/tenant-1/policy-exceptions/"
+            "exception-active/deactivate"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.repository.deactivated_policy_exceptions, [])
 
     def test_msp_admin_can_upload_valid_customer_logo(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -988,6 +1300,101 @@ class MspCustomerDetailTests(unittest.TestCase):
             "operator@example.com", "temporary-password", "Operator",
             "MSP_OPERATOR", None, "user-1",
         )])
+
+    def test_msp_admin_can_explicitly_scope_new_msp_user(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        response = self.client.post(
+            "/msp/users/platform",
+            data={
+                "csrf_token": "csrf-token",
+                "email": "public-operator@example.com",
+                "display_name": "Public Operator",
+                "role": "MSP_OPERATOR",
+                "environment_scope": "public",
+                "password": "temporary-password",
+                "password_confirmation": "temporary-password",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.created_msp_users, [(
+            "public-operator@example.com",
+            "temporary-password",
+            "Public Operator",
+            "MSP_OPERATOR",
+            "public",
+            "user-1",
+        )])
+
+    def test_public_scoped_admin_cannot_access_gov_tenant_or_report(self):
+        self.use_scoped_msp("MSP_ADMIN", "public")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        original_tenant_detail = self.repository.tenant_detail
+
+        def tenant_detail(tenant_id):
+            if tenant_id == "tenant-gov":
+                return {
+                    "id": "tenant-gov",
+                    "environment": "gov",
+                    "customer_code": "gov-customer",
+                    "customer_name": "Gov Customer",
+                    "status": "ACTIVE",
+                }
+            return original_tenant_detail(tenant_id)
+
+        self.repository.tenant_detail = tenant_detail
+
+        detail = self.client.get("/msp/customer/tenant-gov")
+        report = self.client.get("/reports/report-gov")
+        deletion = self.client.post(
+            "/reports/report-gov/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+        mutation = self.client.post(
+            "/msp/customer/tenant-gov/logo/delete",
+            data={"csrf_token": "csrf-token"},
+        )
+        exception_deactivation = self.client.post(
+            "/msp/customer/tenant-gov/policy-exceptions/"
+            "exception-gov/deactivate",
+            data={"csrf_token": "csrf-token"},
+        )
+        customer_creation = self.client.post(
+            "/msp/customers/gov",
+            data={"csrf_token": "csrf-token"},
+        )
+
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(report.status_code, 404)
+        self.assertEqual(deletion.status_code, 404)
+        self.assertEqual(mutation.status_code, 404)
+        self.assertEqual(exception_deactivation.status_code, 404)
+        self.assertEqual(customer_creation.status_code, 404)
+        self.assertEqual(self.repository.deleted_reports, [])
+        self.assertEqual(self.repository.deleted_logos, [])
+        self.assertEqual(self.repository.deactivated_policy_exceptions, [])
+
+    def test_scoped_admin_cannot_create_global_msp_or_customer_user(self):
+        self.use_scoped_msp("MSP_ADMIN", "public")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        common = {
+            "csrf_token": "csrf-token",
+            "email": "new-user@example.com",
+            "display_name": "New User",
+            "password": "temporary-password",
+            "password_confirmation": "temporary-password",
+        }
+
+        customer_user = self.client.post("/msp/users", data=common)
+        global_msp = self.client.post(
+            "/msp/users/platform",
+            data={**common, "role": "MSP_OPERATOR", "environment_scope": ""},
+        )
+
+        self.assertEqual(customer_user.status_code, 403)
+        self.assertEqual(global_msp.status_code, 403)
+        self.assertEqual(self.repository.created_portal_users, [])
+        self.assertEqual(self.repository.created_msp_users, [])
 
     def test_msp_admin_can_disable_and_enable_another_msp_user(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

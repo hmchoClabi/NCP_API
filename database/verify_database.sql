@@ -46,8 +46,8 @@ BEGIN
     WHERE table_schema IN ('control', 'public_data', 'gov_data', 'audit')
       AND table_type = 'BASE TABLE';
 
-    IF table_count < 33 THEN
-        RAISE EXCEPTION 'Expected at least 33 tables, found %', table_count;
+    IF table_count < 36 THEN
+        RAISE EXCEPTION 'Expected at least 36 tables, found %', table_count;
     END IF;
 
     IF NOT EXISTS (
@@ -57,6 +57,77 @@ BEGIN
           AND rowsecurity
     ) THEN
         RAISE EXCEPTION 'Tenant branding table or RLS is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'control'
+          AND tablename = 'policy_exceptions'
+          AND rowsecurity
+    ) THEN
+        RAISE EXCEPTION 'Policy exceptions table or RLS is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'control'
+          AND tablename = 'event_cases'
+          AND policyname = 'tenant_msp_access'
+          AND qual ILIKE '%current_tenant_id%'
+          AND with_check ILIKE '%current_tenant_id%'
+    ) THEN
+        RAISE EXCEPTION 'Event case MSP tenant RLS is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'control'
+          AND tablename = 'policy_exceptions'
+          AND policyname = 'policy_exceptions_msp_access'
+          AND qual ILIKE '%app.environment_scope%'
+          AND with_check ILIKE '%app.environment_scope%'
+    ) THEN
+        RAISE EXCEPTION 'Policy exception MSP environment RLS is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'control.event_cases'::regclass
+          AND conname = 'event_cases_tenant_environment_fk'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'control.event_cases'::regclass
+          AND conname = 'event_cases_latest_run_tenant_fk'
+    ) THEN
+        RAISE EXCEPTION 'Event case tenant boundary constraints are missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'control.daily_account_facts'::regclass
+          AND conname = 'daily_account_facts_pkey'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'control.daily_account_facts'::regclass
+          AND conname = 'daily_account_facts_cloud_account_tenant_fk'
+    ) THEN
+        RAISE EXCEPTION 'Daily fact account boundary constraints are missing';
+    END IF;
+
+    IF has_table_privilege(
+        'ncp_control_app', 'control.policy_exceptions', 'INSERT'
+    ) OR has_table_privilege(
+        'ncp_control_app', 'control.policy_exceptions', 'UPDATE'
+    ) OR has_table_privilege(
+        'ncp_control_app', 'control.policy_exceptions', 'DELETE'
+    ) THEN
+        RAISE EXCEPTION 'Customer role can mutate policy exceptions';
     END IF;
 
     SELECT count(*)

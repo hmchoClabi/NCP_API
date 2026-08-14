@@ -16,6 +16,7 @@ from webapp.route_access import (
     _can_manage_tenant,
     _is_msp,
     _login_required,
+    _msp_environment_scopes,
     _msp_required,
 )
 
@@ -23,11 +24,36 @@ from webapp.route_access import (
 def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     """tenant 접근 권한을 유지하며 포털·보고서 endpoint를 등록한다."""
 
+    def accessible_tenant_ids(user: dict[str, Any]) -> list[str] | None:
+        if not _is_msp(user):
+            return [
+                str(item["tenant_id"])
+                for item in user.get("memberships", [])
+            ]
+        scopes = _msp_environment_scopes(user)
+        if scopes is None:
+            return None
+        return repository.tenant_ids_for_environments(scopes)
+
+    def account_tenant(account_id: str) -> tuple[str, dict[str, Any]] | None:
+        tenant_id = repository.account_tenant(account_id)
+        if not tenant_id:
+            return None
+        tenant = repository.tenant_detail(tenant_id)
+        if not tenant:
+            return None
+        return tenant_id, tenant
+
     @app.post("/accounts/<account_id>/report-jobs")
     @_login_required
     def enqueue_report(account_id: str):
-        tenant_id = repository.account_tenant(account_id)
-        if not tenant_id or not _can_access_tenant(g.user, tenant_id):
+        account_scope = account_tenant(account_id)
+        if not account_scope:
+            abort(404)
+        tenant_id, tenant = account_scope
+        if not _can_access_tenant(
+            g.user, tenant_id, tenant.get("environment")
+        ):
             abort(404)
         try:
             jobs.enqueue(
@@ -46,8 +72,13 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/accounts/<account_id>/schedules")
     @_login_required
     def save_schedule(account_id: str):
-        tenant_id = repository.account_tenant(account_id)
-        if not tenant_id or not _can_manage_tenant(g.user, tenant_id):
+        account_scope = account_tenant(account_id)
+        if not account_scope:
+            abort(404)
+        tenant_id, tenant = account_scope
+        if not _can_manage_tenant(
+            g.user, tenant_id, tenant.get("environment")
+        ):
             abort(403)
         try:
             report_type = request.form.get("report_type", "")
@@ -71,7 +102,9 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         portal_is_msp = _is_msp(g.user)
         customers = []
         if portal_is_msp:
-            customers = repository.tenants()
+            customers = repository.tenants(
+                allowed_environments=_msp_environment_scopes(g.user)
+            )
             tenant_ids = [str(item["id"]) for item in customers]
             memberships = [
                 {
@@ -85,6 +118,10 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         else:
             memberships = g.user.get("memberships", [])
             tenant_ids = [str(item["tenant_id"]) for item in memberships]
+        environment_by_tenant = {
+            str(item.get("id", item.get("tenant_id"))): item.get("environment")
+            for item in (customers or memberships)
+        }
         return render_template(
             "customer_portal.html",
             customers=customers,
@@ -97,21 +134,18 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             manageable_tenant_ids={
                 tenant_id
                 for tenant_id in tenant_ids
-                if _can_manage_tenant(g.user, tenant_id)
+                if _can_manage_tenant(
+                    g.user,
+                    tenant_id,
+                    environment_by_tenant.get(tenant_id),
+                )
             },
         )
 
     @app.get("/reports/<report_id>")
     @_login_required
     def report_detail(report_id: str):
-        allowed = (
-            None
-            if _is_msp(g.user)
-            else [
-                str(item["tenant_id"])
-                for item in g.user.get("memberships", [])
-            ]
-        )
+        allowed = accessible_tenant_ids(g.user)
         report = repository.report_detail(report_id, allowed)
         if not report:
             abort(404)
@@ -124,6 +158,10 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.post("/reports/<report_id>/delete")
     @_msp_required
     def delete_report(report_id: str):
+        if not repository.report_detail(
+            report_id, accessible_tenant_ids(g.user)
+        ):
+            abort(404)
         try:
             deleted = repository.delete_report(report_id, str(g.user["id"]))
             message = f"{deleted['customer_name']} 보고서를 삭제했습니다."
@@ -144,14 +182,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.get("/history")
     @_login_required
     def report_history():
-        tenant_ids = (
-            None
-            if _is_msp(g.user)
-            else [
-                str(item["tenant_id"])
-                for item in g.user.get("memberships", [])
-            ]
-        )
+        tenant_ids = accessible_tenant_ids(g.user)
         return render_template(
             "history.html",
             history=repository.report_history(tenant_ids),
@@ -172,14 +203,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         oldest = datetime.now(timezone.utc) - timedelta(hours=24)
         if after < oldest:
             after = oldest
-        tenant_ids = (
-            None
-            if _is_msp(g.user)
-            else [
-                str(item["tenant_id"])
-                for item in g.user.get("memberships", [])
-            ]
-        )
+        tenant_ids = accessible_tenant_ids(g.user)
         labels = {
             "QUEUED": ("info", "보고서 작업이 등록되었습니다."),
             "RUNNING": ("info", "보고서 작업을 시작했습니다."),
@@ -219,14 +243,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @app.get("/reports/<report_id>/content")
     @_login_required
     def report_content(report_id: str):
-        allowed = (
-            None
-            if _is_msp(g.user)
-            else [
-                str(item["tenant_id"])
-                for item in g.user.get("memberships", [])
-            ]
-        )
+        allowed = accessible_tenant_ids(g.user)
         report = repository.report_detail(report_id, allowed)
         if not report:
             abort(404)

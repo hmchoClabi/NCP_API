@@ -33,7 +33,7 @@ class ReportResultSnapshotTests(unittest.TestCase):
             restored.infrastructure_metrics,
             report.infrastructure_metrics,
         )
-        self.assertEqual(snapshot["schema_version"], "1.4")
+        self.assertEqual(snapshot["schema_version"], "1.5")
 
     def test_legacy_snapshot_uses_servers_as_infrastructure_fallback(self):
         restored = ReportResult.from_dict({

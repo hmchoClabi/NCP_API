@@ -72,7 +72,13 @@ class ObservabilityResult:
         default_factory=dict
     )
     activity_events: Dict[str, Any] = field(default_factory=dict)
+    service_availability: Dict[str, Any] = field(default_factory=dict)
+    security_monitoring: Dict[str, Any] = field(default_factory=dict)
+    dataset_statuses: List[Dict[str, Any]] = field(default_factory=list)
     activity_errors: List[Dict[str, Any]] = field(default_factory=list)
+    operational_source_errors: List[Dict[str, Any]] = field(
+        default_factory=list
+    )
     insight_event_errors: List[Dict[str, Any]] = field(default_factory=list)
     insight_errors: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)

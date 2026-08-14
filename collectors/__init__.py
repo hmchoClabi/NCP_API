@@ -6,6 +6,8 @@ from .billingcollector import BillingCollector
 from .organizationcollector import OrganizationCollector
 from .infrastructurecollector import InfrastructureCollector
 from .infrastructuremetriccollector import InfrastructureMetricCollector
+from .wmscollector import WMSCollector
+from .securitymonitoringcollector import SecurityMonitoringCollector
 
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "OrganizationCollector",
     "InfrastructureCollector",
     "InfrastructureMetricCollector",
+    "WMSCollector",
+    "SecurityMonitoringCollector",
 ]

@@ -1,0 +1,771 @@
+import json
+import unittest
+from types import SimpleNamespace
+
+from app.report_analysis import analyze_report
+from app.report_analysis.provenance import historical_source_state
+
+
+class ReportAnalysisTests(unittest.TestCase):
+    def _report(self, **overrides):
+        report = {
+            "period": {"period_type": "day"},
+            "report_options": {
+                "sections": [
+                    "executive_summary",
+                    "billing",
+                    "infrastructure_inventory",
+                    "monitoring",
+                    "insight_events",
+                    "activity_history",
+                ]
+            },
+            "servers": [],
+            "server_metrics": [],
+            "infrastructure": [],
+            "infrastructure_metrics": [],
+            "insight_events": [],
+            "activity_events": {},
+            "billing": {},
+            "service_availability": {},
+            "security_monitoring": {},
+            "dataset_statuses": [
+                {"key": "service_availability", "status": "NOT_REQUESTED"},
+                {"key": "security_events", "status": "NOT_REQUESTED"},
+            ],
+            "collection_errors": [],
+            "collection_warnings": [],
+        }
+        report.update(overrides)
+        return report
+
+    def test_missing_data_is_unknown_and_never_normal_or_zero(self):
+        analysis = analyze_report(self._report())
+
+        self.assertEqual(analysis["overall_status"], "UNKNOWN")
+        monitoring = self._dataset(analysis, "monitoring")
+        self.assertEqual(monitoring["status"], "UNAVAILABLE")
+        self.assertIsNone(monitoring["record_count"])
+        self.assertNotEqual(analysis["metrics"]["status"], "AVAILABLE")
+        json.dumps(analysis, ensure_ascii=False)
+
+    def test_report_result_like_object_is_supported(self):
+        report = SimpleNamespace(**self._report())
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["version"], "1.1")
+        self.assertEqual(analysis["period_type"], "DAILY")
+
+    def test_runner_period_type_aliases_are_normalized(self):
+        aliases = {
+            "today": "DAILY",
+            "yesterday": "DAILY",
+            "prev_month": "MONTHLY",
+            "datetime_range": "RANGE",
+        }
+
+        for raw, expected in aliases.items():
+            with self.subTest(period_type=raw):
+                analysis = analyze_report(
+                    self._report(period={"period_type": raw})
+                )
+                self.assertEqual(analysis["period_type"], expected)
+
+    def test_explicit_empty_is_distinct_from_failed_and_not_requested(self):
+        report = self._report(dataset_statuses=[
+            {
+                "key": "service_availability",
+                "status": "COLLECTED_EMPTY",
+                "record_count": 0,
+            },
+            {
+                "key": "security_events",
+                "status": "FAILED",
+                "record_count": 0,
+            },
+        ])
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(
+            self._dataset(analysis, "service_availability")["status"],
+            "COLLECTED_EMPTY",
+        )
+        self.assertEqual(
+            self._dataset(analysis, "security_events")["status"],
+            "FAILED",
+        )
+        self.assertEqual(analysis["security"]["status"], "FAILED")
+
+    def test_explicit_success_with_related_warning_is_partial(self):
+        report = self._report(
+            server_metrics=[{
+                "server_id": "server-1",
+                "raw_metrics": {
+                    "used_rto": {"avg": [{"raw": {"dps": [[1, 10]]}}]}
+                },
+            }],
+            dataset_statuses=[
+                {
+                    "key": "monitoring",
+                    "status": "COLLECTED",
+                    "record_count": 1,
+                    "warning_count": 1,
+                },
+                {"key": "service_availability", "status": "NOT_REQUESTED"},
+                {"key": "security_events", "status": "NOT_REQUESTED"},
+            ],
+            collection_warnings=[{
+                "collector": "InfrastructureMetricCollector",
+                "target_type": "infrastructure_metric",
+                "api": "get_query_data_multiple",
+            }],
+        )
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(
+            self._dataset(analysis, "monitoring")["status"],
+            "PARTIAL",
+        )
+        self.assertEqual(analysis["data_quality"]["overall_status"], "PARTIAL")
+
+    def test_metric_p95_and_duration_do_not_join_across_collection_gap(self):
+        minute = 60_000
+        points = [
+            [0, 91],
+            [minute, 92],
+            [5 * minute, 93],
+            [6 * minute, 94],
+        ]
+        report = self._report(
+            server_metrics=[{
+                "server_id": "server-1",
+                "server_name": "web-1",
+                "metric_interval": "Min1",
+                "raw_metrics": {
+                    "used_rto": {
+                        "avg": [{
+                            "dimensions": {"instanceNo": "server-1"},
+                            "raw": {"dps": points},
+                        }]
+                    }
+                },
+            }],
+        )
+        policy = {
+            "thresholds": {
+                "cpu_warning_percent": 80,
+                "cpu_critical_percent": 90,
+                "sustained_minutes": 3,
+            }
+        }
+
+        analysis = analyze_report(report, policy=policy)
+
+        summary = analysis["metrics"]["summaries"][0]
+        self.assertEqual(summary["sample_count"], 4)
+        self.assertAlmostEqual(summary["p95"], 93.85)
+        self.assertEqual(summary["critical_duration_seconds"], 120)
+        self.assertFalse(any(
+            finding["rule_id"] == "METRIC_CPU_SUSTAINED"
+            for finding in analysis["findings"]
+        ))
+
+    def test_sustained_metric_finding_has_stable_fingerprint(self):
+        points = [[index * 60_000, 95] for index in range(3)]
+        report = self._report(server_metrics=[{
+            "server_id": "server-1",
+            "server_name": "web-1",
+            "metric_interval": "Min1",
+            "raw_metrics": {
+                "used_rto": {"avg": [{"raw": {"dps": points}}]}
+            },
+        }])
+        policy = {"thresholds": {"sustained_minutes": 3}}
+
+        first = analyze_report(report, policy=policy)
+        second = analyze_report(report, policy=policy)
+        finding = next(
+            item for item in first["findings"]
+            if item["rule_id"] == "METRIC_CPU_SUSTAINED"
+        )
+
+        self.assertEqual(first["overall_status"], "RISK")
+        self.assertEqual(
+            finding["fingerprint"],
+            next(
+                item["fingerprint"] for item in second["findings"]
+                if item["rule_id"] == "METRIC_CPU_SUSTAINED"
+            ),
+        )
+
+    def test_event_duration_is_not_labeled_as_mttr(self):
+        start_time = 1_780_000_000_000
+        report = self._report(insight_events=[{
+            "event_id": "event-1",
+            "level": "WARNING",
+            "resource_id": "server-1",
+            "resource_name": "web-1",
+            "rule_name": "CPU high",
+            "start_time": start_time,
+            "end_time": start_time + 60_000,
+        }])
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["events"]["items"][0]["duration_seconds"], 60)
+        self.assertIn("MTTA", analysis["events"]["duration_note"])
+        self.assertIn("MTTR", analysis["events"]["duration_note"])
+
+    def test_zero_event_end_time_is_treated_as_open(self):
+        report = self._report(insight_events=[{
+            "event_id": "event-open",
+            "level": "CRITICAL",
+            "start_time": 1_780_000_000_000,
+            "end_time": 0,
+        }])
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["events"]["open_count"], 1)
+        self.assertTrue(analysis["events"]["items"][0]["is_open"])
+        self.assertIsNone(
+            analysis["events"]["items"][0]["duration_seconds"]
+        )
+
+    def test_explicit_dataset_counts_prevent_cross_dataset_issue_matching(self):
+        report = self._report(
+            infrastructure=[{
+                "category": "SERVER",
+                "resource_id": "server-1",
+            }],
+            dataset_statuses=[
+                {
+                    "key": "infrastructure",
+                    "status": "COLLECTED",
+                    "record_count": 1,
+                    "error_count": 0,
+                    "warning_count": 0,
+                },
+                {
+                    "key": "monitoring",
+                    "status": "FAILED",
+                    "record_count": 0,
+                    "error_count": 1,
+                },
+                {"key": "service_availability", "status": "NOT_REQUESTED"},
+                {"key": "security_events", "status": "NOT_REQUESTED"},
+            ],
+            collection_errors=[{
+                "collector": "InsightMetricCollector",
+                "target_type": "server",
+                "api": "query_data",
+            }],
+        )
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(
+            self._dataset(analysis, "infrastructure")["status"],
+            "AVAILABLE",
+        )
+        self.assertEqual(
+            self._dataset(analysis, "monitoring")["status"],
+            "FAILED",
+        )
+
+    def test_activity_failure_creates_change_finding(self):
+        report = self._report(activity_events={"server-1": [{
+            "event_id": "change-1",
+            "event_time": 1_000,
+            "product_display_name": "Server",
+            "action_name": "Reboot",
+            "result": "FAILED",
+            "resource_id": "server-1",
+            "resource_name": "web-1",
+        }]})
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["changes"]["failure_count"], 1)
+        self.assertEqual(analysis["changes"]["failed_change_count"], 1)
+        self.assertTrue(any(
+            item["rule_id"] == "ACTIVITY_CHANGE_FAILED"
+            for item in analysis["findings"]
+        ))
+
+    def test_failed_read_activity_is_not_reported_as_change_failure(self):
+        report = self._report(activity_events={"server-1": [{
+            "event_id": "read-1",
+            "event_time": 1_000,
+            "product_display_name": "Server",
+            "action_name": "getServerInstanceList",
+            "result": "FAILED",
+            "resource_id": "server-1",
+        }]})
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["changes"]["change_count"], 0)
+        self.assertEqual(analysis["changes"]["failed_change_count"], 0)
+        finding = next(
+            item for item in analysis["findings"]
+            if item["rule_id"] == "ACTIVITY_READ_FAILED"
+        )
+        self.assertEqual(finding["category"], "EVENT")
+
+    def test_distinct_events_on_same_resource_have_distinct_fingerprints(self):
+        report = self._report(insight_events=[
+            {
+                "event_id": "event-1",
+                "level": "WARNING",
+                "resource_id": "server-1",
+                "resource_name": "web-1",
+                "rule_name": "CPU high",
+                "start_time": 1_780_000_000_000,
+            },
+            {
+                "event_id": "event-2",
+                "level": "WARNING",
+                "resource_id": "server-1",
+                "resource_name": "web-1",
+                "rule_name": "Memory high",
+                "start_time": 1_780_000_060_000,
+            },
+        ])
+
+        analysis = analyze_report(report)
+        fingerprints = {
+            item["fingerprint"]
+            for item in analysis["findings"]
+            if item["category"] == "EVENT"
+        }
+
+        self.assertEqual(len(fingerprints), 2)
+
+    def test_cost_comparison_requires_matching_basis_and_confidence(self):
+        fact = {
+            "cost_type": "PERIOD_ESTIMATE",
+            "status": "AVAILABLE",
+            "total_amount": 120,
+            "currency": "KRW",
+            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            "confidence": "VERIFIED_ESTIMATE",
+            "includes_discount": False,
+            "includes_vat": False,
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-01",
+            "coverage_start": "2026-08-01",
+            "coverage_end": "2026-08-01",
+        }
+        report = self._report(billing={"period_estimate": fact})
+        baseline = self._report(billing={
+            "period_estimate": {
+                **fact,
+                "total_amount": 100,
+                "period_start": "2026-07-31",
+                "period_end": "2026-07-31",
+                "coverage_start": "2026-07-31",
+                "coverage_end": "2026-07-31",
+            }
+        })
+
+        compatible = analyze_report(report, baseline=baseline)
+        incompatible = analyze_report(
+            report,
+            baseline=self._report(billing={
+                "period_estimate": {
+                    **fact,
+                    "total_amount": 100,
+                    "confidence": "PARTIAL",
+                    "period_start": "2026-07-31",
+                    "period_end": "2026-07-31",
+                    "coverage_start": "2026-07-31",
+                    "coverage_end": "2026-07-31",
+                }
+            }),
+        )
+
+        self.assertEqual(compatible["costs"]["comparison"]["status"], "AVAILABLE")
+        self.assertEqual(compatible["costs"]["comparison"]["rate_change"], 20)
+        self.assertEqual(incompatible["costs"]["comparison"]["status"], "INCOMPATIBLE")
+
+    def test_cost_threshold_and_distinct_period_are_required(self):
+        fact = {
+            "cost_type": "PERIOD_ESTIMATE",
+            "status": "AVAILABLE",
+            "total_amount": 120,
+            "currency": "KRW",
+            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            "confidence": "VERIFIED_ESTIMATE",
+            "includes_discount": False,
+            "includes_vat": False,
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-01",
+            "coverage_start": "2026-08-01",
+            "coverage_end": "2026-08-01",
+        }
+        report = self._report(billing={"period_estimate": fact})
+        distinct_baseline = self._report(billing={
+            "period_estimate": {
+                **fact,
+                "total_amount": 100,
+                "period_start": "2026-07-31",
+                "period_end": "2026-07-31",
+                "coverage_start": "2026-07-31",
+                "coverage_end": "2026-07-31",
+            }
+        })
+
+        high_threshold = analyze_report(
+            report,
+            baseline=distinct_baseline,
+            policy={"thresholds": {"cost_increase_warning_percent": 50}},
+        )
+        same_period = analyze_report(
+            report,
+            baseline=self._report(billing={
+                "period_estimate": {**fact, "total_amount": 100}
+            }),
+        )
+
+        self.assertFalse(any(
+            item["rule_id"] == "COST_INCREASE_BASELINE"
+            for item in high_threshold["findings"]
+        ))
+        self.assertEqual(
+            same_period["costs"]["comparison"]["status"],
+            "INCOMPATIBLE",
+        )
+
+    def test_cost_comparison_rejects_different_collection_coverage(self):
+        current = {
+            "cost_type": "PERIOD_ESTIMATE",
+            "status": "AVAILABLE",
+            "total_amount": 120,
+            "currency": "KRW",
+            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            "confidence": "PARTIAL",
+            "includes_discount": False,
+            "includes_vat": False,
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-10",
+            "coverage_start": "2026-08-01",
+            "coverage_end": "2026-08-10",
+        }
+        previous = {
+            **current,
+            "total_amount": 100,
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-10",
+            "coverage_start": "2026-07-01",
+            "coverage_end": "2026-07-09",
+        }
+
+        analysis = analyze_report(
+            self._report(
+                period={"period_type": "range"},
+                billing={"period_estimate": current},
+            ),
+            baseline=self._report(
+                period={"period_type": "range"},
+                billing={"period_estimate": previous},
+            ),
+        )
+
+        comparison = analysis["costs"]["comparison"]
+        self.assertEqual(comparison["status"], "INCOMPATIBLE")
+        self.assertIn("coverage", comparison["incompatible_fields"])
+
+    def test_monthly_full_periods_remain_comparable_across_month_lengths(self):
+        current = {
+            "cost_type": "CONFIRMED",
+            "status": "AVAILABLE",
+            "total_amount": 120,
+            "currency": "KRW",
+            "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+            "confidence": "CONFIRMED",
+            "includes_discount": True,
+            "includes_vat": True,
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+            "coverage_start": "2026-07-01",
+            "coverage_end": "2026-07-31",
+        }
+        previous = {
+            **current,
+            "total_amount": 100,
+            "period_start": "2026-06-01",
+            "period_end": "2026-06-30",
+            "coverage_start": "2026-06-01",
+            "coverage_end": "2026-06-30",
+        }
+
+        analysis = analyze_report(
+            self._report(
+                period={"period_type": "prev_month"},
+                billing={"invoice_summary": current},
+            ),
+            baseline=self._report(
+                period={"period_type": "prev_month"},
+                billing={"invoice_summary": previous},
+            ),
+        )
+
+        self.assertEqual(analysis["period_type"], "MONTHLY")
+        self.assertEqual(
+            analysis["costs"]["comparison"]["status"],
+            "AVAILABLE",
+        )
+
+    def test_unmatched_exception_recalculation_keeps_quality_unknown(self):
+        from app.runner import ReportRunner
+
+        analysis = analyze_report(self._report())
+        updated = ReportRunner._apply_analysis_exceptions(
+            analysis,
+            [{"rule_id": "DOES_NOT_MATCH", "resource_id": None}],
+        )
+
+        self.assertEqual(updated["overall_status"], "UNKNOWN")
+
+    def test_wms_security_and_governance_use_only_explicit_evidence(self):
+        report = self._report(
+            infrastructure=[
+                {
+                    "category": "BLOCK_STORAGE",
+                    "resource_id": "disk-1",
+                    "resource_name": "data-disk",
+                    "details": {"encrypted": False},
+                },
+                {
+                    "category": "BLOCK_STORAGE",
+                    "resource_id": "disk-unknown",
+                    "resource_name": "unknown-disk",
+                    "details": {},
+                },
+                {
+                    "category": "KUBERNETES",
+                    "resource_id": "cluster-1",
+                    "resource_name": "prod-cluster",
+                    "details": {"termination_protection": False},
+                },
+            ],
+            service_availability={
+                "status": "COLLECTED",
+                "source": "NCP_WMS",
+                "scenarios": [{
+                    "scenario_id": "wms-1",
+                    "name": "homepage",
+                    "availability_percent": 94,
+                    "total_count": 100,
+                    "success_count": 94,
+                    "error_count": 6,
+                }],
+            },
+            security_monitoring={
+                "status": "COLLECTED",
+                "scope": "VPC",
+                "service_statuses": {"WAF": "COLLECTED"},
+                "events": [{
+                    "event_id": "security-1",
+                    "service": "WAF",
+                    "event_name": "SQL Injection",
+                    "detected_at": 1_000,
+                    "vpc_name": "prod-vpc",
+                }],
+            },
+            dataset_statuses=[
+                {"key": "service_availability", "status": "COLLECTED", "record_count": 1},
+                {"key": "security_events", "status": "COLLECTED", "record_count": 1},
+            ],
+        )
+        policy = {"policies": {
+            "require_block_storage_encryption": True,
+            "require_kubernetes_termination_protection": True,
+            "flag_public_ip": False,
+            "require_owner_tag": False,
+            "require_backup": False,
+        }}
+
+        analysis = analyze_report(report, policy=policy)
+        rule_ids = [item["rule_id"] for item in analysis["findings"]]
+
+        self.assertIn("WMS_AVAILABILITY_BELOW_THRESHOLD", rule_ids)
+        self.assertIn("SECURITY_MONITORING_EVENT_DETECTED", rule_ids)
+        self.assertEqual(rule_ids.count("BLOCK_STORAGE_ENCRYPTION_DISABLED"), 1)
+        self.assertIn("KUBERNETES_TERMINATION_PROTECTION_DISABLED", rule_ids)
+        self.assertEqual(analysis["security"]["event_count"], 1)
+
+    def test_missing_governance_evidence_cannot_be_reported_as_normal(self):
+        report = self._report(
+            report_options={"sections": ["infrastructure_inventory"]},
+            infrastructure=[{
+                "category": "BLOCK_STORAGE",
+                "resource_id": "disk-unknown",
+                "resource_name": "unknown-disk",
+                "details": {},
+            }],
+            dataset_statuses=[{
+                "key": "infrastructure",
+                "status": "COLLECTED",
+                "record_count": 1,
+            }],
+        )
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(analysis["overall_status"], "UNKNOWN")
+        self.assertEqual(analysis["governance"]["status"], "PARTIAL")
+        self.assertEqual(analysis["governance"]["indeterminate_count"], 1)
+        self.assertIn(
+            "GOVERNANCE_EVIDENCE_INCOMPLETE",
+            {item["rule_id"] for item in analysis["findings"]},
+        )
+
+    def test_source_states_distinguish_observed_calculated_and_missing_data(self):
+        report = self._report(
+            server_metrics=[{
+                "server_id": "server-1",
+                "server_name": "web-1",
+                "metric_interval": "Min1",
+                "raw_metrics": {
+                    "used_rto": {
+                        "avg": [{"raw": {"dps": [[1_000, 95]]}}]
+                    }
+                },
+            }],
+            insight_events=[{
+                "event_id": "event-1",
+                "level": "WARNING",
+                "resource_id": "server-1",
+                "start_time": 1_000,
+            }],
+            activity_events={"server-1": [{
+                "event_id": "change-1",
+                "event_time": 1_000,
+                "result": "SUCCESS",
+            }]},
+            billing={
+                "invoice_summary": {
+                    "cost_type": "CONFIRMED",
+                    "status": "AVAILABLE",
+                    "total_amount": 100,
+                },
+                "period_estimate": {
+                    "cost_type": "PERIOD_ESTIMATE",
+                    "status": "AVAILABLE",
+                    "total_amount": 90,
+                },
+            },
+            service_availability={
+                "status": "COLLECTED",
+                "scenarios": [{
+                    "scenario_id": "wms-1",
+                    "name": "homepage",
+                    "availability_percent": 100,
+                    "total_count": 1,
+                    "success_count": 1,
+                }],
+            },
+            security_monitoring={
+                "status": "COLLECTED",
+                "events": [{
+                    "event_id": "security-1",
+                    "service": "WAF",
+                    "detected_at": 1_000,
+                }],
+            },
+            dataset_statuses=[
+                {
+                    "key": "service_availability",
+                    "status": "COLLECTED",
+                    "record_count": 1,
+                },
+                {
+                    "key": "security_events",
+                    "status": "COLLECTED",
+                    "record_count": 1,
+                },
+            ],
+        )
+
+        analysis = analyze_report(report)
+        cost_facts = {
+            item["name"]: item for item in analysis["costs"]["facts"]
+        }
+
+        self.assertEqual(analysis["source_state"], "CALCULATED")
+        self.assertEqual(
+            analysis["events"]["items"][0]["source_state"],
+            "OBSERVED",
+        )
+        self.assertEqual(analysis["events"]["source_state"], "CALCULATED")
+        self.assertEqual(
+            analysis["changes"]["items"][0]["source_state"],
+            "OBSERVED",
+        )
+        self.assertEqual(
+            analysis["availability"]["items"][0]["source_state"],
+            "OBSERVED",
+        )
+        self.assertEqual(
+            analysis["security"]["items"][0]["source_state"],
+            "OBSERVED",
+        )
+        self.assertEqual(
+            analysis["metrics"]["summaries"][0]["source_state"],
+            "CALCULATED",
+        )
+        self.assertTrue(all(
+            item["source_state"] == "CALCULATED"
+            for item in analysis["findings"]
+        ))
+        self.assertEqual(
+            cost_facts["invoice_summary"]["source_state"],
+            "OBSERVED",
+        )
+        self.assertEqual(
+            cost_facts["period_estimate"]["source_state"],
+            "CALCULATED",
+        )
+
+    def test_source_state_distinguishes_collection_failure_from_unavailable(self):
+        analysis = analyze_report(self._report(dataset_statuses=[
+            {"key": "security_events", "status": "FAILED"},
+            {"key": "service_availability", "status": "NOT_REQUESTED"},
+        ]))
+
+        self.assertEqual(
+            self._dataset(analysis, "security_events")["source_state"],
+            "COLLECTION_FAILED",
+        )
+        self.assertEqual(
+            analysis["security"]["source_state"],
+            "COLLECTION_FAILED",
+        )
+        self.assertEqual(
+            self._dataset(analysis, "service_availability")["source_state"],
+            "UNAVAILABLE",
+        )
+
+    def test_inferred_source_requires_explicit_historical_confidence(self):
+        self.assertEqual(
+            historical_source_state("INFERRED_FROM_CREATE_TIME"),
+            "INFERRED",
+        )
+        self.assertEqual(historical_source_state("UNKNOWN"), "UNAVAILABLE")
+        self.assertEqual(historical_source_state(None), "OBSERVED")
+
+    @staticmethod
+    def _dataset(analysis, key):
+        return next(
+            item for item in analysis["data_quality"]["datasets"]
+            if item["key"] == key
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

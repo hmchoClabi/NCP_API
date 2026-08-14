@@ -153,11 +153,16 @@ class ReportRepositoryTests(unittest.TestCase):
             "report-id",
             "tenant-id",
             "public",
+            "account-id",
         )
 
-        _, parameters = cursor.calls[0]
-        self.assertEqual(parameters[11], 4321)
-        self.assertEqual(parameters[13], "PARTIAL")
+        self.assertEqual(len(cursor.calls), 3)
+        self.assertIn("pg_advisory_xact_lock", cursor.calls[0][0])
+        query, parameters = cursor.calls[1]
+        self.assertIn("control.daily_account_facts", query)
+        self.assertEqual(parameters[12], 4321)
+        self.assertEqual(parameters[14], "PARTIAL")
+        self.assertIn("control.daily_customer_facts", cursor.calls[2][0])
 
     def test_daily_fact_does_not_replace_unavailable_period_with_month_total(self):
         cursor = RecordingCursor()
@@ -187,11 +192,64 @@ class ReportRepositoryTests(unittest.TestCase):
             "report-id",
             "tenant-id",
             "public",
+            "account-id",
         )
 
-        _, parameters = cursor.calls[0]
-        self.assertIsNone(parameters[11])
-        self.assertEqual(parameters[13], "UNAVAILABLE")
+        self.assertEqual(len(cursor.calls), 3)
+        _, parameters = cursor.calls[1]
+        self.assertIsNone(parameters[12])
+        self.assertEqual(parameters[14], "UNAVAILABLE")
+
+    def test_daily_fact_uses_operational_analysis_for_dashboard_counts(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-12 00:00:00",
+                "end_dt": "2026-08-12 23:59:59",
+            },
+            insight_events=[{"level": "INFO"}],
+            analysis={
+                "data_quality": {"overall_status": "PARTIAL"},
+                "findings": [
+                    {
+                        "severity": "CRITICAL",
+                        "category": "PERFORMANCE",
+                        "status": "OPEN",
+                    },
+                    {
+                        "severity": "WARNING",
+                        "category": "COST",
+                        "status": "OPEN",
+                    },
+                    {
+                        "severity": "WARNING",
+                        "category": "DATA_QUALITY",
+                        "status": "OPEN",
+                    },
+                    {
+                        "severity": "CRITICAL",
+                        "category": "SECURITY",
+                        "status": "EXCEPTION",
+                    },
+                ],
+            },
+        )
+
+        self.repository._upsert_daily_fact(
+            cursor,
+            report,
+            "report-id",
+            "tenant-id",
+            "public",
+            "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 3)
+        _, parameters = cursor.calls[1]
+        self.assertEqual(parameters[5], "PARTIAL_SUCCESS")
+        self.assertEqual(parameters[7], 1)
+        self.assertEqual(parameters[8], 1)
+        self.assertEqual(parameters[9], 0)
 
     def test_report_run_retry_updates_pipeline_versions(self):
         cursor = RecordingCursor()
@@ -225,7 +283,149 @@ class ReportRepositoryTests(unittest.TestCase):
             "renderer_version = EXCLUDED.renderer_version",
             query,
         )
-        self.assertIn("'1.4', '1.4', '1.4'", query)
+        self.assertIn("'1.5', '1.5', '1.5'", query)
+
+    def test_policy_exception_rows_are_mapped_and_account_scoped(self):
+        cursor = RecordingCursor()
+        expires_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        cursor.fetchall = lambda: [(
+            "exception-id",
+            "account-id",
+            "SECURITY_PUBLIC_IP",
+            "public-ip-id",
+            "approved",
+            expires_at,
+        )]
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return cursor
+
+        repository = PostgresReportRepository(
+            DatabaseSettings(tenant_id="tenant-id")
+        )
+        fake_psycopg = SimpleNamespace(
+            connect=lambda **_kwargs: Connection()
+        )
+
+        with patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            exceptions = repository.load_active_policy_exceptions({
+                "cloud_account_id": "account-id",
+                "api_type": "public",
+            })
+
+        self.assertEqual(exceptions, [{
+            "id": "exception-id",
+            "cloud_account_id": "account-id",
+            "rule_id": "SECURITY_PUBLIC_IP",
+            "resource_id": "public-ip-id",
+            "reason": "approved",
+            "expires_at": expires_at,
+        }])
+        self.assertEqual(cursor.calls[1][1], ("public",))
+        query, parameters = cursor.calls[2]
+        self.assertIn("cloud_account_id IS NULL OR cloud_account_id = %s", query)
+        self.assertEqual(parameters, ("tenant-id", "public", "account-id"))
+
+    def test_analysis_case_is_account_scoped_and_idempotent_per_report(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "start_dt": "2026-08-01T00:00:00+09:00",
+                "end_dt": "2026-08-02T00:00:00+09:00",
+                "end_exclusive": True,
+            },
+            analysis={
+                "findings": [{
+                    "fingerprint": "finding-123",
+                    "rule_id": "SECURITY_PUBLIC_IP",
+                    "severity": "WARNING",
+                    "category": "SECURITY",
+                    "title": "Public IP review",
+                    "resource": {"id": "public-ip-id"},
+                    "evidence": [],
+                }]
+            },
+        )
+
+        self.repository._upsert_analysis_cases(
+            cursor,
+            report,
+            "report-id",
+            "tenant-id",
+            "public",
+            "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        query, parameters = cursor.calls[0]
+        self.assertIn("tenant_id, cloud_account_id, environment", query)
+        self.assertIn(
+            "tenant_id, source_type, source_event_id",
+            " ".join(query.split()),
+        )
+        self.assertIn("'ANALYSIS'", query)
+        self.assertIn(
+            "EXCLUDED.occurred_at > control.event_cases.occurred_at",
+            query,
+        )
+        self.assertIn(
+            "WHERE EXCLUDED.occurred_at >= control.event_cases.occurred_at",
+            query,
+        )
+        self.assertIn("acknowledged_by = CASE", query)
+        self.assertIn("resolved_at = CASE", query)
+        self.assertEqual(parameters[:5], (
+            "tenant-id",
+            "account-id",
+            "public",
+            "CUSTOM",
+            "account-id:CUSTOM:finding-123",
+        ))
+
+    def test_complete_dataset_marks_disappeared_cases_not_detected(self):
+        cursor = RecordingCursor()
+        report = ReportResult(
+            period={
+                "period_type": "day",
+                "start_dt": "2026-08-12T00:00:00+09:00",
+                "end_dt": "2026-08-13T00:00:00+09:00",
+                "end_exclusive": True,
+            },
+            analysis={
+                "findings": [],
+                "data_quality": {
+                    "datasets": [
+                        {"key": "monitoring", "status": "AVAILABLE"},
+                        {"key": "billing", "status": "PARTIAL"},
+                    ]
+                },
+            },
+        )
+
+        self.repository._upsert_analysis_cases(
+            cursor,
+            report,
+            "report-id",
+            "tenant-id",
+            "public",
+            "account-id",
+        )
+
+        self.assertEqual(len(cursor.calls), 1)
+        query, parameters = cursor.calls[0]
+        self.assertIn("SET status = 'NOT_DETECTED'", query)
+        self.assertIn("report_type = %s", query)
+        self.assertIn("rule_id LIKE ANY", query)
+        self.assertEqual(parameters[2], "DAILY")
+        self.assertIn("METRIC_%", parameters[4])
+        self.assertNotIn("COST_%", parameters[4])
 
     def test_historical_snapshot_query_uses_observation_time_not_report_date(self):
         source = inspect.getsource(

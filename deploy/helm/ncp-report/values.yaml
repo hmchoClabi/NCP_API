@@ -14,8 +14,12 @@ migration:
     repository: ncp-report-migrate
     tag: local
     pullPolicy: IfNotPresent
-  schemaVersion: "170"
+  schemaVersion: "180"
   waitSeconds: 300
+
+operationalAnalysis:
+  # 긴급 원복 시 false로 바꾸면 기존 보고서 형식으로 생성한다.
+  enabled: true
 
 existingSecret: ncp-report-secrets
 

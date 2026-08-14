@@ -26,6 +26,14 @@ from app.renderers.infrastructure_presenter import (
     server_spec_summary,
 )
 from app.report_branding import normalize_customer_logo_data_uri
+from app.report_analysis.provenance import (
+    CALCULATED,
+    OBSERVED,
+    SOURCE_STATE_LABELS,
+    UNAVAILABLE,
+    dataset_source_state,
+    historical_source_state,
+)
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
@@ -432,6 +440,65 @@ class HtmlReportRenderer:
             f"{fact.get('coverage_end') or '-'}"
         )
 
+    def _report_period_cost_fact(
+        self,
+        period: Mapping[str, Any],
+        facts: Sequence[Mapping[str, Any]],
+        preferred_names: Sequence[str],
+    ) -> Mapping[str, Any]:
+        """보고서 대상 기간과 정확히 일치하는 비용 사실만 요약에 사용한다."""
+        report_start = self._billing_date(
+            period.get("use_start_date") or period.get("start_dt")
+        )
+        report_end = self._billing_date(
+            period.get("use_end_date") or period.get("end_dt")
+        )
+        if report_start is None or report_end is None:
+            return {}
+        return next((
+            fact
+            for name in preferred_names
+            for fact in facts
+            if fact.get("name") == name
+            and self._billing_date(fact.get("period_start")) == report_start
+            and self._billing_date(fact.get("period_end")) == report_end
+        ), {})
+
+    @staticmethod
+    def _operational_cost_label(fact: Mapping[str, Any]) -> str:
+        label = {
+            "invoice_summary": "확정 청구 금액",
+            "period_estimate": "보고 기간 추정 금액",
+            "month_to_date_estimate": "월 누적 추정 금액",
+            "month_end_projection": "월말 추정 금액",
+        }.get(str(fact.get("name") or ""), "보고 기간 비용")
+        start = fact.get("period_start")
+        end = fact.get("period_end")
+        if start or end:
+            return f"{label} · {start or '-'}~{end or '-'}"
+        return label
+
+    @staticmethod
+    def _source_state_text(value: Any) -> str:
+        status = str(value or UNAVAILABLE).strip().upper()
+        label = SOURCE_STATE_LABELS.get(status, "미확인")
+        return f"{status} ({label})"
+
+    @staticmethod
+    def _comparison_period_text(
+        comparison: Mapping[str, Any], prefix: str
+    ) -> str:
+        period_start = comparison.get(f"{prefix}_period_start")
+        period_end = comparison.get(f"{prefix}_period_end")
+        coverage_start = comparison.get(f"{prefix}_coverage_start")
+        coverage_end = comparison.get(f"{prefix}_coverage_end")
+        if not any((period_start, period_end, coverage_start, coverage_end)):
+            return "-"
+        return (
+            f"대상 {period_start or '-'} ~ {period_end or '-'} · "
+            f"수집 {coverage_start or '-'} ~ {coverage_end or '-'}"
+        )
+
     def _render_summary_section(
         self,
         report: ReportResult,
@@ -439,6 +506,10 @@ class HtmlReportRenderer:
     ) -> str:
         report_options = display.report_options
         if report_options.section_enabled("executive_summary"):
+            # 분석이 포함된 새 보고서는 바로 아래 의사결정 요약을 먼저
+            # 표시한다. 이 블록은 과거 스냅샷 표시 호환용이다.
+            if report.analysis:
+                return ""
             summary_cards = []
             if display.inventory_enabled:
                 summary_cards.append(
@@ -497,6 +568,421 @@ class HtmlReportRenderer:
                 + "</section>"
             )
         return ""
+
+    def _render_operational_analysis(self, report: ReportResult) -> str:
+        analysis = self._mapping(report.analysis)
+        if not analysis:
+            return ""
+        quality = self._mapping(analysis.get("data_quality"))
+        datasets = self._records(quality.get("datasets"))
+        all_findings = self._records(analysis.get("findings"))
+        if not all_findings:
+            # 초기 1.0 분석 스냅샷은 key_findings만 저장할 수 있다.
+            all_findings = self._records(analysis.get("key_findings"))
+        active_findings = [
+            finding
+            for finding in all_findings
+            if finding.get("category") != "DATA_QUALITY"
+            and finding.get("status") != "EXCEPTION"
+        ]
+        findings = [
+            finding
+            for finding in self._records(analysis.get("key_findings"))
+            if finding.get("category") != "DATA_QUALITY"
+            and finding.get("status") != "EXCEPTION"
+        ]
+        metrics = self._mapping(analysis.get("metrics"))
+        events = self._mapping(analysis.get("events"))
+        changes = self._mapping(analysis.get("changes"))
+        costs = self._mapping(analysis.get("costs"))
+        availability = self._mapping(analysis.get("availability"))
+        security = self._mapping(analysis.get("security"))
+        status = str(analysis.get("overall_status") or "UNKNOWN")
+        status_label = str(
+            analysis.get("overall_status_label") or "판정 불가"
+        )
+        requested_datasets = [
+            item for item in datasets
+            if item.get("status") != "NOT_REQUESTED"
+        ]
+        completed_datasets = [
+            item for item in requested_datasets
+            if item.get("status") in {"AVAILABLE", "COLLECTED_EMPTY"}
+        ]
+        collection_label = {
+            "COMPLETE": "정상",
+            "PARTIAL": "일부 누락",
+            "FAILED": "실패",
+            "UNKNOWN": "판정 불가",
+        }.get(str(quality.get("overall_status")), "판정 불가")
+        if requested_datasets:
+            collection_label += (
+                f" · {len(completed_datasets)}/{len(requested_datasets)}"
+            )
+
+        cost_facts = self._records(costs.get("facts"))
+        preferred_cost_names = (
+            (
+                "invoice_summary",
+                "period_estimate",
+                "month_to_date_estimate",
+                "month_end_projection",
+            )
+            if analysis.get("period_type") == "MONTHLY"
+            else (
+                "period_estimate",
+                "month_to_date_estimate",
+                "month_end_projection",
+                "invoice_summary",
+            )
+        )
+        current_cost = self._report_period_cost_fact(
+            report.period,
+            cost_facts,
+            preferred_cost_names,
+        )
+        availability_value = availability.get(
+            "overall_availability_percent"
+        )
+        immediate_status = self._analysis_finding_status(active_findings)
+        availability_findings = [
+            finding for finding in active_findings
+            if finding.get("category") == "AVAILABILITY"
+            or str(finding.get("rule_id") or "").startswith("WMS_")
+        ]
+        cost_findings = [
+            finding for finding in active_findings
+            if finding.get("category") == "COST"
+        ]
+        availability_card_status = (
+            self._analysis_finding_status(availability_findings)
+            if availability_value is not None
+            else "unknown"
+        )
+        cost_card_status = (
+            self._analysis_finding_status(cost_findings)
+            if current_cost
+            else "unknown"
+        )
+
+        status_cards = "".join((
+            self._analysis_status_card(
+                "보고서 생성",
+                self._mapping(analysis.get("report_generation")).get(
+                    "status_label", "성공"
+                ),
+                "generation-success",
+                self._mapping(analysis.get("report_generation")).get(
+                    "source_state", OBSERVED
+                ),
+            ),
+            self._analysis_status_card(
+                "데이터 수집",
+                collection_label,
+                str(quality.get("overall_status") or "unknown").casefold(),
+                quality.get("source_state", CALCULATED),
+            ),
+            self._analysis_status_card(
+                "클라우드 운영 판정",
+                status_label,
+                status.casefold(),
+                analysis.get("source_state", CALCULATED),
+            ),
+            self._analysis_status_card(
+                "즉시 확인",
+                f"{len(active_findings)}건",
+                immediate_status,
+                CALCULATED,
+            ),
+            self._analysis_status_card(
+                "서비스 가용률",
+                (
+                    f"{self._number(availability_value, 2)}%"
+                    if availability_value is not None
+                    else "조회 불가"
+                ),
+                availability_card_status,
+                availability.get("source_state", UNAVAILABLE),
+            ),
+            self._analysis_status_card(
+                self._operational_cost_label(current_cost),
+                (
+                    f"{self._number(current_cost.get('total_amount'), 0)}원"
+                    if current_cost.get("total_amount") is not None
+                    else "조회 불가"
+                ),
+                cost_card_status,
+                current_cost.get("source_state", UNAVAILABLE),
+            ),
+        ))
+
+        finding_content = (
+            '<div class="finding-list">'
+            + "".join(self._finding_card(item) for item in findings)
+            + "</div>"
+            if findings
+            else '<p class="empty-state">활성 경고가 없습니다. 단, 수집 불가 데이터는 정상으로 판정하지 않습니다.</p>'
+        )
+        dataset_rows = [
+            {
+                "label": item.get("label"),
+                "status": item.get("status_label") or item.get("status"),
+                "record_count": item.get("record_count"),
+                "error_count": item.get("error_count"),
+                "warning_count": item.get("warning_count"),
+                "reason": item.get("reason"),
+                "source_state_text": self._source_state_text(
+                    item.get("source_state")
+                ),
+            }
+            for item in datasets
+        ]
+        metric_rows = sorted(
+            self._records(metrics.get("summaries")),
+            key=lambda item: float(item.get("maximum") or -1),
+            reverse=True,
+        )[:10]
+        metric_rows = [
+            {
+                **item,
+                "source_state_text": self._source_state_text(
+                    item.get("source_state")
+                ),
+            }
+            for item in metric_rows
+        ]
+        comparison = self._mapping(costs.get("comparison"))
+        comparison_rows = [{
+            **comparison,
+            "source_state_text": self._source_state_text(
+                comparison.get("source_state")
+            ),
+            "current_period_display": self._comparison_period_text(
+                comparison, "current"
+            ),
+            "baseline_period_display": self._comparison_period_text(
+                comparison, "baseline"
+            ),
+        }] if comparison else []
+        scenario_rows = [
+            {
+                **item,
+                "source_state_text": self._source_state_text(
+                    item.get("source_state")
+                ),
+            }
+            for item in self._records(availability.get("items"))
+        ]
+        security_rows = [
+            {
+                **item,
+                "source_state_text": self._source_state_text(
+                    item.get("source_state")
+                ),
+            }
+            for item in self._records(security.get("items"))[:50]
+        ]
+        events_known = events.get("status") in {
+            "AVAILABLE", "COLLECTED_EMPTY"
+        }
+        changes_known = changes.get("status") in {
+            "AVAILABLE", "COLLECTED_EMPTY"
+        }
+
+        return "".join((
+            '<section class="operational-overview" aria-label="운영 판단 요약">',
+            f'<div class="operational-status-grid">{status_cards}</div>',
+            self._section(
+                "즉시 확인이 필요한 항목 · 상위 5건",
+                "규칙 기반 판정 결과입니다. 전체 활성 항목 수는 상단 카드에 표시하며, 이 목록에는 우선순위 상위 5건만 표시합니다. 숫자와 위험도는 AI 추정이 아니라 저장된 수집 데이터와 고객 임계치로 계산합니다.",
+                finding_content,
+                len(findings),
+                warning=bool(findings),
+            ),
+            self._section(
+                "데이터 수집 상태",
+                "수집 완료 0건과 미수집·권한 부족·실패를 분리합니다.",
+                self._table(
+                    dataset_rows,
+                    (
+                        ("label", "데이터셋"),
+                        ("status", "상태"),
+                        ("source_state_text", "출처 상태"),
+                        ("record_count", "레코드", "number0"),
+                        ("error_count", "오류", "number0"),
+                        ("warning_count", "경고", "number0"),
+                        ("reason", "판정 근거"),
+                    ),
+                ),
+                len(dataset_rows),
+            ),
+            self._section(
+                "성능 임계치와 Top 리소스",
+                "평균·P95·최댓값과 관측 공백을 이어 붙이지 않은 최대 연속 초과 시간을 표시합니다.",
+                self._table(
+                    metric_rows,
+                    (
+                        ("category", "상품"),
+                        ("resource_name", "자원"),
+                        ("metric_label", "지표"),
+                        ("source_state_text", "출처 상태"),
+                        ("average", "평균", "number2"),
+                        ("p95", "P95", "number2"),
+                        ("maximum", "최대", "number2"),
+                        ("warning_duration_seconds", "주의 지속(초)", "number0"),
+                    ),
+                ),
+                len(metric_rows),
+            ) if metric_rows else "",
+            self._section(
+                "서비스 가용성(WMS)",
+                "가용률과 평균 응답시간입니다. 집계 버킷 통계이며 개별 요청 p95로 해석하지 않습니다.",
+                self._table(
+                    scenario_rows,
+                    (
+                        ("name", "시나리오"),
+                        ("source_state_text", "출처 상태"),
+                        ("availability_percent", "가용률(%)", "number2"),
+                        ("avg_load_time_ms", "평균 로드(ms)", "number2"),
+                        ("avg_run_time_ms", "평균 실행(ms)", "number2"),
+                        ("success_count", "성공", "number0"),
+                        ("error_count", "오류", "number0"),
+                    ),
+                ),
+                len(scenario_rows),
+            ) if scenario_rows else "",
+            self._section(
+                "Security Monitoring(VPC)",
+                "AV·DDoS·IDS·IPS·WAF 탐지 결과입니다. 미수집은 보안 정상으로 표시하지 않습니다.",
+                self._table(
+                    security_rows,
+                    (
+                        ("service", "상품"),
+                        ("source_state_text", "출처 상태"),
+                        ("detected_at_kst", "탐지 시각"),
+                        ("event_name", "이벤트"),
+                        ("attack_type", "유형"),
+                        ("action_status", "조치"),
+                        ("target", "대상"),
+                    ),
+                ),
+                len(security_rows),
+                warning=bool(security_rows),
+            ) if security_rows else "",
+            self._section(
+                "이벤트·변경·비용 비교",
+                "Cloud Insight 이벤트 시간은 발생~종료 구간이며 MTTA/MTTR이 아닙니다. 비용은 기준·신뢰도·할인·VAT 범위가 같을 때만 비교합니다.",
+                '<div class="analysis-kpi-grid">'
+                + self._analysis_kpi(
+                    "Critical 이벤트",
+                    events.get("critical_count") if events_known else None,
+                    "건",
+                    events.get("source_state", UNAVAILABLE),
+                )
+                + self._analysis_kpi(
+                    "미종료 이벤트",
+                    events.get("open_count") if events_known else None,
+                    "건",
+                    events.get("source_state", UNAVAILABLE),
+                )
+                + self._analysis_kpi(
+                    "전체 활동",
+                    changes.get("total_count") if changes_known else None,
+                    "건",
+                    changes.get("source_state", UNAVAILABLE),
+                )
+                + self._analysis_kpi(
+                    "실패 활동",
+                    changes.get("failure_count") if changes_known else None,
+                    "건",
+                    changes.get("source_state", UNAVAILABLE),
+                )
+                + "</div>"
+                + self._table(
+                    comparison_rows,
+                    (
+                        ("status", "비교 상태"),
+                        ("source_state_text", "출처 상태"),
+                        ("current_period_display", "현재 대상·수집 기간"),
+                        ("baseline_period_display", "이전 대상·수집 기간"),
+                        ("current_amount", "현재", "number0"),
+                        ("baseline_amount", "이전", "number0"),
+                        ("amount_change", "증감액", "number0"),
+                        ("rate_change", "증감률(%)", "number2"),
+                        ("amount_basis", "금액 기준"),
+                        ("reason", "근거"),
+                    ),
+                ),
+                1,
+            ),
+            "</section>",
+        ))
+
+    def _analysis_status_card(
+        self,
+        label: str,
+        value: Any,
+        status: str,
+        source_state: Any = UNAVAILABLE,
+    ) -> str:
+        safe_status = status if status in {
+            "normal", "caution", "risk", "unknown", "complete", "partial",
+            "failed", "generation-success",
+        } else "unknown"
+        return (
+            f'<article class="operational-status {safe_status}">'
+            f'<span>{self._text(label)}</span><strong>{self._text(value)}</strong>'
+            f'<small class="source-state">{self._text(self._source_state_text(source_state))}</small>'
+            "</article>"
+        )
+
+    @staticmethod
+    def _analysis_finding_status(
+        findings: Sequence[Mapping[str, Any]],
+    ) -> str:
+        severities = {
+            str(finding.get("severity") or "").upper()
+            for finding in findings
+        }
+        if "CRITICAL" in severities:
+            return "risk"
+        if "WARNING" in severities:
+            return "caution"
+        return "normal"
+
+    def _analysis_kpi(
+        self,
+        label: str,
+        value: Any,
+        unit: str,
+        source_state: Any = CALCULATED,
+    ) -> str:
+        display = "-" if value is None else self._number(value, decimals=0)
+        return (
+            '<div><span>' + self._text(label) + '</span><strong>'
+            + self._text(display) + ' <small>' + self._text(unit)
+            + '</small></strong><small class="source-state">'
+            + self._text(self._source_state_text(source_state))
+            + '</small></div>'
+        )
+
+    def _finding_card(self, finding: Mapping[str, Any]) -> str:
+        resource = self._mapping(finding.get("resource"))
+        evidence = self._records(finding.get("evidence"))
+        evidence_text = " · ".join(
+            f"{item.get('label')}: {item.get('value')}"
+            + (f" {item.get('unit')}" if item.get("unit") else "")
+            for item in evidence
+        )
+        severity = str(finding.get("severity") or "INFO").casefold()
+        if finding.get("status") == "EXCEPTION":
+            severity = "exception"
+        return f"""
+        <article class="finding-card {self._text(severity)}">
+          <div class="finding-heading"><span>{self._text(finding.get('severity'))}</span><span>{self._text(self._source_state_text(finding.get('source_state')))}</span><strong>{self._text(finding.get('title'))}</strong></div>
+          <p>{self._text(resource.get('name') or resource.get('id') or '공통')}</p>
+          <dl><div><dt>근거</dt><dd>{self._text(evidence_text or '-')}</dd></div><div><dt>영향</dt><dd>{self._text(finding.get('impact') or '-')}</dd></div><div><dt>권고</dt><dd>{self._text(finding.get('recommendation') or '-')}</dd></div></dl>
+        </article>"""
 
     def _render_infrastructure_sections(
         self,
@@ -700,6 +1186,7 @@ class HtmlReportRenderer:
         display: ReportDisplayData,
     ) -> ReportSectionHtml:
         summary = self._render_summary_section(report, display)
+        operational_analysis = self._render_operational_analysis(report)
         infrastructure = self._render_infrastructure_sections(
             report,
             display,
@@ -712,6 +1199,7 @@ class HtmlReportRenderer:
         )
         return ReportSectionHtml(
             summary=summary,
+            operational_analysis=operational_analysis,
             inventory=infrastructure.inventory,
             network_configuration=(
                 infrastructure.network_configuration
@@ -773,6 +1261,7 @@ class HtmlReportRenderer:
     </header>
 
     {sections.summary}
+    {sections.operational_analysis}
     {sections.inventory}
     {sections.network_configuration}
     {sections.monitoring}
@@ -900,6 +1389,11 @@ class HtmlReportRenderer:
                         details.get("historical_presence_confidence")
                     )
                 ),
+                "historical_source_state_text": self._source_state_text(
+                    historical_source_state(
+                        details.get("historical_presence_confidence")
+                    )
+                ),
             })
 
         if not prepared:
@@ -938,6 +1432,9 @@ class HtmlReportRenderer:
         ):
             columns.append(
                 ("historical_presence_text", "기간 존재 판단")
+            )
+            columns.append(
+                ("historical_source_state_text", "출처 상태")
             )
         table = self._table(prepared, tuple(columns))
         summary = (
@@ -997,6 +1494,11 @@ class HtmlReportRenderer:
                         details.get("historical_presence_confidence")
                     )
                 ),
+                "historical_source_state_text": self._source_state_text(
+                    historical_source_state(
+                        details.get("historical_presence_confidence")
+                    )
+                ),
             })
 
         columns = [
@@ -1016,6 +1518,7 @@ class HtmlReportRenderer:
             for resource in prepared
         ):
             columns.append(("historical_presence_text", "기간 존재 판단"))
+            columns.append(("historical_source_state_text", "출처 상태"))
 
         return self._section(
             "서버 현황",
@@ -2078,6 +2581,7 @@ class HtmlReportRenderer:
         for row in sorted_rows:
             prepared.append(
                 {
+                    "source_state_text": self._source_state_text(OBSERVED),
                     "time": self._first(
                         row,
                         "start_time_kst",
@@ -2125,6 +2629,7 @@ class HtmlReportRenderer:
             prepared,
             (
                 ("time", "시각"),
+                ("source_state_text", "출처 상태"),
                 ("severity", "심각도"),
                 ("resource", "리소스"),
                 ("type", "유형"),
@@ -2339,6 +2844,7 @@ class HtmlReportRenderer:
             prepared.append(
                 {
                     **row,
+                    "source_state_text": self._source_state_text(OBSERVED),
                     "display_event_time": (
                         row.get("event_time_kst")
                         or row.get("event_time")
@@ -2353,6 +2859,7 @@ class HtmlReportRenderer:
             prepared,
             (
                 ("display_event_time", "발생 시각 (KST)"),
+                ("source_state_text", "출처 상태"),
                 ("actor", "수행 계정"),
                 ("product_display_name", "서비스"),
                 ("target", "대상 객체"),
@@ -2525,8 +3032,12 @@ class HtmlReportRenderer:
 
     def _format_value(self, value: Any, format_name: str) -> str:
         if format_name == "number0":
+            if value is None or value == "":
+                return "-"
             return self._text(self._number(value, decimals=0))
         if format_name == "number3":
+            if value is None or value == "":
+                return "-"
             return self._text(self._number(value, decimals=3))
         if format_name == "percent":
             if value is None or value == "":
@@ -2609,6 +3120,17 @@ class HtmlReportRenderer:
         cards = []
         for fact in facts:
             status = str(fact.get("status") or "UNAVAILABLE")
+            collected_source_state = dataset_source_state(status)
+            source_state = (
+                collected_source_state
+                if collected_source_state != OBSERVED
+                else (
+                    OBSERVED
+                    if str(fact.get("cost_type") or "").upper()
+                    == "CONFIRMED"
+                    else CALCULATED
+                )
+            )
             amount = (
                 self._number(fact.get("total_amount"), 0) + "원"
                 if fact.get("total_amount") is not None else "조회 불가"
@@ -2653,6 +3175,7 @@ class HtmlReportRenderer:
                 f"<li><span>금액 기준</span><strong>{self._text(basis_labels.get(str(fact.get('amount_basis')), fact.get('amount_basis')))}</strong></li>"
                 f"<li><span>포함 범위</span><strong>{self._text(included)}</strong></li>"
                 f"<li><span>신뢰도</span><strong>{self._text(fact.get('confidence'))}</strong></li>"
+                f"<li><span>출처 상태</span><strong>{self._text(self._source_state_text(source_state))}</strong></li>"
                 f"{estimate_quality}"
                 f"{invoice_breakdown}"
                 "</ul></article>"

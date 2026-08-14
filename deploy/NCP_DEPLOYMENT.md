@@ -157,7 +157,7 @@ helm upgrade --install ncp-report deploy/helm/ncp-report \
   --wait --wait-for-jobs --timeout 15m
 ```
 
-The app containers wait for schema version `170`. The migration Job is created
+The app containers wait for schema version `180`. The migration Job is created
 with the other resources, connects as the DB administrator, creates the
 application roles and applies all SQL files in filename order. This avoids a
 first-install deadlock between a post-install hook and `helm --wait`.

@@ -66,6 +66,14 @@ class PostgresReportRepository:
                             (str(self.settings.tenant_id),),
                         )
                     tenant_id, environment = self._resolve_tenant(cursor, report)
+                    cursor.execute(
+                        "SELECT set_config('app.tenant_id', %s, true)",
+                        (str(tenant_id),),
+                    )
+                    cursor.execute(
+                        "SELECT set_config('app.environment_scope', %s, true)",
+                        (environment,),
+                    )
                     cloud_account_id = self._resolve_cloud_account(
                         cursor, report, tenant_id, environment
                     )
@@ -81,7 +89,20 @@ class PostgresReportRepository:
                     )
                     self._replace_errors(cursor, report, report_run_id, tenant_id)
                     self._upsert_daily_fact(
-                        cursor, report, report_run_id, tenant_id, environment
+                        cursor,
+                        report,
+                        report_run_id,
+                        tenant_id,
+                        environment,
+                        cloud_account_id,
+                    )
+                    self._upsert_analysis_cases(
+                        cursor,
+                        report,
+                        report_run_id,
+                        tenant_id,
+                        environment,
+                        cloud_account_id,
                     )
                 self.last_report_run_id = str(report_run_id)
                 return self.last_report_run_id
@@ -324,6 +345,154 @@ class PostgresReportRepository:
             },
         }
 
+    def load_previous_report_snapshot(
+        self,
+        period: Mapping[str, Any],
+        customer: Mapping[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest comparable report that ended before this period.
+
+        The lookup is tenant, cloud-account, environment and report-type
+        scoped. A rerun of the same period therefore cannot accidentally use
+        itself as the comparison baseline.
+        """
+        tenant_id = self.settings.tenant_id
+        cloud_account_id = customer.get("cloud_account_id")
+        environment = str(customer.get("api_type") or "public").casefold()
+        if (
+            not tenant_id
+            or not cloud_account_id
+            or environment not in self.SCHEMAS
+        ):
+            return None
+
+        period_start, _, _ = self._period_bounds(period)
+        report_type = self._report_type(period)
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabasePersistenceError(
+                "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        schema = self.SCHEMAS[environment]
+        try:
+            with psycopg.connect(
+                **self.settings.connection_kwargs()
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
+                cursor.execute(
+                    f"""
+                    SELECT snapshot.normalized_data, report_run.id,
+                           report_run.period_start, report_run.period_end,
+                           report_run.completed_at
+                    FROM {schema}.report_snapshots snapshot
+                    JOIN control.report_runs report_run
+                      ON report_run.id = snapshot.report_run_id
+                     AND report_run.tenant_id = snapshot.tenant_id
+                    WHERE snapshot.tenant_id = %s
+                      AND report_run.cloud_account_id = %s
+                      AND report_run.environment = %s
+                      AND report_run.report_type = %s
+                      AND report_run.status IN ('SUCCESS', 'PARTIAL_SUCCESS')
+                      AND report_run.period_end <= %s
+                      AND jsonb_typeof(snapshot.normalized_data) = 'object'
+                    ORDER BY report_run.period_end DESC,
+                             report_run.completed_at DESC NULLS LAST,
+                             report_run.id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        str(tenant_id),
+                        str(cloud_account_id),
+                        environment,
+                        report_type,
+                        period_start,
+                    ),
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            raise DatabasePersistenceError(
+                "Previous report comparison lookup failed."
+            ) from exc
+
+        if not row or not isinstance(row[0], dict):
+            return None
+        result = dict(row[0])
+        result["_comparison_reference"] = {
+            "report_run_id": str(row[1]),
+            "period_start": self._parse_datetime(row[2]).isoformat(),
+            "period_end": self._parse_datetime(row[3]).isoformat(),
+            "completed_at": (
+                self._parse_datetime(row[4]).isoformat()
+                if row[4] is not None
+                else None
+            ),
+        }
+        return result
+
+    def load_active_policy_exceptions(
+        self,
+        customer: Mapping[str, Any],
+    ) -> list[Dict[str, Any]]:
+        """Load unexpired tenant exceptions for the report worker."""
+        tenant_id = self.settings.tenant_id
+        cloud_account_id = customer.get("cloud_account_id")
+        environment = str(customer.get("api_type") or "public").casefold()
+        if not tenant_id or environment not in self.SCHEMAS:
+            return []
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabasePersistenceError(
+                "PostgreSQL support is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+        try:
+            with psycopg.connect(
+                **self.settings.connection_kwargs()
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
+                cursor.execute(
+                    "SELECT set_config('app.environment_scope', %s, true)",
+                    (environment,),
+                )
+                cursor.execute(
+                    """
+                    SELECT id, cloud_account_id, rule_id, resource_id,
+                           reason, expires_at
+                    FROM control.policy_exceptions
+                    WHERE tenant_id = %s
+                      AND environment = %s
+                      AND (cloud_account_id IS NULL OR cloud_account_id = %s)
+                      AND active
+                      AND expires_at > clock_timestamp()
+                    ORDER BY expires_at, id
+                    """,
+                    (str(tenant_id), environment, cloud_account_id),
+                )
+                columns = (
+                    "id", "cloud_account_id", "rule_id", "resource_id",
+                    "reason", "expires_at",
+                )
+                return [
+                    (
+                        {name: row.get(name) for name in columns}
+                        if isinstance(row, Mapping)
+                        else dict(zip(columns, row))
+                    )
+                    for row in cursor.fetchall()
+                ]
+        except Exception as exc:
+            raise DatabasePersistenceError(
+                "Policy exception lookup failed."
+            ) from exc
+
     def _snapshot_eligibility_window(
         self,
         period: Mapping[str, Any],
@@ -414,7 +583,7 @@ class PostgresReportRepository:
                 attempt_count, error_count, started_at, completed_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                '1.4', '1.4', '1.4', %s, 1, %s, clock_timestamp(), clock_timestamp()
+                '1.5', '1.5', '1.5', %s, 1, %s, clock_timestamp(), clock_timestamp()
             )
             ON CONFLICT (idempotency_key) DO UPDATE SET
                 period_start = EXCLUDED.period_start,
@@ -506,7 +675,7 @@ class PostgresReportRepository:
                 report_run_id, tenant_id, schema_version, normalized_data,
                 content_hash_sha256, collector_version, normalizer_version,
                 renderer_version
-            ) VALUES (%s, %s, '1.4', %s::jsonb, %s, '1.4', '1.4', '1.4')
+            ) VALUES (%s, %s, '1.5', %s::jsonb, %s, '1.5', '1.5', '1.5')
             """,
             (
                 report_run_id,
@@ -527,6 +696,9 @@ class PostgresReportRepository:
             cursor, schema, report, report_run_id, tenant_id
         )
         self._insert_activity_events(
+            cursor, schema, report, report_run_id, tenant_id
+        )
+        self._insert_metric_series(
             cursor, schema, report, report_run_id, tenant_id
         )
         self._insert_metric_summaries(
@@ -831,6 +1003,198 @@ class PostgresReportRepository:
                     ),
                 )
 
+    def _insert_metric_series(
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+    ) -> None:
+        """Persist sanitized chart points used by deterministic analysis.
+
+        Raw provider responses may contain fields that are unnecessary for
+        reporting. Only timestamp/value pairs and allowlisted dimensions are
+        copied to the normalized metric table.
+        """
+        period_start, period_end, _ = self._period_bounds(report.period)
+        for metric in report.server_metrics:
+            if not isinstance(metric, Mapping):
+                continue
+            resource_id = self._text(metric.get("server_id"), 255)
+            raw_metrics = metric.get("raw_metrics")
+            if not resource_id or not isinstance(raw_metrics, Mapping):
+                continue
+            for metric_name, statistics in raw_metrics.items():
+                if not isinstance(statistics, Mapping):
+                    continue
+                entries = statistics.get("avg")
+                if not isinstance(entries, list):
+                    entries = next(
+                        (
+                            value
+                            for value in statistics.values()
+                            if isinstance(value, list)
+                        ),
+                        [],
+                    )
+                for entry in entries:
+                    if not isinstance(entry, Mapping):
+                        continue
+                    dimensions = self._safe_metric_dimensions(
+                        entry.get("dimensions")
+                    )
+                    raw = entry.get("raw")
+                    raw_points = (
+                        raw.get("dps") if isinstance(raw, Mapping) else None
+                    )
+                    points = self._normalized_metric_points(raw_points)
+                    if not points:
+                        continue
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {schema}.metric_series (
+                            report_run_id, tenant_id, resource_id,
+                            resource_name, metric_group, metric_name,
+                            dimensions, interval_name, aggregation,
+                            period_start, period_end, points, point_count
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s::jsonb,
+                            %s, %s, %s, %s, %s::jsonb, %s
+                        )
+                        """,
+                        (
+                            report_run_id,
+                            tenant_id,
+                            resource_id,
+                            self._text(metric.get("server_name"), 500),
+                            self._server_metric_group(
+                                str(metric_name), dimensions
+                            ),
+                            self._text(metric_name, 255) or "unknown",
+                            self._json(dimensions),
+                            self._text(raw.get("interval"), 30)
+                            if isinstance(raw, Mapping)
+                            else None,
+                            "AVG",
+                            period_start,
+                            period_end,
+                            self._json(points),
+                            len(points),
+                        ),
+                    )
+
+        for group in report.infrastructure_metrics:
+            if not isinstance(group, Mapping):
+                continue
+            metric_name = self._text(group.get("metric"), 255)
+            if not metric_name:
+                continue
+            for series in group.get("series") or []:
+                if not isinstance(series, Mapping):
+                    continue
+                resource_id = self._text(series.get("resource_id"), 255)
+                points = self._normalized_metric_points(series.get("points"))
+                if not resource_id or not points:
+                    continue
+                dimensions = self._safe_metric_dimensions(
+                    series.get("dimensions")
+                )
+                dimensions.update({
+                    key: value
+                    for key, value in {
+                        "category": self._text(group.get("category"), 80),
+                        "product": self._text(group.get("product"), 120),
+                        "unit": self._text(group.get("unit"), 40),
+                    }.items()
+                    if value
+                })
+                cursor.execute(
+                    f"""
+                    INSERT INTO {schema}.metric_series (
+                        report_run_id, tenant_id, resource_id,
+                        resource_name, metric_group, metric_name,
+                        dimensions, interval_name, aggregation,
+                        period_start, period_end, points, point_count
+                    ) VALUES (
+                        %s, %s, %s, %s, 'OTHER', %s, %s::jsonb,
+                        %s, %s, %s, %s, %s::jsonb, %s
+                    )
+                    """,
+                    (
+                        report_run_id,
+                        tenant_id,
+                        resource_id,
+                        self._text(series.get("resource_name"), 500),
+                        metric_name,
+                        self._json(dimensions),
+                        self._text(group.get("interval"), 30),
+                        self._text(group.get("aggregation"), 30),
+                        period_start,
+                        period_end,
+                        self._json(points),
+                        len(points),
+                    ),
+                )
+
+    @staticmethod
+    def _safe_metric_dimensions(value: Any) -> Dict[str, Any]:
+        if not isinstance(value, Mapping):
+            return {}
+        allowed = {
+            "instanceNo",
+            "mnt_nm",
+            "mount",
+            "role",
+            "nodeRole",
+            "targetGroupNo",
+            "loadBalancerInstanceNo",
+        }
+        return {
+            str(key)[:80]: str(item)[:500]
+            for key, item in value.items()
+            if str(key) in allowed and item not in (None, "")
+        }
+
+    @staticmethod
+    def _normalized_metric_points(value: Any) -> list[list[float | int]]:
+        if not isinstance(value, list):
+            return []
+        points: dict[int, float] = {}
+        for point in value:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                timestamp = int(float(point[0]))
+                metric_value = float(point[1])
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if timestamp < 0 or not (-1e300 < metric_value < 1e300):
+                continue
+            points[timestamp] = metric_value
+        return [
+            [timestamp, points[timestamp]] for timestamp in sorted(points)
+        ]
+
+    @staticmethod
+    def _server_metric_group(
+        metric_name: str,
+        dimensions: Mapping[str, Any],
+    ) -> str:
+        normalized = metric_name.strip().casefold()
+        if normalized == "used_rto":
+            return "CPU"
+        if normalized == "mem_usert":
+            return "MEM"
+        if normalized == "fs_usert":
+            mount = str(
+                dimensions.get("mnt_nm") or dimensions.get("mount") or ""
+            ).replace("\\", "/").rstrip("/")
+            if mount in {"", "/"} or mount.casefold().startswith("c:"):
+                return "ROOT_DISK"
+            return "DATA_DISK"
+        return "OTHER"
+
     def _insert_cost_details(
         self, cursor: Any, schema: str, report: ReportResult,
         report_run_id: Any, tenant_id: Any,
@@ -1062,12 +1426,46 @@ class PostgresReportRepository:
 
     def _upsert_daily_fact(
         self, cursor: Any, report: ReportResult, report_run_id: Any,
-        tenant_id: Any, environment: str,
+        tenant_id: Any, environment: str, cloud_account_id: Any,
     ) -> None:
         insight = [event for event in report.insight_events if isinstance(event, dict)]
-        levels = [str(event.get("level") or "").upper() for event in insight]
+        insight_levels = [
+            str(event.get("level") or "").upper() for event in insight
+        ]
+        analysis = (
+            report.analysis if isinstance(report.analysis, Mapping) else {}
+        )
+        active_findings = [
+            finding
+            for finding in analysis.get("findings") or []
+            if isinstance(finding, Mapping)
+            and finding.get("status") != "EXCEPTION"
+            and finding.get("category") != "DATA_QUALITY"
+        ]
+        finding_levels = [
+            str(finding.get("severity") or "").upper()
+            for finding in active_findings
+        ]
+        levels = finding_levels if analysis else insight_levels
+        quality = (
+            analysis.get("data_quality")
+            if isinstance(analysis.get("data_quality"), Mapping)
+            else {}
+        )
+        quality_status = str(
+            quality.get("overall_status") or ""
+        ).upper()
+        if quality_status == "COMPLETE":
+            collection_status = "SUCCESS"
+        elif quality_status == "FAILED":
+            collection_status = "FAILED"
+        elif quality_status:
+            collection_status = "PARTIAL_SUCCESS"
+        else:
+            collection_status = (
+                "PARTIAL_SUCCESS" if report.collection_errors else "SUCCESS"
+            )
         activities = list(self._event_records(report.activity_events))
-        billing_summary = report.billing.get("summary", {}) if isinstance(report.billing, dict) else {}
         billing = report.billing if isinstance(report.billing, dict) else {}
         period_estimate = billing.get("period_estimate", {})
         month_to_date_estimate = billing.get("month_to_date_estimate", {})
@@ -1085,15 +1483,24 @@ class PostgresReportRepository:
             or invoice_summary.get("confidence")
             or "UNAVAILABLE"
         )
+        fact_date = self._period_bounds(report.period)[0].date()
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"daily-fact:{tenant_id}:{fact_date.isoformat()}",),
+        )
         cursor.execute(
             """
-            INSERT INTO control.daily_customer_facts (
-                tenant_id, fact_date, environment, latest_report_run_id,
+            INSERT INTO control.daily_account_facts (
+                tenant_id, cloud_account_id, fact_date, environment,
+                latest_report_run_id,
                 collection_status, server_count, critical_count, warning_count,
                 info_count, activity_failure_count, collection_error_count,
                 estimated_cost, confirmed_cost, cost_confidence
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (tenant_id, fact_date) DO UPDATE SET
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (tenant_id, cloud_account_id, fact_date) DO UPDATE SET
                 latest_report_run_id = EXCLUDED.latest_report_run_id,
                 collection_status = EXCLUDED.collection_status,
                 server_count = EXCLUDED.server_count,
@@ -1108,8 +1515,9 @@ class PostgresReportRepository:
                 updated_at = clock_timestamp()
             """,
             (
-                tenant_id, self._period_bounds(report.period)[0].date(), environment,
-                report_run_id, "PARTIAL_SUCCESS" if report.collection_errors else "SUCCESS",
+                tenant_id, cloud_account_id,
+                fact_date, environment,
+                report_run_id, collection_status,
                 len(report.servers), levels.count("CRITICAL"), levels.count("WARNING"),
                 levels.count("INFO"),
                 sum(
@@ -1119,6 +1527,304 @@ class PostgresReportRepository:
                 ),
                 len(report.collection_errors), active_estimate.get("total_amount"),
                 invoice_summary.get("total_amount"), confidence,
+            ),
+        )
+        # 구버전 코드 원복 호환을 위해 기존 고객/일자 사실 테이블의 키와
+        # 쓰기 계약은 유지하고, 새 계정별 사실을 합산한 값만 갱신한다.
+        cursor.execute(
+            """
+            INSERT INTO control.daily_customer_facts (
+                tenant_id, fact_date, environment, latest_report_run_id,
+                collection_status, server_count, critical_count, warning_count,
+                info_count, activity_failure_count, collection_error_count,
+                estimated_cost, confirmed_cost, cost_confidence
+            )
+            SELECT
+                tenant_id,
+                fact_date,
+                environment,
+                (
+                    array_agg(
+                        latest_report_run_id ORDER BY updated_at DESC
+                    ) FILTER (WHERE latest_report_run_id IS NOT NULL)
+                )[1],
+                CASE
+                    WHEN bool_or(collection_status = 'FAILED') THEN 'FAILED'
+                    WHEN bool_or(
+                        collection_status IS DISTINCT FROM 'SUCCESS'
+                    ) THEN 'PARTIAL_SUCCESS'
+                    ELSE 'SUCCESS'
+                END,
+                sum(server_count)::integer,
+                sum(critical_count)::integer,
+                sum(warning_count)::integer,
+                sum(info_count)::integer,
+                sum(activity_failure_count)::integer,
+                sum(collection_error_count)::integer,
+                sum(estimated_cost),
+                sum(confirmed_cost),
+                CASE
+                    WHEN bool_or(cost_confidence = 'UNAVAILABLE')
+                        THEN 'UNAVAILABLE'
+                    WHEN bool_or(cost_confidence = 'PARTIAL') THEN 'PARTIAL'
+                    WHEN bool_or(cost_confidence = 'VERIFIED_ESTIMATE')
+                        THEN 'VERIFIED_ESTIMATE'
+                    WHEN bool_or(cost_confidence = 'CONFIRMED')
+                        THEN 'CONFIRMED'
+                    ELSE NULL
+                END
+            FROM control.daily_account_facts
+            WHERE tenant_id = %s AND fact_date = %s
+            GROUP BY tenant_id, fact_date, environment
+            ON CONFLICT (tenant_id, fact_date) DO UPDATE SET
+                environment = EXCLUDED.environment,
+                latest_report_run_id = EXCLUDED.latest_report_run_id,
+                collection_status = EXCLUDED.collection_status,
+                server_count = EXCLUDED.server_count,
+                critical_count = EXCLUDED.critical_count,
+                warning_count = EXCLUDED.warning_count,
+                info_count = EXCLUDED.info_count,
+                activity_failure_count = EXCLUDED.activity_failure_count,
+                collection_error_count = EXCLUDED.collection_error_count,
+                estimated_cost = EXCLUDED.estimated_cost,
+                confirmed_cost = EXCLUDED.confirmed_cost,
+                cost_confidence = EXCLUDED.cost_confidence,
+                updated_at = clock_timestamp()
+            """,
+            (tenant_id, fact_date),
+        )
+
+    def _upsert_analysis_cases(
+        self,
+        cursor: Any,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+        environment: str,
+        cloud_account_id: Any,
+    ) -> None:
+        """Create or refresh actionable cases from active deterministic findings."""
+        analysis = report.analysis if isinstance(report.analysis, Mapping) else {}
+        report_type = self._report_type(report.period)
+        current_source_event_ids: list[str] = []
+        for finding in analysis.get("findings") or []:
+            if not isinstance(finding, Mapping):
+                continue
+            fingerprint = self._text(finding.get("fingerprint"), 255)
+            source_event_id = (
+                self._text(
+                    f"{cloud_account_id}:{report_type}:{fingerprint}",
+                    255,
+                )
+                if fingerprint
+                else None
+            )
+            if source_event_id:
+                current_source_event_ids.append(source_event_id)
+            if finding.get("status") == "EXCEPTION":
+                continue
+            severity = str(finding.get("severity") or "INFO").upper()
+            if severity not in {"CRITICAL", "WARNING"}:
+                continue
+            title = self._text(finding.get("title"), 4000)
+            if not fingerprint or not title:
+                continue
+            resource = (
+                finding.get("resource")
+                if isinstance(finding.get("resource"), Mapping)
+                else {}
+            )
+            occurred_at = self._period_bounds(report.period)[1]
+            cursor.execute(
+                """
+                INSERT INTO control.event_cases (
+                    tenant_id, cloud_account_id, environment,
+                    report_type, source_type, source_event_id,
+                    occurred_at, severity, title, latest_report_run_id,
+                    rule_id, resource_id, category, evidence, impact,
+                    recommendation, priority, first_detected_at,
+                    last_detected_at, occurrence_count
+                ) VALUES (
+                    %s, %s, %s, %s, 'ANALYSIS', %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s::jsonb, %s, %s, %s,
+                    clock_timestamp(), clock_timestamp(), 1
+                )
+                ON CONFLICT (tenant_id, source_type, source_event_id)
+                DO UPDATE SET
+                    cloud_account_id = EXCLUDED.cloud_account_id,
+                    latest_report_run_id = EXCLUDED.latest_report_run_id,
+                    occurred_at = EXCLUDED.occurred_at,
+                    severity = EXCLUDED.severity,
+                    title = EXCLUDED.title,
+                    rule_id = EXCLUDED.rule_id,
+                    resource_id = EXCLUDED.resource_id,
+                    category = EXCLUDED.category,
+                    evidence = EXCLUDED.evidence,
+                    impact = EXCLUDED.impact,
+                    recommendation = EXCLUDED.recommendation,
+                    priority = EXCLUDED.priority,
+                    last_detected_at = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                            THEN clock_timestamp()
+                        ELSE control.event_cases.last_detected_at
+                    END,
+                    occurrence_count = control.event_cases.occurrence_count
+                        + CASE
+                            WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                                THEN 1
+                            ELSE 0
+                          END,
+                    status = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                         AND control.event_cases.status IN (
+                             'RESOLVED', 'IGNORED', 'NOT_DETECTED'
+                         )
+                            THEN 'NEW'
+                        ELSE control.event_cases.status
+                    END,
+                    acknowledged_by = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                         AND control.event_cases.status IN (
+                             'RESOLVED', 'IGNORED', 'NOT_DETECTED'
+                         )
+                            THEN NULL
+                        ELSE control.event_cases.acknowledged_by
+                    END,
+                    acknowledged_at = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                         AND control.event_cases.status IN (
+                             'RESOLVED', 'IGNORED', 'NOT_DETECTED'
+                         )
+                            THEN NULL
+                        ELSE control.event_cases.acknowledged_at
+                    END,
+                    resolved_by = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                         AND control.event_cases.status IN (
+                             'RESOLVED', 'IGNORED', 'NOT_DETECTED'
+                         )
+                            THEN NULL
+                        ELSE control.event_cases.resolved_by
+                    END,
+                    resolved_at = CASE
+                        WHEN EXCLUDED.occurred_at > control.event_cases.occurred_at
+                         AND control.event_cases.status IN (
+                             'RESOLVED', 'IGNORED', 'NOT_DETECTED'
+                         )
+                            THEN NULL
+                        ELSE control.event_cases.resolved_at
+                    END
+                WHERE EXCLUDED.occurred_at >= control.event_cases.occurred_at
+                """,
+                (
+                    tenant_id,
+                    cloud_account_id,
+                    environment,
+                    report_type,
+                    source_event_id,
+                    occurred_at,
+                    severity,
+                    title,
+                    report_run_id,
+                    self._text(finding.get("rule_id"), 120),
+                    self._text(resource.get("id"), 500),
+                    self._text(finding.get("category"), 50),
+                    self._json(finding.get("evidence") or []),
+                    self._text(finding.get("impact"), 4000),
+                    self._text(finding.get("recommendation"), 4000),
+                    "P1" if severity == "CRITICAL" else "P2",
+                ),
+            )
+
+        self._mark_missing_analysis_cases(
+            cursor,
+            report,
+            tenant_id,
+            cloud_account_id,
+            report_type,
+            current_source_event_ids,
+        )
+
+    def _mark_missing_analysis_cases(
+        self,
+        cursor: Any,
+        report: ReportResult,
+        tenant_id: Any,
+        cloud_account_id: Any,
+        report_type: str,
+        current_source_event_ids: list[str],
+    ) -> None:
+        """완전 수집된 데이터셋에서 사라진 경고만 미탐지로 전환한다."""
+        analysis = report.analysis if isinstance(report.analysis, Mapping) else {}
+        quality = (
+            analysis.get("data_quality")
+            if isinstance(analysis.get("data_quality"), Mapping)
+            else {}
+        )
+        statuses = {
+            str(item.get("key") or ""): str(
+                item.get("status") or ""
+            ).upper()
+            for item in quality.get("datasets") or []
+            if isinstance(item, Mapping)
+        }
+        complete = {
+            key
+            for key, status in statuses.items()
+            if status in {"AVAILABLE", "COLLECTED_EMPTY"}
+        }
+        prefix_by_dataset = {
+            "monitoring": ("METRIC_%",),
+            "service_availability": ("WMS_%",),
+            "insight_events": ("INSIGHT_%",),
+            "activity_events": ("ACTIVITY_%",),
+            "billing": ("COST_%",),
+            "security_events": ("SECURITY_%",),
+            "infrastructure": (
+                "BLOCK_STORAGE_%",
+                "KUBERNETES_%",
+                "PUBLIC_IP_%",
+                "RESOURCE_%",
+                "GOVERNANCE_%",
+            ),
+        }
+        rule_prefixes = [
+            prefix
+            for dataset in complete
+            for prefix in prefix_by_dataset.get(dataset, ())
+        ]
+        if not rule_prefixes and not complete:
+            return
+
+        cursor.execute(
+            """
+            UPDATE control.event_cases
+            SET status = 'NOT_DETECTED',
+                resolved_by = NULL,
+                resolved_at = clock_timestamp()
+            WHERE tenant_id = %s
+              AND cloud_account_id = %s
+              AND report_type = %s
+              AND source_type = 'ANALYSIS'
+              AND occurred_at <= %s
+              AND status IN ('NEW', 'ACKNOWLEDGED', 'IN_PROGRESS')
+              AND (
+                  rule_id LIKE ANY(%s)
+                  OR (
+                      category = 'DATA_QUALITY'
+                      AND resource_id = ANY(%s)
+                  )
+              )
+              AND NOT (source_event_id = ANY(%s))
+            """,
+            (
+                tenant_id,
+                cloud_account_id,
+                report_type,
+                self._period_bounds(report.period)[1],
+                rule_prefixes,
+                sorted(complete),
+                current_source_event_ids,
             ),
         )
 

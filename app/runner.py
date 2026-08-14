@@ -9,6 +9,7 @@ from app.network_configuration import (
     snapshot_categories,
 )
 from app.report_models import ReportResult
+from app.report_analysis import analyze_report
 from app.report_options import (
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     ReportOptions,
@@ -34,6 +35,8 @@ from collectors import (
     InfrastructureCollector,
     InfrastructureMetricCollector,
     OrganizationCollector,
+    SecurityMonitoringCollector,
+    WMSCollector,
 )
 from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
@@ -53,6 +56,13 @@ from zoneinfo import ZoneInfo
 
 class ReportRunner:
     KST = ZoneInfo("Asia/Seoul")
+
+    @staticmethod
+    def _operational_analysis_feature_enabled() -> bool:
+        value = os.getenv("REPORT_OPERATIONAL_ANALYSIS_ENABLED")
+        if value is None:
+            return True
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
 
     def __init__(
         self,
@@ -206,6 +216,14 @@ class ReportRunner:
     ) -> Dict[str, Any]:
         start_dt = f"{start:%Y-%m-%d} 00:00:00"
         end_dt = f"{end:%Y-%m-%d} 23:59:59"
+        # 기간 API는 밀리초 단위의 포함 종료값을 사용한다. 날짜형
+        # 보고서의 마지막 999ms도 빠지지 않도록 다음 날 0시 직전으로
+        # 계산하되, 사람이 읽는 종료 표시는 기존의 23:59:59를 유지한다.
+        end_exclusive = datetime.combine(
+            end + timedelta(days=1),
+            datetime.min.time(),
+            tzinfo=self.KST,
+        )
         is_full_month = (
             start.year == end.year
             and start.month == end.month
@@ -220,7 +238,7 @@ class ReportRunner:
             "start_dt": start_dt,
             "end_dt": end_dt,
             "start_time": get_unix_time_stamp(start_dt),
-            "end_time": get_unix_time_stamp(end_dt),
+            "end_time": int(end_exclusive.timestamp() * 1000) - 1,
             "use_start_date": f"{start:%Y%m%d}",
             "use_end_date": f"{end:%Y%m%d}",
             "billing_month": f"{start:%Y%m}",
@@ -1140,6 +1158,95 @@ class ReportRunner:
                 getattr(activity_collector, "last_errors", [])
             )
 
+        service_availability: Dict[str, Any] = {}
+        security_monitoring: Dict[str, Any] = {}
+        dataset_statuses: List[Dict[str, Any]] = []
+        operational_source_errors: List[Dict[str, Any]] = []
+        if (
+            self._operational_analysis_feature_enabled()
+            and report_options.analysis_enabled()
+        ):
+            if report_options.analysis_collector_enabled("wms"):
+                wms_collector = WMSCollector(api_factory=self.api_factory)
+                scenarios = wms_collector.collect(
+                    start_time=period["start_time"],
+                    end_time=period["end_time"],
+                    aggregation=self._wms_aggregation(period),
+                )
+                wms_errors = list(wms_collector.last_errors)
+                operational_source_errors.extend(wms_errors)
+                service_availability = {
+                    "source": "NCP_WMS",
+                    "status": wms_collector.last_dataset_status,
+                    "aggregation": self._wms_aggregation(period),
+                    "scenarios": scenarios,
+                    "observation_count": self._wms_observation_count(
+                        scenarios
+                    ),
+                    "error_count": len(wms_errors),
+                }
+                dataset_statuses.append({
+                    "key": "service_availability",
+                    "label": "서비스 가용성(WMS)",
+                    "status": wms_collector.last_dataset_status,
+                    "record_count": self._wms_observation_count(scenarios),
+                    "error_count": len(wms_errors),
+                    "source": "NCP_WMS",
+                })
+            else:
+                dataset_statuses.append({
+                    "key": "service_availability",
+                    "label": "서비스 가용성(WMS)",
+                    "status": "NOT_REQUESTED",
+                    "record_count": 0,
+                    "error_count": 0,
+                    "reason": "고객 보고서 설정에서 수집하지 않도록 지정했습니다.",
+                })
+
+            if report_options.analysis_collector_enabled(
+                "security_monitoring"
+            ):
+                security_collector = SecurityMonitoringCollector(
+                    api_factory=self.api_factory
+                )
+                security_events = security_collector.collect(
+                    start_time=period["start_time"],
+                    end_time=period["end_time"],
+                )
+                security_errors = list(security_collector.last_errors)
+                operational_source_errors.extend(security_errors)
+                security_monitoring = {
+                    "source": "NCP_SECURITY_MONITORING",
+                    "scope": "VPC",
+                    "status": security_collector.last_dataset_status,
+                    "service_statuses": dict(
+                        security_collector.last_service_statuses
+                    ),
+                    "events": security_events,
+                    "error_count": len(security_errors),
+                }
+                dataset_statuses.append({
+                    "key": "security_events",
+                    "label": "Security Monitoring(VPC)",
+                    "status": security_collector.last_dataset_status,
+                    "record_count": len(security_events),
+                    "error_count": len(security_errors),
+                    "source": "NCP_SECURITY_MONITORING",
+                    "scope": "VPC",
+                    "service_statuses": dict(
+                        security_collector.last_service_statuses
+                    ),
+                })
+            else:
+                dataset_statuses.append({
+                    "key": "security_events",
+                    "label": "Security Monitoring(VPC)",
+                    "status": "NOT_REQUESTED",
+                    "record_count": 0,
+                    "error_count": 0,
+                    "reason": "고객 보고서 설정에서 수집하지 않도록 지정했습니다.",
+                })
+
         insight_errors = self._merge_error_lists(
             server_metric_errors,
             insight_event_errors,
@@ -1150,7 +1257,11 @@ class ReportRunner:
             insight_events=insight_events,
             grouped_insight_events=grouped_insight_events,
             activity_events=activity_events,
+            service_availability=service_availability,
+            security_monitoring=security_monitoring,
+            dataset_statuses=dataset_statuses,
             activity_errors=activity_errors,
+            operational_source_errors=operational_source_errors,
             insight_event_errors=insight_event_errors,
             insight_errors=insight_errors,
             errors=self._merge_error_lists(
@@ -1158,12 +1269,344 @@ class ReportRunner:
                 insight_errors,
                 infrastructure_metric_errors,
                 activity_errors,
+                operational_source_errors,
             ),
             warnings=self._merge_error_lists(
                 *base_warnings,
                 infrastructure_metric_warnings,
             ),
         )
+
+    @staticmethod
+    def _wms_aggregation(period: Dict[str, Any]) -> str:
+        try:
+            duration_ms = int(period["end_time"]) - int(period["start_time"])
+        except (KeyError, TypeError, ValueError):
+            return "MIN5"
+        duration_days = max(duration_ms, 0) / 86_400_000
+        if duration_days > 7:
+            return "HOUR2"
+        if duration_days > 2:
+            return "MIN30"
+        return "MIN5"
+
+    def _load_analysis_baseline(
+        self,
+        *,
+        period: Dict[str, Any],
+        customer: Dict[str, Any],
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        repository = getattr(self, "report_repository", None)
+        loader = getattr(repository, "load_previous_report_snapshot", None)
+        if not callable(loader):
+            return None, None
+        try:
+            return loader(period, customer), None
+        except Exception as exc:
+            return None, {
+                "collector": "OperationalAnalysis",
+                "stage": "comparison_baseline",
+                "target_type": "previous_report",
+                "api": "PostgreSQL/report_snapshots",
+                "exception_type": type(exc).__name__,
+                "message": (
+                    "이전 보고서 비교 기준을 불러오지 못해 현재 기간만 "
+                    "분석했습니다."
+                ),
+            }
+
+    def _load_analysis_exceptions(
+        self,
+        *,
+        customer: Dict[str, Any],
+    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        repository = getattr(self, "report_repository", None)
+        loader = getattr(repository, "load_active_policy_exceptions", None)
+        if not callable(loader):
+            return [], None
+        try:
+            return list(loader(customer) or []), None
+        except Exception as exc:
+            return [], {
+                "collector": "OperationalAnalysis",
+                "stage": "policy_exception_lookup",
+                "target_type": "policy_exception",
+                "api": "PostgreSQL/policy_exceptions",
+                "exception_type": type(exc).__name__,
+                "message": (
+                    "정책 예외 목록을 불러오지 못해 예외를 적용하지 않았습니다."
+                ),
+            }
+
+    @staticmethod
+    def _analysis_policy(report_options: ReportOptions) -> Dict[str, Any]:
+        configured = report_options.operational_analysis
+        thresholds = configured.get("thresholds") or {}
+        sustained_seconds = int(
+            thresholds.get("sustained_minutes") or 15
+        ) * 60
+        return {
+            "thresholds": {
+                "CPU": {
+                    "warning": thresholds.get(
+                        "cpu_warning_percent", 80.0
+                    ),
+                    "critical": thresholds.get(
+                        "cpu_critical_percent", 90.0
+                    ),
+                    "duration_seconds": sustained_seconds,
+                },
+                "MEMORY": {
+                    "warning": thresholds.get(
+                        "memory_warning_percent", 85.0
+                    ),
+                    "critical": thresholds.get(
+                        "memory_critical_percent", 95.0
+                    ),
+                    "duration_seconds": sustained_seconds,
+                },
+                "FILESYSTEM": {
+                    "warning": thresholds.get(
+                        "disk_warning_percent", 85.0
+                    ),
+                    "critical": thresholds.get(
+                        "disk_critical_percent", 90.0
+                    ),
+                    "duration_seconds": sustained_seconds,
+                },
+                "cost_increase_warning_percent": thresholds.get(
+                    "cost_increase_warning_percent", 20.0
+                ),
+                "availability_warning_percent": thresholds.get(
+                    "availability_warning_percent", 99.0
+                ),
+                "availability_critical_percent": thresholds.get(
+                    "availability_critical_percent", 95.0
+                ),
+                "response_time_warning_ms": thresholds.get(
+                    "response_time_warning_ms", 3000.0
+                ),
+            },
+            "policies": configured.get("policies") or {},
+        }
+
+    @staticmethod
+    def _wms_observation_count(
+        scenarios: List[Dict[str, Any]],
+    ) -> int:
+        count = 0
+        for scenario in scenarios:
+            if not isinstance(scenario, dict):
+                continue
+            raw_total = scenario.get("total_count")
+            try:
+                count += (
+                    max(int(raw_total), 0)
+                    if raw_total is not None
+                    else len(scenario.get("results") or [])
+                )
+            except (TypeError, ValueError):
+                count += len(scenario.get("results") or [])
+        return count
+
+    @staticmethod
+    def _dataset_status_entry(
+        *,
+        key: str,
+        label: str,
+        requested: bool,
+        record_count: int,
+        errors: List[Dict[str, Any]],
+        warnings: Optional[List[Dict[str, Any]]] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        warnings = warnings or []
+        if not requested:
+            status = "NOT_REQUESTED"
+            reason = "고객 보고서 설정에서 수집하지 않도록 지정했습니다."
+        elif errors and record_count:
+            status = "PARTIAL"
+            reason = "일부 결과는 수집했으나 관련 오류가 있습니다."
+        elif errors:
+            status = "FAILED"
+            reason = "관련 수집 오류로 사용할 수 있는 결과가 없습니다."
+        elif warnings:
+            status = "PARTIAL"
+            reason = "수집 결과는 있으나 범위 또는 최신성 경고가 있습니다."
+        elif record_count:
+            status = "COLLECTED"
+            reason = "요청한 범위의 수집 결과가 있습니다."
+        else:
+            status = "COLLECTED_EMPTY"
+            reason = "수집은 완료되었으나 결과가 0건입니다."
+        return {
+            "key": key,
+            "label": label,
+            "status": status,
+            "record_count": max(int(record_count), 0),
+            "error_count": len(errors),
+            "warning_count": len(warnings),
+            "reason": reason,
+            **({"source": source} if source else {}),
+        }
+
+    @staticmethod
+    def _monitoring_observation_count(
+        server_metrics: List[Dict[str, Any]],
+        infrastructure_metrics: List[Dict[str, Any]],
+    ) -> int:
+        count = 0
+        for metric in server_metrics:
+            raw_metrics = metric.get("raw_metrics")
+            if not isinstance(raw_metrics, dict):
+                continue
+            for statistics in raw_metrics.values():
+                if not isinstance(statistics, dict):
+                    continue
+                for entries in statistics.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        raw = entry.get("raw")
+                        if isinstance(raw, dict) and isinstance(
+                            raw.get("dps"), list
+                        ):
+                            count += len(raw["dps"])
+                        elif isinstance(entry.get("values"), list):
+                            count += len(entry["values"])
+        for group in infrastructure_metrics:
+            if not isinstance(group, dict):
+                continue
+            for series in group.get("series") or []:
+                if isinstance(series, dict) and isinstance(
+                    series.get("points"), list
+                ):
+                    count += len(series["points"])
+        return count
+
+    @staticmethod
+    def _grouped_record_count(value: Any) -> int:
+        if isinstance(value, list):
+            return sum(isinstance(item, dict) for item in value)
+        if isinstance(value, dict):
+            return sum(
+                ReportRunner._grouped_record_count(item)
+                for item in value.values()
+            )
+        return 0
+
+    @staticmethod
+    def _issues_matching(
+        issues: List[Dict[str, Any]], *tokens: str
+    ) -> List[Dict[str, Any]]:
+        normalized_tokens = tuple(token.casefold() for token in tokens)
+        result = []
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            haystack = " ".join(
+                str(issue.get(name) or "").casefold()
+                for name in (
+                    "collector", "stage", "target_type", "api", "service_name"
+                )
+            )
+            if any(token in haystack for token in normalized_tokens):
+                result.append(issue)
+        return result
+
+    @staticmethod
+    def _billing_available_fact_count(billing: Dict[str, Any]) -> int:
+        count = 0
+        for name in (
+            "invoice_summary",
+            "period_estimate",
+            "month_to_date_estimate",
+            "month_end_projection",
+        ):
+            fact = billing.get(name)
+            if isinstance(fact, dict) and fact.get("status") == "AVAILABLE":
+                count += 1
+        return count
+
+    @staticmethod
+    def _apply_analysis_exceptions(
+        analysis: Dict[str, Any],
+        exceptions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not exceptions:
+            return analysis
+        for finding in analysis.get("findings") or []:
+            if not isinstance(finding, dict):
+                continue
+            resource = finding.get("resource")
+            resource_id = (
+                str(resource.get("id") or "")
+                if isinstance(resource, dict)
+                else ""
+            )
+            match = next((
+                item
+                for item in exceptions
+                if str(item.get("rule_id") or "")
+                == str(finding.get("rule_id") or "")
+                and (
+                    not item.get("resource_id")
+                    or str(item.get("resource_id")) == resource_id
+                )
+            ), None)
+            if match:
+                finding["status"] = "EXCEPTION"
+                finding["exception"] = {
+                    "id": str(match.get("id") or ""),
+                    "reason": str(match.get("reason") or ""),
+                    "expires_at": match.get("expires_at"),
+                }
+
+        active = [
+            finding
+            for finding in analysis.get("findings") or []
+            if isinstance(finding, dict)
+            and finding.get("status") != "EXCEPTION"
+        ]
+        operational = [
+            finding for finding in active
+            if finding.get("category") != "DATA_QUALITY"
+        ]
+        quality_findings = [
+            finding for finding in active
+            if finding.get("category") == "DATA_QUALITY"
+        ]
+        analysis["key_findings"] = [
+            *operational, *quality_findings
+        ][:5]
+        quality = analysis.get("data_quality") or {}
+        if any(
+            item.get("severity") == "CRITICAL" for item in operational
+        ):
+            status = "RISK"
+        elif any(
+            item.get("severity") == "WARNING" for item in operational
+        ):
+            status = "CAUTION"
+        elif int(
+            (analysis.get("governance") or {}).get("indeterminate_count")
+            or 0
+        ) > 0:
+            status = "UNKNOWN"
+        elif quality.get("overall_status") == "COMPLETE":
+            status = "NORMAL"
+        else:
+            status = "UNKNOWN"
+        analysis["overall_status"] = status
+        analysis["overall_status_label"] = {
+            "NORMAL": "수집·검사 범위 내 정상",
+            "CAUTION": "주의",
+            "RISK": "위험",
+            "UNKNOWN": "판정 불가",
+        }[status]
+        return analysis
 
     def _write_prebilling_artifacts(
         self,
@@ -1263,7 +1706,10 @@ class ReportRunner:
                 use_start_date=period["use_start_date"],
                 use_end_date=period["usage_query_end_date"],
                 demand_month=period["billing_month"],
-                region_code="KR",
+                region_code=str(
+                    getattr(getattr(self, "customer", None), "region", None)
+                    or "KR"
+                ).upper(),
                 pay_currency_code="KRW",
                 confirmed_demand_month=period["confirmed_demand_month"],
                 month_to_date_start=period["month_to_date_start"],
@@ -2145,6 +2591,98 @@ class ReportRunner:
             collection_warnings=all_collection_warnings,
         )
 
+        comparison_baseline: Optional[Dict[str, Any]] = None
+        policy_exceptions: List[Dict[str, Any]] = []
+        if (
+            self._operational_analysis_feature_enabled()
+            and report_options.analysis_enabled()
+        ):
+            comparison_baseline, baseline_warning = (
+                self._load_analysis_baseline(
+                    period=period,
+                    customer=customer_snapshot,
+                )
+            )
+            policy_exceptions, exception_warning = (
+                self._load_analysis_exceptions(customer=customer_snapshot)
+            )
+            all_collection_warnings = self._merge_error_lists(
+                all_collection_warnings,
+                [baseline_warning] if baseline_warning else [],
+                [exception_warning] if exception_warning else [],
+            )
+
+            infrastructure_requested = (
+                report_options.section_enabled("infrastructure_inventory")
+            )
+            monitoring_requested = report_options.section_enabled(
+                "monitoring"
+            )
+            observability.dataset_statuses.extend((
+                self._dataset_status_entry(
+                    key="infrastructure",
+                    label="인프라 자원",
+                    requested=infrastructure_requested,
+                    record_count=len(infrastructure_collected_data),
+                    errors=self._merge_error_lists(
+                        server_errors, infrastructure_errors
+                    ),
+                    warnings=infrastructure_warnings,
+                    source="NCP_RESOURCE_APIS",
+                ),
+                self._dataset_status_entry(
+                    key="monitoring",
+                    label="모니터링 지표",
+                    requested=monitoring_requested,
+                    record_count=self._monitoring_observation_count(
+                        insight_data, infrastructure_metric_data
+                    ),
+                    errors=self._issues_matching(
+                        all_collection_errors,
+                        "insightmetric",
+                        "infrastructuremetric",
+                    ),
+                    source="NCP_CLOUD_INSIGHT",
+                ),
+                self._dataset_status_entry(
+                    key="insight_events",
+                    label="Cloud Insight 이벤트",
+                    requested=report_options.section_enabled(
+                        "insight_events"
+                    ),
+                    record_count=len(insight_events),
+                    errors=observability.insight_event_errors,
+                    source="NCP_CLOUD_INSIGHT",
+                ),
+                self._dataset_status_entry(
+                    key="activity_events",
+                    label="변경 이력",
+                    requested=report_options.section_enabled(
+                        "activity_history"
+                    ),
+                    record_count=self._grouped_record_count(activity_data),
+                    errors=observability.activity_errors,
+                    source="NCP_CLOUD_ACTIVITY_TRACER",
+                ),
+                self._dataset_status_entry(
+                    key="billing",
+                    label="비용",
+                    requested=(
+                        report_options.section_enabled("billing")
+                        or report_options.section_enabled(
+                            "organization_billing"
+                        )
+                    ),
+                    record_count=self._billing_available_fact_count(
+                        billing_result
+                    ),
+                    errors=self._issues_matching(
+                        all_collection_errors, "billing"
+                    ),
+                    source="NCP_BILLING",
+                ),
+            ))
+
         report = ReportResult(
             period=period,
             customer=customer_snapshot,
@@ -2160,6 +2698,9 @@ class ReportRunner:
             grouped_insight_events=insight_grouped_events,
             activity_events=activity_data,
             billing=billing_result,
+            service_availability=observability.service_availability,
+            security_monitoring=observability.security_monitoring,
+            dataset_statuses=observability.dataset_statuses,
             report_options=report_options_snapshot,
             collection_metadata=collection_metadata,
             collection_errors=all_collection_errors,
@@ -2169,6 +2710,24 @@ class ReportRunner:
             ),
             generated_at=self._now_kst_iso(),
         )
+        if (
+            self._operational_analysis_feature_enabled()
+            and report_options.analysis_enabled()
+        ):
+            report.analysis = self._apply_analysis_exceptions(
+                analyze_report(
+                    report,
+                    baseline=comparison_baseline,
+                    policy=self._analysis_policy(report_options),
+                ),
+                policy_exceptions,
+            )
+            report.analysis["report_generation"] = {
+                "status": "SUCCESS",
+                "status_label": "성공",
+                "source_state": "OBSERVED",
+                "generated_at": report.generated_at,
+            }
         self._persist_report_artifacts(
             report,
             file_suffix=period["file_suffix"],

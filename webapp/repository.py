@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
 
@@ -31,6 +32,18 @@ _PERSONAL_DATA_KEYS = {
 }
 _ACTIVE_REPORT_STATUSES = {"QUEUED", "RUNNING", "RETRYING"}
 _MSP_ACCOUNT_MANAGEMENT_LOCK_ID = 1_311_787_345
+_KST = ZoneInfo("Asia/Seoul")
+
+
+def _parse_kst_form_datetime(value: str, error_message: str) -> datetime:
+    """KST 기반 datetime-local 값을 UTC 시각으로 정규화한다."""
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise ValueError(error_message) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_KST)
+    return parsed.astimezone(timezone.utc)
 
 
 def _remove_local_report_artifacts(storage_uris: list[str]) -> tuple[int, int]:
@@ -124,6 +137,30 @@ class PortalRepository:
             row_factory=dict_row,
         )
 
+    @staticmethod
+    def _set_tenant_rls_scope(cursor: Any, tenant_id: str) -> str:
+        """대상 고객과 환경을 현재 트랜잭션의 RLS 범위로 설정한다."""
+
+        cursor.execute(
+            "SELECT environment FROM control.tenants WHERE id = %s",
+            (tenant_id,),
+        )
+        tenant = cursor.fetchone()
+        if not tenant:
+            raise ValueError("고객을 찾을 수 없습니다.")
+        environment = str(tenant["environment"])
+        if environment not in {"public", "gov"}:
+            raise ValueError("고객 환경이 올바르지 않습니다.")
+        cursor.execute(
+            "SELECT set_config('app.tenant_id', %s, true)",
+            (tenant_id,),
+        )
+        cursor.execute(
+            "SELECT set_config('app.environment_scope', %s, true)",
+            (environment,),
+        )
+        return environment
+
     def authenticate(self, email: str) -> Optional[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -149,10 +186,19 @@ class PortalRepository:
             if not user or user["status"] != "ACTIVE":
                 return None
             cursor.execute(
-                "SELECT role FROM control.platform_roles WHERE user_id = %s",
+                """
+                SELECT role, environment_scope
+                FROM control.platform_roles
+                WHERE user_id = %s
+                ORDER BY role, environment_scope NULLS FIRST
+                """,
                 (user_id,),
             )
-            user["platform_roles"] = [row["role"] for row in cursor.fetchall()]
+            role_bindings = cursor.fetchall()
+            user["platform_role_bindings"] = role_bindings
+            user["platform_roles"] = list(dict.fromkeys(
+                row["role"] for row in role_bindings
+            ))
             cursor.execute(
                 """
                 SELECT membership.tenant_id, membership.role,
@@ -414,7 +460,9 @@ class PortalRepository:
             )
             return str(user_id)
 
-    def msp_users(self) -> list[dict[str, Any]]:
+    def msp_users(
+        self, allowed_environments: Optional[set[str]] = None
+    ) -> list[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -439,7 +487,13 @@ class PortalRepository:
                 ORDER BY users.display_name, users.email
                 """
             )
-            return cursor.fetchall()
+            users = cursor.fetchall()
+        if allowed_environments is None:
+            return users
+        return [
+            user for user in users
+            if user["environment_scope"] in allowed_environments
+        ]
 
     def set_msp_user_enabled(
         self,
@@ -594,10 +648,19 @@ class PortalRepository:
                 (user_id,),
             )
 
-    def customer_users(self) -> list[dict[str, Any]]:
+    def customer_users(
+        self, allowed_environments: Optional[set[str]] = None
+    ) -> list[dict[str, Any]]:
+        tenant_join_condition = ""
+        parameters: tuple[Any, ...] = ()
+        if allowed_environments is not None:
+            if not allowed_environments:
+                return []
+            tenant_join_condition = "AND tenant.environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT users.id, users.email, users.display_name,
                        users.status AS user_status, users.last_login_at,
                        users.created_at, membership.tenant_id, membership.role,
@@ -612,8 +675,10 @@ class PortalRepository:
                     SELECT 1 FROM control.platform_roles role
                     WHERE role.user_id = users.id
                 )
+                  {tenant_join_condition}
                 ORDER BY users.display_name, users.email, tenant.customer_name
-                """
+                """,
+                parameters,
             )
             users_by_id: dict[str, dict[str, Any]] = {}
             for row in cursor.fetchall():
@@ -636,6 +701,33 @@ class PortalRepository:
                         "status": row["membership_status"],
                     })
             return list(users_by_id.values())
+
+    def customer_user_accessible_in_environments(
+        self, user_id: str, allowed_environments: set[str]
+    ) -> bool:
+        """고객 사용자가 관리자의 환경 범위 안에 이미 속하는지 확인한다."""
+
+        if not allowed_environments:
+            return False
+        try:
+            user_id = str(UUID(user_id))
+        except (TypeError, ValueError):
+            return False
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM control.memberships membership
+                    JOIN control.tenants tenant
+                      ON tenant.id = membership.tenant_id
+                    WHERE membership.user_id = %s
+                      AND tenant.environment = ANY(%s)
+                ) AS accessible
+                """,
+                (user_id, sorted(allowed_environments)),
+            )
+            return bool(cursor.fetchone()["accessible"])
 
     def users_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
@@ -695,26 +787,49 @@ class PortalRepository:
             )
             return str(row["id"])
 
-    def dashboard(self) -> dict[str, Any]:
+    def dashboard(
+        self, allowed_environments: Optional[set[str]] = None
+    ) -> dict[str, Any]:
+        if allowed_environments is not None and not allowed_environments:
+            return {
+                "summary": {
+                    "customer_count": 0,
+                    "public_count": 0,
+                    "gov_count": 0,
+                    "issue_count": 0,
+                },
+                "issue_customers": [],
+            }
+        tenant_filter = ""
+        status_filter = ""
+        parameters: tuple[Any, ...] = ()
+        if allowed_environments is not None:
+            tenant_filter = "AND environment = ANY(%s)"
+            status_filter = "WHERE environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT count(*) AS customer_count,
                        count(*) FILTER (WHERE environment = 'public') AS public_count,
                        count(*) FILTER (WHERE environment = 'gov') AS gov_count
-                FROM control.tenants WHERE status <> 'OFFBOARDED'
-                """
+                FROM control.tenants
+                WHERE status <> 'OFFBOARDED' {tenant_filter}
+                """,
+                parameters,
             )
             summary = cursor.fetchone()
             cursor.execute(
-                """
+                f"""
                 SELECT DISTINCT ON (tenant_id)
                        tenant_id, customer_code, customer_name, environment,
                        fact_date, collection_status, critical_count, warning_count,
                        activity_failure_count, collection_error_count, updated_at
                 FROM control.v_msp_customer_daily_status
+                {status_filter}
                 ORDER BY tenant_id, fact_date DESC NULLS LAST
-                """
+                """,
+                parameters,
             )
             customers = cursor.fetchall()
         issue_customers = [
@@ -729,12 +844,27 @@ class PortalRepository:
         summary["issue_count"] = len(issue_customers)
         return {"summary": summary, "issue_customers": issue_customers}
 
-    def tenants(self, environment: Optional[str] = None) -> list[dict[str, Any]]:
+    def tenants(
+        self,
+        environment: Optional[str] = None,
+        allowed_environments: Optional[set[str]] = None,
+    ) -> list[dict[str, Any]]:
+        if (
+            allowed_environments is not None
+            and environment is not None
+            and environment not in allowed_environments
+        ):
+            return []
+        if allowed_environments is not None and not allowed_environments:
+            return []
         parameters: tuple[Any, ...] = ()
         condition = ""
         if environment in {"public", "gov"}:
             condition = "WHERE tenant.environment = %s"
             parameters = (environment,)
+        elif allowed_environments is not None:
+            condition = "WHERE tenant.environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -752,6 +882,25 @@ class PortalRepository:
                 parameters,
             )
             return cursor.fetchall()
+
+    def tenant_ids_for_environments(
+        self, allowed_environments: set[str]
+    ) -> list[str]:
+        """MSP 환경 범위에 포함되는 tenant ID만 반환한다."""
+
+        if not allowed_environments:
+            return []
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id
+                FROM control.tenants
+                WHERE environment = ANY(%s)
+                ORDER BY id
+                """,
+                (sorted(allowed_environments),),
+            )
+            return [str(row["id"]) for row in cursor.fetchall()]
 
     def tenant_detail(self, tenant_id: str) -> Optional[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
@@ -868,6 +1017,276 @@ class PortalRepository:
                 ),
             )
         return normalized
+
+    def action_cases(self, tenant_id: str) -> list[dict[str, Any]]:
+        """현재 및 최근 종료된 운영 조치 항목을 반환한다."""
+        with self._connect() as connection, connection.cursor() as cursor:
+            self._set_tenant_rls_scope(cursor, tenant_id)
+            cursor.execute(
+                """
+                SELECT event_case.*, assignee.display_name AS assigned_to_name
+                FROM control.event_cases event_case
+                LEFT JOIN control.users assignee
+                  ON assignee.id = event_case.assigned_to
+                WHERE event_case.tenant_id = %s
+                  AND event_case.source_type = 'ANALYSIS'
+                ORDER BY
+                    CASE event_case.status
+                        WHEN 'NEW' THEN 0
+                        WHEN 'ACKNOWLEDGED' THEN 1
+                        WHEN 'IN_PROGRESS' THEN 2
+                        WHEN 'NOT_DETECTED' THEN 3
+                        WHEN 'RESOLVED' THEN 4
+                        ELSE 5
+                    END,
+                    CASE event_case.priority
+                        WHEN 'P1' THEN 0
+                        WHEN 'P2' THEN 1
+                        WHEN 'P3' THEN 2
+                        ELSE 3
+                    END,
+                    event_case.last_detected_at DESC
+                LIMIT 100
+                """,
+                (tenant_id,),
+            )
+            return cursor.fetchall()
+
+    def update_action_case(
+        self,
+        tenant_id: str,
+        case_id: str,
+        *,
+        status: str,
+        assigned_to: Optional[str],
+        due_at: Optional[str],
+        actor_id: str,
+    ) -> None:
+        status = status.strip().upper()
+        if status not in {
+            "NEW", "ACKNOWLEDGED", "IN_PROGRESS", "RESOLVED", "IGNORED",
+            "NOT_DETECTED",
+        }:
+            raise ValueError("올바른 조치 상태를 선택하세요.")
+        assignee = assigned_to.strip() if assigned_to else None
+        if assignee:
+            try:
+                assignee = str(UUID(assignee))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("올바른 담당자를 선택하세요.") from exc
+        due = None
+        if due_at and due_at.strip():
+            due = _parse_kst_form_datetime(
+                due_at,
+                "마감 시각 형식이 올바르지 않습니다.",
+            )
+
+        with self._connect() as connection, connection.cursor() as cursor:
+            self._set_tenant_rls_scope(cursor, tenant_id)
+            if assignee:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM control.users user_account
+                    JOIN control.memberships membership
+                      ON membership.user_id = user_account.id
+                    WHERE user_account.id = %s
+                      AND user_account.status = 'ACTIVE'
+                      AND membership.tenant_id = %s
+                      AND membership.status = 'ACTIVE'
+                    LIMIT 1
+                    """,
+                    (assignee, tenant_id),
+                )
+                if not cursor.fetchone():
+                    raise ValueError("이 고객의 활성 사용자만 담당자로 지정할 수 있습니다.")
+            cursor.execute(
+                """
+                UPDATE control.event_cases
+                SET status = %s,
+                    assigned_to = %s,
+                    due_at = %s,
+                    acknowledged_by = CASE
+                        WHEN %s IN ('ACKNOWLEDGED', 'IN_PROGRESS')
+                            THEN COALESCE(acknowledged_by, %s)
+                        ELSE acknowledged_by
+                    END,
+                    acknowledged_at = CASE
+                        WHEN %s IN ('ACKNOWLEDGED', 'IN_PROGRESS')
+                            THEN COALESCE(acknowledged_at, clock_timestamp())
+                        ELSE acknowledged_at
+                    END,
+                    resolved_by = CASE
+                        WHEN %s IN ('RESOLVED', 'IGNORED') THEN %s
+                        ELSE NULL
+                    END,
+                    resolved_at = CASE
+                        WHEN %s IN ('RESOLVED', 'IGNORED')
+                            THEN clock_timestamp()
+                        ELSE NULL
+                    END
+                WHERE id = %s AND tenant_id = %s AND source_type = 'ANALYSIS'
+                """,
+                (
+                    status,
+                    assignee,
+                    due,
+                    status,
+                    actor_id,
+                    status,
+                    status,
+                    actor_id,
+                    status,
+                    case_id,
+                    tenant_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("조치 항목을 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                ) VALUES (%s, %s, 'control.event_cases', %s,
+                          'UPDATE', %s::jsonb)
+                """,
+                (
+                    tenant_id,
+                    actor_id,
+                    case_id,
+                    json.dumps({
+                        "status": status,
+                        "assigned_to": assignee,
+                        "due_at": due.isoformat() if due else None,
+                    }),
+                ),
+            )
+
+    def policy_exceptions(self, tenant_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection, connection.cursor() as cursor:
+            self._set_tenant_rls_scope(cursor, tenant_id)
+            cursor.execute(
+                """
+                SELECT exception.*, approver.display_name AS approved_by_name,
+                       account.display_name AS account_display_name,
+                       (exception.active
+                        AND exception.expires_at > clock_timestamp())
+                           AS effective_active
+                FROM control.policy_exceptions exception
+                JOIN control.users approver ON approver.id = exception.approved_by
+                LEFT JOIN control.cloud_accounts account
+                  ON account.id = exception.cloud_account_id
+                 AND account.tenant_id = exception.tenant_id
+                WHERE exception.tenant_id = %s
+                ORDER BY exception.active DESC, exception.expires_at DESC
+                """,
+                (tenant_id,),
+            )
+            return cursor.fetchall()
+
+    def create_policy_exception(
+        self,
+        tenant_id: str,
+        *,
+        cloud_account_id: Optional[str],
+        rule_id: str,
+        resource_id: Optional[str],
+        reason: str,
+        expires_at: str,
+        actor_id: str,
+    ) -> None:
+        rule_id = rule_id.strip()[:120]
+        resource_id = resource_id.strip()[:500] if resource_id else None
+        reason = reason.strip()
+        account_id = cloud_account_id.strip() if cloud_account_id else None
+        if account_id:
+            try:
+                account_id = str(UUID(account_id))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("올바른 NCP 계정을 선택하세요.") from exc
+        if not rule_id or not reason or len(reason) > 2000:
+            raise ValueError("규칙과 2,000자 이내 예외 사유를 입력하세요.")
+        expires = _parse_kst_form_datetime(
+            expires_at,
+            "예외 만료일을 입력하세요.",
+        )
+        if expires <= datetime.now(timezone.utc):
+            raise ValueError("예외 만료일은 현재보다 이후여야 합니다.")
+        with self._connect() as connection, connection.cursor() as cursor:
+            environment = self._set_tenant_rls_scope(cursor, tenant_id)
+            if account_id:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM control.cloud_accounts
+                    WHERE id = %s AND tenant_id = %s
+                    """,
+                    (account_id, tenant_id),
+                )
+                if not cursor.fetchone():
+                    raise ValueError("이 고객에 속한 NCP 계정만 선택할 수 있습니다.")
+            cursor.execute(
+                """
+                INSERT INTO control.policy_exceptions (
+                    tenant_id, cloud_account_id, environment, rule_id,
+                    resource_id, reason, expires_at, approved_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    tenant_id,
+                    account_id,
+                    environment,
+                    rule_id,
+                    resource_id,
+                    reason,
+                    expires,
+                    actor_id,
+                ),
+            )
+
+    def deactivate_policy_exception(
+        self,
+        tenant_id: str,
+        exception_id: str,
+        actor_id: str,
+    ) -> str:
+        """정책 예외를 삭제하지 않고 비활성화해 감사 이력을 보존한다."""
+
+        try:
+            exception_id = str(UUID(exception_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("정책 예외 식별자가 올바르지 않습니다.") from exc
+        with self._connect() as connection, connection.cursor() as cursor:
+            self._set_tenant_rls_scope(cursor, tenant_id)
+            cursor.execute(
+                """
+                UPDATE control.policy_exceptions
+                SET active = false
+                WHERE id = %s AND tenant_id = %s AND active
+                RETURNING rule_id
+                """,
+                (exception_id, tenant_id),
+            )
+            exception = cursor.fetchone()
+            if not exception:
+                raise ValueError("활성 정책 예외를 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                ) VALUES (%s, %s, 'control.policy_exceptions', %s,
+                          'UPDATE', %s::jsonb)
+                """,
+                (
+                    tenant_id,
+                    actor_id,
+                    exception_id,
+                    json.dumps({"active": False}),
+                ),
+            )
+            return str(exception["rule_id"])
 
     def update_tenant_logo(
         self,
@@ -1001,6 +1420,52 @@ class PortalRepository:
             )
             row = cursor.fetchone()
             return str(row["tenant_id"]) if row else None
+
+    def schedule_environment(self, schedule_id: str) -> Optional[str]:
+        """일정 변경 전에 해당 고객 환경을 확인한다."""
+
+        try:
+            schedule_id = str(UUID(schedule_id))
+        except (TypeError, ValueError):
+            return None
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT tenant.environment
+                FROM control.account_report_schedules schedule
+                JOIN control.tenants tenant ON tenant.id = schedule.tenant_id
+                WHERE schedule.id = %s
+                """,
+                (schedule_id,),
+            )
+            row = cursor.fetchone()
+            return str(row["environment"]) if row else None
+
+    def msp_user_environment_scopes(
+        self, user_id: str
+    ) -> Optional[set[str]]:
+        """대상 MSP 계정의 환경 범위를 반환한다. ``None``은 전체 범위다."""
+
+        try:
+            user_id = str(UUID(user_id))
+        except (TypeError, ValueError):
+            return set()
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT environment_scope
+                FROM control.platform_roles
+                WHERE user_id = %s
+                  AND role IN ('MSP_ADMIN', 'MSP_OPERATOR', 'SYSTEM_ADMIN')
+                """,
+                (user_id,),
+            )
+            rows = cursor.fetchall()
+        if not rows:
+            return set()
+        if any(row["environment_scope"] is None for row in rows):
+            return None
+        return {str(row["environment_scope"]) for row in rows}
 
     def accounts_for_tenants(self, tenant_ids: list[str]) -> list[dict[str, Any]]:
         if not tenant_ids:
@@ -1246,10 +1711,19 @@ class PortalRepository:
             )
             return cursor.fetchall()
 
-    def schedules(self) -> list[dict[str, Any]]:
+    def schedules(
+        self, allowed_environments: Optional[set[str]] = None
+    ) -> list[dict[str, Any]]:
+        if allowed_environments is not None and not allowed_environments:
+            return []
+        environment_filter = ""
+        parameters: tuple[Any, ...] = ()
+        if allowed_environments is not None:
+            environment_filter = "WHERE tenant.environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT schedule.*, tenant.customer_code, tenant.customer_name,
                        tenant.environment, account.display_name AS account_name,
                        account.account_code,
@@ -1261,16 +1735,27 @@ class PortalRepository:
                 JOIN control.cloud_accounts account
                     ON account.id = schedule.cloud_account_id
                 LEFT JOIN control.users creator ON creator.id = schedule.created_by
+                {environment_filter}
                 ORDER BY tenant.environment, tenant.customer_name,
                          account.display_name, schedule.report_type
-                """
+                """,
+                parameters,
             )
             return cursor.fetchall()
 
-    def schedulable_accounts(self) -> list[dict[str, Any]]:
+    def schedulable_accounts(
+        self, allowed_environments: Optional[set[str]] = None
+    ) -> list[dict[str, Any]]:
+        if allowed_environments is not None and not allowed_environments:
+            return []
+        environment_filter = ""
+        parameters: tuple[Any, ...] = ()
+        if allowed_environments is not None:
+            environment_filter = "AND tenant.environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT account.id, account.tenant_id, account.account_code,
                        account.display_name AS account_name,
                        tenant.customer_code, tenant.customer_name,
@@ -1282,9 +1767,11 @@ class PortalRepository:
                    AND credential.tenant_id = account.tenant_id
                 WHERE tenant.status = 'ACTIVE'
                   AND account.status = 'ACTIVE'
+                  {environment_filter}
                 ORDER BY tenant.environment, tenant.customer_name,
                          account.display_name
-                """
+                """,
+                parameters,
             )
             return cursor.fetchall()
 
