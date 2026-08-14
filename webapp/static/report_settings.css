@@ -114,28 +114,20 @@
   gap: 12px;
 }
 
-.analysis-threshold-grid label,
-.case-update-form {
+.analysis-threshold-grid label {
   display: grid;
   gap: 6px;
   color: var(--muted);
   font-size: 12px;
 }
 
-.analysis-threshold-grid input,
-.case-update-form input,
-.case-update-form select {
+.analysis-threshold-grid input {
   min-width: 0;
   padding: 9px;
   border: 1px solid #cdd9e7;
   border-radius: 9px;
   background: #fff;
   color: var(--ink);
-}
-
-.case-update-form {
-  grid-template-columns: minmax(110px, 1fr) minmax(170px, 1.3fr) auto;
-  align-items: center;
 }
 
 .settings-note,
@@ -173,8 +165,7 @@
 
   .branding-layout,
   .branding-upload,
-  .analysis-threshold-grid,
-  .case-update-form {
+  .analysis-threshold-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -1015,15 +1015,6 @@ class HtmlReportRendererTests(unittest.TestCase):
                     "resource": {"name": "보안 이벤트"},
                     "evidence": [],
                 },
-                {
-                    "severity": "WARNING",
-                    "category": "GOVERNANCE",
-                    "status": "EXCEPTION",
-                    "title": "승인된 정책 예외",
-                    "source_state": "CALCULATED",
-                    "resource": {"name": "disk-1"},
-                    "evidence": [],
-                },
             ],
             "metrics": {
                 "source_state": "CALCULATED",
@@ -1083,8 +1074,224 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("UNAVAILABLE (미수집)", html)
         self.assertIn("즉시 확인</span><strong>1건", html)
         self.assertIn("CPU 임계치 확인 필요", html)
-        self.assertNotIn("승인된 정책 예외", html)
         self.assertNotIn("수집 상태 확인 필요", html)
+
+    def test_operational_metric_table_only_shows_sustained_90_percent_alerts(self):
+        report = self._sample_report()
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "overall_status": "CAUTION",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "findings": [],
+            "metrics": {
+                "source_state": "CALCULATED",
+                "summaries": [
+                    {
+                        "category": "SERVER",
+                        "resource_name": "cpu-alert",
+                        "metric_label": "CPU 사용률",
+                        "metric_kind": "CPU",
+                        "source_state": "CALCULATED",
+                        "average": 91,
+                        "p95": 92,
+                        "maximum": 92,
+                        "alert_severity": "WARNING",
+                        "alert_duration_seconds": 900,
+                    },
+                    {
+                        "category": "NAS",
+                        "resource_name": "nas-alert",
+                        "metric_label": "볼륨 사용률",
+                        "metric_kind": "FILESYSTEM",
+                        "source_state": "CALCULATED",
+                        "average": 95,
+                        "p95": 96,
+                        "maximum": 96,
+                        "alert_severity": "CRITICAL",
+                        "alert_duration_seconds": 900,
+                    },
+                    {
+                        "category": "SERVER",
+                        "resource_name": "below-90",
+                        "metric_label": "메모리 사용률",
+                        "metric_kind": "MEMORY",
+                        "source_state": "CALCULATED",
+                        "maximum": 89.9,
+                        "alert_severity": "WARNING",
+                    },
+                    {
+                        "category": "SERVER",
+                        "resource_name": "not-sustained",
+                        "metric_label": "CPU 사용률",
+                        "metric_kind": "CPU",
+                        "source_state": "CALCULATED",
+                        "maximum": 99,
+                    },
+                    {
+                        "category": "CLOUD_DB",
+                        "resource_name": "free-or-absolute",
+                        "metric_label": "디스크 여유 용량",
+                        "metric_kind": None,
+                        "source_state": "CALCULATED",
+                        "maximum": 999,
+                        "alert_severity": "CRITICAL",
+                    },
+                ],
+            },
+            "events": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {},
+        }
+
+        html = HtmlReportRenderer().render(report)
+        metric_section = html.split(
+            "<h2>90% 이상 지속 사용 자원</h2>", 1
+        )[1].split("</section>", 1)[0]
+
+        self.assertIn("cpu-alert", metric_section)
+        self.assertIn("nas-alert", metric_section)
+        self.assertIn(">주의</td>", metric_section)
+        self.assertIn(">위험</td>", metric_section)
+        self.assertNotIn("below-90", metric_section)
+        self.assertNotIn("not-sustained", metric_section)
+        self.assertNotIn("free-or-absolute", metric_section)
+
+    def test_operational_metric_table_labels_top_ten_and_total_count(self):
+        report = self._sample_report()
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "overall_status": "CAUTION",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "findings": [],
+            "metrics": {
+                "source_state": "CALCULATED",
+                "summaries": [
+                    {
+                        "category": "SERVER",
+                        "resource_name": f"alert-{index:02d}",
+                        "metric_label": "CPU 사용률",
+                        "metric_kind": "CPU",
+                        "source_state": "CALCULATED",
+                        "average": 90 + index / 10,
+                        "p95": 90 + index / 10,
+                        "maximum": 90 + index / 10,
+                        "alert_severity": "WARNING",
+                        "alert_duration_seconds": 900,
+                    }
+                    for index in range(11)
+                ],
+            },
+            "events": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {},
+        }
+
+        html = HtmlReportRenderer().render(report)
+        metric_section = html.split(
+            "<h2>90% 이상 지속 사용 자원</h2>", 1
+        )[1].split("</section>", 1)[0]
+
+        self.assertIn("상위 10건", metric_section)
+        self.assertIn('<span class="count">11건</span>', metric_section)
+        self.assertEqual(metric_section.count("<tr>"), 11)
+        self.assertNotIn(">alert-00<", metric_section)
+        self.assertIn(">alert-10<", metric_section)
+
+    def test_historical_governance_only_snapshot_recalculates_visible_status(self):
+        report = self._sample_report()
+        report.analysis = {
+            "version": "1.1",
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "overall_status": "CAUTION",
+            "overall_status_label": "주의",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "key_findings": [{
+                "severity": "WARNING",
+                "category": "GOVERNANCE",
+                "title": "블록 스토리지가 암호화되지 않았습니다.",
+                "source_state": "CALCULATED",
+                "resource": {"name": "disk-1"},
+                "evidence": [],
+            }],
+            "metrics": {"summaries": []},
+            "events": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {},
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn(
+            "클라우드 운영 판정</span><strong>수집·검사 범위 내 정상",
+            html,
+        )
+        self.assertIn("즉시 확인</span><strong>0건", html)
+        self.assertNotIn("블록 스토리지가 암호화되지 않았습니다.", html)
+
+    def test_historical_metric_finding_below_90_is_hidden(self):
+        report = self._sample_report()
+        report.analysis = {
+            "version": "1.1",
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "overall_status": "CAUTION",
+            "overall_status_label": "주의",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "key_findings": [{
+                "rule_id": "METRIC_CPU_SUSTAINED",
+                "severity": "WARNING",
+                "category": "PERFORMANCE",
+                "title": "web-1의 CPU 사용률 80% 초과가 지속되었습니다.",
+                "status": "OPEN",
+                "source_state": "CALCULATED",
+                "resource": {"name": "web-1"},
+                "evidence": [{
+                    "label": "임계치",
+                    "value": 80,
+                    "unit": "%",
+                }],
+            }],
+            "metrics": {"summaries": []},
+            "events": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {},
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn(
+            "클라우드 운영 판정</span><strong>수집·검사 범위 내 정상",
+            html,
+        )
+        self.assertIn("즉시 확인</span><strong>0건", html)
+        self.assertNotIn("CPU 사용률 80% 초과", html)
 
     def test_unavailable_daily_billing_uses_labeled_month_to_date_tables(self):
         report = self._sample_report()

@@ -148,29 +148,19 @@
     <fieldset>
       <legend>운영 임계치</legend>
       <div class="analysis-threshold-grid">
-        <label>CPU 주의(%)<input type="number" name="cpu_warning_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.cpu_warning_percent }}"></label>
-        <label>CPU 위험(%)<input type="number" name="cpu_critical_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.cpu_critical_percent }}"></label>
-        <label>메모리 주의(%)<input type="number" name="memory_warning_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.memory_warning_percent }}"></label>
-        <label>메모리 위험(%)<input type="number" name="memory_critical_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.memory_critical_percent }}"></label>
-        <label>디스크 주의(%)<input type="number" name="disk_warning_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.disk_warning_percent }}"></label>
-        <label>디스크 위험(%)<input type="number" name="disk_critical_percent" min="0" max="100" step="0.1" value="{{ analysis.thresholds.disk_critical_percent }}"></label>
+        <label>CPU 주의(%)<input type="number" name="cpu_warning_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.cpu_warning_percent }}"></label>
+        <label>CPU 위험(%)<input type="number" name="cpu_critical_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.cpu_critical_percent }}"></label>
+        <label>메모리 주의(%)<input type="number" name="memory_warning_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.memory_warning_percent }}"></label>
+        <label>메모리 위험(%)<input type="number" name="memory_critical_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.memory_critical_percent }}"></label>
+        <label>스토리지 주의(%)<input type="number" name="disk_warning_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.disk_warning_percent }}"></label>
+        <label>스토리지 위험(%)<input type="number" name="disk_critical_percent" min="90" max="100" step="0.1" value="{{ analysis.thresholds.disk_critical_percent }}"></label>
         <label>지속 시간(분)<input type="number" name="sustained_minutes" min="1" max="1440" step="1" value="{{ analysis.thresholds.sustained_minutes }}"></label>
         <label>비용 증가 주의(%)<input type="number" name="cost_increase_warning_percent" min="0" max="10000" step="0.1" value="{{ analysis.thresholds.cost_increase_warning_percent }}"></label>
         <label>가용성 주의 기준(%)<input type="number" name="availability_warning_percent" min="0" max="100" step="0.001" value="{{ analysis.thresholds.availability_warning_percent }}"></label>
         <label>가용성 위험 기준(%)<input type="number" name="availability_critical_percent" min="0" max="100" step="0.001" value="{{ analysis.thresholds.availability_critical_percent }}"></label>
         <label>응답시간 주의(ms)<input type="number" name="response_time_warning_ms" min="0" max="3600000" step="1" value="{{ analysis.thresholds.response_time_warning_ms }}"></label>
       </div>
-    </fieldset>
-
-    <fieldset>
-      <legend>정책 판정</legend>
-      <div class="option-grid">
-        <label><input type="checkbox" name="analysis_policies" value="require_block_storage_encryption"{% if analysis.policies.require_block_storage_encryption %} checked{% endif %}> Block Storage 암호화 필수</label>
-        <label><input type="checkbox" name="analysis_policies" value="require_kubernetes_termination_protection"{% if analysis.policies.require_kubernetes_termination_protection %} checked{% endif %}> Kubernetes 반납 보호 필수</label>
-        <label><input type="checkbox" name="analysis_policies" value="flag_public_ip"{% if analysis.policies.flag_public_ip %} checked{% endif %}> Public IP 검토 항목 표시</label>
-        <label><input type="checkbox" name="analysis_policies" value="require_owner_tag"{% if analysis.policies.require_owner_tag %} checked{% endif %}> 담당자 태그 필수</label>
-        <label><input type="checkbox" name="analysis_policies" value="require_backup"{% if analysis.policies.require_backup %} checked{% endif %}> 명시적 백업 설정 필수</label>
-      </div>
+      <p class="settings-note">CPU·메모리·스토리지의 실제 사용률이 90% 이상으로 설정된 지속 시간 동안 이어질 때만 운영 경고를 표시합니다.</p>
     </fieldset>
 
     <button class="primary" type="submit">보고서 출력 설정 저장</button>
@@ -182,25 +172,6 @@ document.querySelectorAll('[data-check-group]').forEach((button) => button.addEv
   document.querySelectorAll(`.${button.dataset.checkGroup}`).forEach((item) => { item.checked = checked; });
 }));
 </script>
-{% endif %}
-
-{% if 'MSP_ADMIN' in current_user.platform_roles and action_cases %}
-<section class="panel">
-  <div class="panel-heading"><div><h2>운영 조치사항</h2><p>보고서 규칙에서 반복 탐지한 위험을 담당자·마감일·처리 상태로 관리합니다.</p></div></div>
-  <div class="table-wrap"><table><thead><tr><th>우선순위</th><th>문제</th><th>근거/권고</th><th>반복</th><th>처리</th></tr></thead><tbody>
-  {% for item in action_cases %}
-  <tr><td><span class="status {{ 'warn' if item.priority in ('P1','P2') else '' }}">{{ item.priority or '-' }}</span><small>{{ item.severity }}</small></td><td><strong>{{ item.title }}</strong><small>{{ item.category or '-' }} · {{ item.resource_id or '공통' }}</small></td><td>{{ item.impact or '-' }}<small>{{ item.recommendation or '-' }}</small></td><td>{{ item.occurrence_count }}회<small>최근 {{ item.last_detected_at|kst }}</small></td><td><form class="case-update-form" method="post" action="{{ url_for('update_customer_action_case', tenant_id=tenant.id, case_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>담당자<select name="assigned_to"><option value=""{% if not item.assigned_to %} selected{% endif %}>미지정</option>{% for user in tenant_users %}{% if user.user_status == 'ACTIVE' and user.membership_status == 'ACTIVE' %}<option value="{{ user.id }}"{% if item.assigned_to|string == user.id|string %} selected{% endif %}>{{ user.display_name }} · {{ user.email }}</option>{% endif %}{% endfor %}</select></label><label>상태<select name="status"><option value="NEW"{% if item.status == 'NEW' %} selected{% endif %}>신규</option><option value="ACKNOWLEDGED"{% if item.status == 'ACKNOWLEDGED' %} selected{% endif %}>확인</option><option value="IN_PROGRESS"{% if item.status == 'IN_PROGRESS' %} selected{% endif %}>진행</option>{% if item.status == 'NOT_DETECTED' %}<option value="NOT_DETECTED" selected>최근 동일 유형 보고서에서 미탐지</option>{% endif %}<option value="RESOLVED"{% if item.status == 'RESOLVED' %} selected{% endif %}>완료</option><option value="IGNORED"{% if item.status == 'IGNORED' %} selected{% endif %}>무시</option></select></label><label>마감 시각 (KST)<input type="datetime-local" name="due_at" value="{{ item.due_at|kst_datetime_local }}"></label><button class="secondary" type="submit">저장</button></form></td></tr>
-  {% endfor %}
-  </tbody></table></div>
-</section>
-{% endif %}
-
-{% if 'MSP_ADMIN' in current_user.platform_roles %}
-<section class="panel">
-  <div class="panel-heading"><div><h2>정책 예외 승인</h2><p>정상적인 공개 자원 등 고객 정책상 허용되는 항목을 기간 제한 예외로 등록합니다.</p></div></div>
-  <form class="form-grid" method="post" action="{{ url_for('create_customer_policy_exception', tenant_id=tenant.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>적용 NCP 계정<select name="cloud_account_id"><option value="">고객 전체 계정</option>{% for account in tenant.accounts %}<option value="{{ account.id }}">{{ account.display_name }}</option>{% endfor %}</select></label><label>규칙 ID<input name="rule_id" required maxlength="120" placeholder="SECURITY_BLOCK_STORAGE_ENCRYPTION"></label><label>자원 ID(선택)<input name="resource_id" maxlength="500"></label><label>만료 시각 (KST)<input type="datetime-local" name="expires_at" required></label><label>승인 사유<input name="reason" required maxlength="2000"></label><button class="primary" type="submit">기간 제한 예외 등록</button></form>
-  {% if policy_exceptions %}<div class="table-wrap"><table><thead><tr><th>적용 계정</th><th>규칙/자원</th><th>사유</th><th>만료</th><th>상태</th><th>관리</th></tr></thead><tbody>{% for item in policy_exceptions %}<tr><td><strong>{{ item.account_display_name or '고객 전체 계정' }}</strong></td><td><strong>{{ item.rule_id }}</strong><small>{{ item.resource_id or '모든 자원' }}</small></td><td>{{ item.reason }}<small>{{ item.approved_by_name }}</small></td><td>{{ item.expires_at|kst }}</td><td>{{ '활성' if item.effective_active else ('만료' if item.active else '해제') }}</td><td>{% if item.active %}<form method="post" action="{{ url_for('deactivate_customer_policy_exception', tenant_id=tenant.id, exception_id=item.id) }}" onsubmit="return confirm('이 정책 예외를 해제하시겠습니까? 다음 보고서부터 예외가 적용되지 않습니다.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-action" type="submit">예외 해제</button></form>{% else %}<span class="muted">-</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
-</section>
 {% endif %}
 
 {% if 'MSP_ADMIN' in current_user.platform_roles and tenant.status != 'OFFBOARDED' %}

@@ -38,6 +38,7 @@ from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     RESOURCE_CATEGORY_LABELS,
+    UTILIZATION_ALERT_MIN_PERCENT,
 )
 from app.report_models import ReportResult
 from utils.event_sort import sort_event_records
@@ -582,25 +583,22 @@ class HtmlReportRenderer:
         active_findings = [
             finding
             for finding in all_findings
-            if finding.get("category") != "DATA_QUALITY"
-            and finding.get("status") != "EXCEPTION"
+            if self._is_visible_operational_finding(finding)
         ]
-        findings = [
-            finding
-            for finding in self._records(analysis.get("key_findings"))
-            if finding.get("category") != "DATA_QUALITY"
-            and finding.get("status") != "EXCEPTION"
-        ]
+        findings = active_findings[:5]
         metrics = self._mapping(analysis.get("metrics"))
         events = self._mapping(analysis.get("events"))
         changes = self._mapping(analysis.get("changes"))
         costs = self._mapping(analysis.get("costs"))
         availability = self._mapping(analysis.get("availability"))
         security = self._mapping(analysis.get("security"))
-        status = str(analysis.get("overall_status") or "UNKNOWN")
-        status_label = str(
-            analysis.get("overall_status_label") or "판정 불가"
-        )
+        status = self._visible_operational_status(active_findings, quality)
+        status_label = {
+            "NORMAL": "수집·검사 범위 내 정상",
+            "CAUTION": "주의",
+            "RISK": "위험",
+            "UNKNOWN": "판정 불가",
+        }[status]
         requested_datasets = [
             item for item in datasets
             if item.get("status") != "NOT_REQUESTED"
@@ -737,19 +735,36 @@ class HtmlReportRenderer:
             }
             for item in datasets
         ]
-        metric_rows = sorted(
-            self._records(metrics.get("summaries")),
-            key=lambda item: float(item.get("maximum") or -1),
+        metric_alert_rows = sorted(
+            [
+                item
+                for item in self._records(metrics.get("summaries"))
+                if self._is_utilization_alert_summary(item)
+            ],
+            key=lambda item: (
+                item.get("alert_severity") == "CRITICAL",
+                float(item.get("maximum") or -1),
+            ),
             reverse=True,
-        )[:10]
+        )
+        metric_alert_count = len(metric_alert_rows)
         metric_rows = [
             {
                 **item,
+                "alert_severity_label": (
+                    "위험"
+                    if item.get("alert_severity") == "CRITICAL"
+                    else "주의"
+                ),
+                "alert_duration_seconds": (
+                    item.get("alert_duration_seconds")
+                    or item.get("warning_duration_seconds")
+                ),
                 "source_state_text": self._source_state_text(
                     item.get("source_state")
                 ),
             }
-            for item in metric_rows
+            for item in metric_alert_rows[:10]
         ]
         comparison = self._mapping(costs.get("comparison"))
         comparison_rows = [{
@@ -817,22 +832,24 @@ class HtmlReportRenderer:
                 len(dataset_rows),
             ),
             self._section(
-                "성능 임계치와 Top 리소스",
-                "평균·P95·최댓값과 관측 공백을 이어 붙이지 않은 최대 연속 초과 시간을 표시합니다.",
+                "90% 이상 지속 사용 자원",
+                "CPU·메모리·스토리지 실제 사용률의 평균(AVG) 또는 최소(MIN) 집계가 90% 이상으로 지속된 자원 중 위험도와 최대 사용률 기준 상위 10건을 표시합니다. 우측 건수는 전체 알람 수이며, 순간 최댓값·할당 용량·암호화·태그 정책은 포함하지 않습니다.",
                 self._table(
                     metric_rows,
                     (
+                        ("alert_severity_label", "상태"),
                         ("category", "상품"),
                         ("resource_name", "자원"),
                         ("metric_label", "지표"),
+                        ("aggregation", "집계"),
                         ("source_state_text", "출처 상태"),
                         ("average", "평균", "number2"),
                         ("p95", "P95", "number2"),
                         ("maximum", "최대", "number2"),
-                        ("warning_duration_seconds", "주의 지속(초)", "number0"),
+                        ("alert_duration_seconds", "90% 이상 지속(초)", "number0"),
                     ),
                 ),
-                len(metric_rows),
+                metric_alert_count,
             ) if metric_rows else "",
             self._section(
                 "서비스 가용성(WMS)",
@@ -949,6 +966,75 @@ class HtmlReportRenderer:
         if "WARNING" in severities:
             return "caution"
         return "normal"
+
+    @staticmethod
+    def _visible_operational_status(
+        findings: Sequence[Mapping[str, Any]],
+        quality: Mapping[str, Any],
+    ) -> str:
+        severities = {
+            str(finding.get("severity") or "").upper()
+            for finding in findings
+        }
+        if "CRITICAL" in severities:
+            return "RISK"
+        if "WARNING" in severities:
+            return "CAUTION"
+        if quality.get("overall_status") == "COMPLETE":
+            return "NORMAL"
+        return "UNKNOWN"
+
+    @staticmethod
+    def _is_visible_operational_finding(
+        finding: Mapping[str, Any],
+    ) -> bool:
+        if finding.get("category") in {"DATA_QUALITY", "GOVERNANCE"}:
+            return False
+        if finding.get("status") == "EXCEPTION":
+            return False
+        if not str(finding.get("rule_id") or "").startswith("METRIC_"):
+            return True
+
+        # 분석 1.1 스냅샷은 80~85% 임계치로 만든 경고를 저장할 수 있다.
+        # 원본 시계열을 다시 계산하지 않고도 새 90% 하한을 보장하기 위해
+        # 명시적인 임계치 근거가 있는 과거 지표 경고만 선별한다.
+        evidence = finding.get("evidence")
+        if not isinstance(evidence, (list, tuple)):
+            return False
+        for item in evidence:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("label") or "").strip().casefold() not in {
+                "threshold",
+                "임계치",
+            }:
+                continue
+            try:
+                return (
+                    float(item.get("value"))
+                    >= UTILIZATION_ALERT_MIN_PERCENT
+                )
+            except (TypeError, ValueError):
+                return False
+        return False
+
+    @staticmethod
+    def _is_utilization_alert_summary(
+        summary: Mapping[str, Any],
+    ) -> bool:
+        if summary.get("alert_severity") not in {"WARNING", "CRITICAL"}:
+            return False
+        if summary.get("metric_kind") not in {
+            "CPU", "MEMORY", "FILESYSTEM"
+        }:
+            return False
+        try:
+            return (
+                float(summary.get("maximum"))
+                >= UTILIZATION_ALERT_MIN_PERCENT
+            )
+        except (TypeError, ValueError):
+            return False
 
     def _analysis_kpi(
         self,

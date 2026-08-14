@@ -8,7 +8,6 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, ur
 
 from app.report_branding import MAX_CUSTOMER_LOGO_BYTES, validate_customer_logo
 from app.report_options import (
-    ANALYSIS_POLICY_OPTIONS,
     MONITORING_CATEGORY_OPTIONS,
     REPORT_SECTION_LABELS,
     REPORT_SECTION_OPTIONS,
@@ -305,17 +304,6 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             resource_category_options=RESOURCE_CATEGORY_OPTIONS,
             resource_category_labels=RESOURCE_CATEGORY_LABELS,
             monitoring_category_options=MONITORING_CATEGORY_OPTIONS,
-            analysis_policy_options=ANALYSIS_POLICY_OPTIONS,
-            action_cases=(
-                repository.action_cases(tenant_id)
-                if hasattr(repository, "action_cases")
-                else []
-            ),
-            policy_exceptions=(
-                repository.policy_exceptions(tenant_id)
-                if hasattr(repository, "policy_exceptions")
-                else []
-            ),
         )
 
     @app.post("/msp/customer/<tenant_id>/report-settings")
@@ -359,85 +347,11 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                                 "response_time_warning_ms",
                             )
                         },
-                        "policies": {
-                            name: name in request.form.getlist(
-                                "analysis_policies"
-                            )
-                            for name in ANALYSIS_POLICY_OPTIONS
-                        },
                     },
                 },
                 str(g.user["id"]),
             )
             flash("고객별 보고서 출력 설정을 저장했습니다.", "success")
-        except ValueError as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("msp_customer", tenant_id=tenant_id))
-
-    @app.post("/msp/customer/<tenant_id>/action-cases/<case_id>")
-    @_msp_admin_required
-    def update_customer_action_case(tenant_id: str, case_id: str):
-        tenant_for_request(tenant_id, manage=True)
-        if not hasattr(repository, "update_action_case"):
-            abort(404)
-        try:
-            repository.update_action_case(
-                tenant_id,
-                case_id,
-                status=request.form.get("status", ""),
-                assigned_to=request.form.get("assigned_to"),
-                due_at=request.form.get("due_at"),
-                actor_id=str(g.user["id"]),
-            )
-            flash("조치 항목을 갱신했습니다.", "success")
-        except ValueError as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("msp_customer", tenant_id=tenant_id))
-
-    @app.post("/msp/customer/<tenant_id>/policy-exceptions")
-    @_msp_admin_required
-    def create_customer_policy_exception(tenant_id: str):
-        tenant_for_request(tenant_id, manage=True)
-        if not hasattr(repository, "create_policy_exception"):
-            abort(404)
-        try:
-            repository.create_policy_exception(
-                tenant_id,
-                cloud_account_id=(
-                    request.form.get("cloud_account_id", "").strip() or None
-                ),
-                rule_id=request.form.get("rule_id", ""),
-                resource_id=request.form.get("resource_id"),
-                reason=request.form.get("reason", ""),
-                expires_at=request.form.get("expires_at", ""),
-                actor_id=str(g.user["id"]),
-            )
-            flash("정책 예외를 등록했습니다. 다음 보고서부터 적용됩니다.", "success")
-        except ValueError as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("msp_customer", tenant_id=tenant_id))
-
-    @app.post(
-        "/msp/customer/<tenant_id>/policy-exceptions/"
-        "<exception_id>/deactivate"
-    )
-    @_msp_admin_required
-    def deactivate_customer_policy_exception(
-        tenant_id: str, exception_id: str
-    ):
-        tenant_for_request(tenant_id, manage=True)
-        if not hasattr(repository, "deactivate_policy_exception"):
-            abort(404)
-        try:
-            rule_id = repository.deactivate_policy_exception(
-                tenant_id,
-                exception_id,
-                str(g.user["id"]),
-            )
-            flash(
-                f"{rule_id} 정책 예외를 해제했습니다. 다음 보고서부터 적용됩니다.",
-                "success",
-            )
         except ValueError as exc:
             flash(str(exc), "error")
         return redirect(url_for("msp_customer", tenant_id=tenant_id))

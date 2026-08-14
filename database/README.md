@@ -71,9 +71,9 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | `daily_customer_facts` | Fast MSP daily dashboard aggregates |
 | `email_recipients` | Tenant report and event recipient preferences |
 | `email_deliveries` | Delivery attempts, provider IDs and failures |
-| `event_cases` | Deterministic finding acknowledgement, assignment, due date and resolution workflow |
+| `event_cases` | Collection/event case storage plus dormant ANALYSIS action history; new ANALYSIS case creation is disabled |
 | `event_case_comments` | Operations comments attached to a case |
-| `policy_exceptions` | Tenant-scoped, approved and expiring rule exceptions |
+| `policy_exceptions` | Dormant legacy exceptions retained without application read/write paths |
 | `customer_deletion_tombstones` | Hashed customer-code deletion ledger, archive reference and forced-test-deletion flag |
 | `schema_versions` | Applied baseline schema components |
 
@@ -163,18 +163,24 @@ SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
 RLS denies tenant-scoped access when this value is missing. Worker access is
 also restricted to tenants matching its `public` or `gov` environment.
 
-MSP access to operational cases and policy exceptions additionally requires an
-environment context in the same transaction:
+The application no longer creates ANALYSIS action cases or reads and writes
+policy exceptions. These rows and schema objects remain intact so a runtime
+rollback does not lose audit history. Physical deletion requires a separately
+approved destructive migration. Hidden legacy policy selections are likewise
+preserved when report settings are saved, but the current runtime ignores them.
+
+MSP access to dormant policy exceptions still requires an environment context
+in the same transaction:
 
 ```sql
 SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
 SET LOCAL app.environment_scope = 'public'; -- or 'gov'
 ```
 
-`control.event_cases` and `control.policy_exceptions` deny the MSP role when
-either setting is absent or when the tenant environment does not match. A
-policy exception with a null `cloud_account_id` applies to every cloud account
-of that tenant; otherwise it applies only to the selected account.
+`control.event_cases` remains tenant-scoped and its composite foreign keys
+prevent cross-environment references. `control.policy_exceptions` denies the
+MSP role when either setting is absent or when the tenant environment does not
+match.
 
 Residual hardening scope: older MSP policies on other control/data tables still
 allow broader database-level reads and currently rely on application route

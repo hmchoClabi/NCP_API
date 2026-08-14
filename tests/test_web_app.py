@@ -31,11 +31,6 @@ class FakePortalRepository:
         self.updated_report_settings = []
         self.updated_logos = []
         self.deleted_logos = []
-        self.action_case_rows = []
-        self.policy_exception_rows = []
-        self.updated_action_cases = []
-        self.created_policy_exceptions = []
-        self.deactivated_policy_exceptions = []
 
     def session_user(self, session_token):
         if not session_token:
@@ -82,34 +77,6 @@ class FakePortalRepository:
     def update_tenant_report_settings(self, tenant_id, options, actor_id):
         self.updated_report_settings.append((tenant_id, options, actor_id))
         return options
-
-    def action_cases(self, tenant_id):
-        return self.action_case_rows if tenant_id == "tenant-1" else []
-
-    def update_action_case(
-        self, tenant_id, case_id, *, status, assigned_to, due_at, actor_id
-    ):
-        self.updated_action_cases.append((
-            tenant_id, case_id, status, assigned_to, due_at, actor_id,
-        ))
-
-    def policy_exceptions(self, tenant_id):
-        return self.policy_exception_rows if tenant_id == "tenant-1" else []
-
-    def create_policy_exception(
-        self, tenant_id, *, cloud_account_id, rule_id, resource_id, reason,
-        expires_at, actor_id
-    ):
-        self.created_policy_exceptions.append((
-            tenant_id, cloud_account_id, rule_id, resource_id, reason,
-            expires_at, actor_id,
-        ))
-
-    def deactivate_policy_exception(self, tenant_id, exception_id, actor_id):
-        self.deactivated_policy_exceptions.append((
-            tenant_id, exception_id, actor_id,
-        ))
-        return "SECURITY_BLOCK_STORAGE_ENCRYPTION"
 
     def update_tenant_logo(self, tenant_id, logo, actor_id):
         self.updated_logos.append((tenant_id, logo, actor_id))
@@ -471,19 +438,6 @@ class WebAppTests(unittest.TestCase):
                     "/msp/customer/<tenant_id>/report-settings",
                     ("POST",),
                 ),
-                "update_customer_action_case": (
-                    "/msp/customer/<tenant_id>/action-cases/<case_id>",
-                    ("POST",),
-                ),
-                "create_customer_policy_exception": (
-                    "/msp/customer/<tenant_id>/policy-exceptions",
-                    ("POST",),
-                ),
-                "deactivate_customer_policy_exception": (
-                    "/msp/customer/<tenant_id>/policy-exceptions/"
-                    "<exception_id>/deactivate",
-                    ("POST",),
-                ),
                 "update_customer_logo": (
                     "/msp/customer/<tenant_id>/logo",
                     ("POST",),
@@ -770,15 +724,6 @@ class WebAppTests(unittest.TestCase):
             "2026-08-04 09:30:00 KST",
         )
 
-    def test_kst_datetime_local_filter_converts_utc_for_form_input(self):
-        formatter = self.app.jinja_env.filters["kst_datetime_local"]
-
-        self.assertEqual(
-            formatter(datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc)),
-            "2026-08-20T18:00",
-        )
-        self.assertEqual(formatter(None), "")
-
     def test_duration_template_filter_formats_elapsed_seconds(self):
         formatter = self.app.jinja_env.filters["duration"]
 
@@ -929,173 +874,31 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
 
-    def test_action_case_renders_tenant_assignee_and_can_be_reassigned(self):
-        self.repository.action_case_rows = [{
-            "id": "case-1",
-            "priority": "P2",
-            "severity": "WARNING",
-            "title": "CPU 사용률 임계치 초과",
-            "category": "PERFORMANCE",
-            "resource_id": "server-1",
-            "impact": "응답 지연 가능성",
-            "recommendation": "용량을 점검하세요.",
-            "occurrence_count": 2,
-            "last_detected_at": datetime(2026, 8, 13, tzinfo=timezone.utc),
-            "status": "NEW",
-            "assigned_to": "customer-user-1",
-            "due_at": datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc),
-        }]
-
+    def test_customer_detail_omits_action_cases_and_policy_exceptions(self):
         detail = self.client.get("/msp/customer/tenant-1")
+        detail_text = detail.get_data(as_text=True)
 
         self.assertEqual(detail.status_code, 200)
-        self.assertIn(b'name="assigned_to"', detail.data)
-        self.assertIn(
-            b'<option value="customer-user-1" selected>',
-            detail.data,
-        )
-        self.assertIn(b"customer@example.com", detail.data)
-        self.assertIn(b'value="2026-08-20T18:00"', detail.data)
-        self.assertIn("마감 시각 (KST)".encode("utf-8"), detail.data)
-        self.assertIn("만료 시각 (KST)".encode("utf-8"), detail.data)
+        self.assertNotIn("운영 조치사항", detail_text)
+        self.assertNotIn("정책 예외 승인", detail_text)
+        self.assertNotIn("/action-cases/", detail_text)
+        self.assertNotIn("/policy-exceptions", detail_text)
 
+    def test_removed_operational_management_routes_return_not_found(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
-        updated = self.client.post(
+        paths = (
             "/msp/customer/tenant-1/action-cases/case-1",
-            data={
-                "csrf_token": "csrf-token",
-                "assigned_to": "customer-user-1",
-                "status": "IN_PROGRESS",
-                "due_at": "2026-08-20T18:00",
-            },
-        )
-
-        self.assertEqual(updated.status_code, 302)
-        self.assertEqual(self.repository.updated_action_cases, [(
-            "tenant-1",
-            "case-1",
-            "IN_PROGRESS",
-            "customer-user-1",
-            "2026-08-20T18:00",
-            "user-1",
-        )])
-
-    def test_active_policy_exception_can_be_deactivated(self):
-        self.repository.policy_exception_rows = [
-            {
-                "id": "exception-active",
-                "account_display_name": "Primary",
-                "rule_id": "SECURITY_BLOCK_STORAGE_ENCRYPTION",
-                "resource_id": "volume-1",
-                "reason": "고객 승인 테스트",
-                "approved_by_name": "MSP Admin",
-                "expires_at": datetime(2026, 9, 1, tzinfo=timezone.utc),
-                "active": True,
-                "effective_active": True,
-            },
-            {
-                "id": "exception-inactive",
-                "account_display_name": None,
-                "rule_id": "SECURITY_PUBLIC_IP",
-                "resource_id": None,
-                "reason": "종료된 예외",
-                "approved_by_name": "MSP Admin",
-                "expires_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
-                "active": False,
-                "effective_active": False,
-            },
-        ]
-
-        detail = self.client.get("/msp/customer/tenant-1")
-        detail_text = detail.get_data(as_text=True)
-
-        self.assertEqual(detail.status_code, 200)
-        self.assertIn(
-            "/msp/customer/tenant-1/policy-exceptions/"
-            "exception-active/deactivate",
-            detail_text,
-        )
-        self.assertNotIn(
-            "/msp/customer/tenant-1/policy-exceptions/"
-            "exception-inactive/deactivate",
-            detail_text,
-        )
-        self.assertIn("예외 해제", detail_text)
-        self.assertIn("Primary", detail_text)
-        self.assertIn("고객 전체 계정", detail_text)
-
-        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
-        deactivated = self.client.post(
-            "/msp/customer/tenant-1/policy-exceptions/"
-            "exception-active/deactivate",
-            data={"csrf_token": "csrf-token"},
-        )
-
-        self.assertEqual(deactivated.status_code, 302)
-        self.assertEqual(self.repository.deactivated_policy_exceptions, [(
-            "tenant-1", "exception-active", "user-1",
-        )])
-
-    def test_policy_exception_can_target_one_customer_account(self):
-        detail = self.client.get("/msp/customer/tenant-1")
-        detail_text = detail.get_data(as_text=True)
-
-        self.assertEqual(detail.status_code, 200)
-        self.assertIn('<select name="cloud_account_id">', detail_text)
-        self.assertIn('<option value="">고객 전체 계정</option>', detail_text)
-        self.assertIn('<option value="account-1">Primary</option>', detail_text)
-
-        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
-        response = self.client.post(
             "/msp/customer/tenant-1/policy-exceptions",
-            data={
-                "csrf_token": "csrf-token",
-                "cloud_account_id": "account-1",
-                "rule_id": "SECURITY_PUBLIC_IP",
-                "resource_id": "public-ip-1",
-                "expires_at": "2099-08-20T18:00",
-                "reason": "고객 승인 테스트",
-            },
+            "/msp/customer/tenant-1/policy-exceptions/exception-1/deactivate",
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.created_policy_exceptions, [(
-            "tenant-1",
-            "account-1",
-            "SECURITY_PUBLIC_IP",
-            "public-ip-1",
-            "고객 승인 테스트",
-            "2099-08-20T18:00",
-            "user-1",
-        )])
-
-    def test_policy_exception_empty_account_means_customer_wide(self):
-        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
-        response = self.client.post(
-            "/msp/customer/tenant-1/policy-exceptions",
-            data={
-                "csrf_token": "csrf-token",
-                "cloud_account_id": "",
-                "rule_id": "SECURITY_PUBLIC_IP",
-                "expires_at": "2099-08-20T18:00",
-                "reason": "고객 전체 승인",
-            },
-        )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            self.repository.created_policy_exceptions[0][1],
-            None,
-        )
-
-    def test_policy_exception_deactivation_requires_csrf(self):
-        response = self.client.post(
-            "/msp/customer/tenant-1/policy-exceptions/"
-            "exception-active/deactivate"
-        )
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(self.repository.deactivated_policy_exceptions, [])
+        for path in paths:
+            with self.subTest(path=path):
+                response = self.client.post(
+                    path,
+                    data={"csrf_token": "csrf-token"},
+                )
+                self.assertEqual(response.status_code, 404)
 
     def test_msp_admin_can_upload_valid_customer_logo(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1354,11 +1157,6 @@ class MspCustomerDetailTests(unittest.TestCase):
             "/msp/customer/tenant-gov/logo/delete",
             data={"csrf_token": "csrf-token"},
         )
-        exception_deactivation = self.client.post(
-            "/msp/customer/tenant-gov/policy-exceptions/"
-            "exception-gov/deactivate",
-            data={"csrf_token": "csrf-token"},
-        )
         customer_creation = self.client.post(
             "/msp/customers/gov",
             data={"csrf_token": "csrf-token"},
@@ -1368,11 +1166,9 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(report.status_code, 404)
         self.assertEqual(deletion.status_code, 404)
         self.assertEqual(mutation.status_code, 404)
-        self.assertEqual(exception_deactivation.status_code, 404)
         self.assertEqual(customer_creation.status_code, 404)
         self.assertEqual(self.repository.deleted_reports, [])
         self.assertEqual(self.repository.deleted_logos, [])
-        self.assertEqual(self.repository.deactivated_policy_exceptions, [])
 
     def test_scoped_admin_cannot_create_global_msp_or_customer_user(self):
         self.use_scoped_msp("MSP_ADMIN", "public")

@@ -5,6 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Optional
 
+from app.report_options import (
+    UTILIZATION_ALERT_MAX_PERCENT,
+    UTILIZATION_ALERT_MIN_PERCENT,
+    UTILIZATION_CRITICAL_PERCENT,
+    UTILIZATION_MAX_SUSTAINED_MINUTES,
+    UTILIZATION_MIN_SUSTAINED_MINUTES,
+    UTILIZATION_SUSTAINED_MINUTES,
+)
+
 from .models import Finding
 from .provenance import CALCULATED, UNAVAILABLE
 from .support import (
@@ -19,12 +28,20 @@ from .support import (
 
 
 DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
-    "CPU": {"warning": 80.0, "critical": 90.0, "duration_seconds": 900.0},
-    "MEMORY": {"warning": 85.0, "critical": 95.0, "duration_seconds": 900.0},
+    "CPU": {
+        "warning": UTILIZATION_ALERT_MIN_PERCENT,
+        "critical": UTILIZATION_CRITICAL_PERCENT,
+        "duration_seconds": UTILIZATION_SUSTAINED_MINUTES * 60.0,
+    },
+    "MEMORY": {
+        "warning": UTILIZATION_ALERT_MIN_PERCENT,
+        "critical": UTILIZATION_CRITICAL_PERCENT,
+        "duration_seconds": UTILIZATION_SUSTAINED_MINUTES * 60.0,
+    },
     "FILESYSTEM": {
-        "warning": 85.0,
-        "critical": 95.0,
-        "duration_seconds": 300.0,
+        "warning": UTILIZATION_ALERT_MIN_PERCENT,
+        "critical": UTILIZATION_CRITICAL_PERCENT,
+        "duration_seconds": UTILIZATION_SUSTAINED_MINUTES * 60.0,
     },
 }
 
@@ -41,15 +58,27 @@ _SERVER_METRIC_KIND = {
 }
 
 _PERCENT_METRIC_TOKENS = {
-    "CPU": ("cpu", "used_rto", "unit_utilization"),
-    "MEMORY": ("mem_pct", "mem_usage", "mem_usert", "memory_usage"),
+    "CPU": ("cpu", "used_rto", "unit_utilization", "used_v_cores_percent"),
+    "MEMORY": (
+        "mem_pct",
+        "mem_usage",
+        "mem_usert",
+        "memory_ratio",
+        "memory_usage",
+        "used_memory_percent",
+    ),
     "FILESYSTEM": (
+        "disk_data_pct",
         "fs_usert",
         "disk_used_ratio",
         "volume_used_ratio",
         "disk_mysql_used_ratio",
+        "storage_used_ratio",
+        "storage_usage_percent",
     ),
 }
+
+_NON_USAGE_METRIC_TOKENS = ("available", "free", "idle")
 
 
 def analyze_metrics(
@@ -74,7 +103,9 @@ def analyze_metrics(
             "resource_name": item.get("resource_name"),
             "metric": item["metric"],
             "metric_label": item.get("metric_label") or item["metric"],
+            "metric_kind": item.get("kind"),
             "unit": item.get("unit"),
+            "aggregation": item.get("aggregation"),
             "sample_count": len(values),
             "average": rounded(sum(values) / len(values)),
             "p95": rounded(percentile(values, 0.95)),
@@ -82,7 +113,11 @@ def analyze_metrics(
             "interval_seconds": interval,
         }
         kind = item.get("kind")
-        if kind in thresholds and interval:
+        if (
+            kind in thresholds
+            and interval
+            and item.get("alert_eligible", False)
+        ):
             rule = thresholds[kind]
             warning_duration = _longest_threshold_duration(
                 points,
@@ -107,6 +142,19 @@ def analyze_metrics(
                 required_duration=rule["duration_seconds"],
             )
             if finding:
+                item_summary.update({
+                    "alert_severity": finding.severity,
+                    "alert_threshold": (
+                        rule["critical"]
+                        if finding.severity == "CRITICAL"
+                        else rule["warning"]
+                    ),
+                    "alert_duration_seconds": (
+                        critical_duration
+                        if finding.severity == "CRITICAL"
+                        else warning_duration
+                    ),
+                })
                 findings.append(finding)
         summaries.append(item_summary)
 
@@ -138,9 +186,11 @@ def _server_series(report: Any) -> list[dict[str, Any]]:
             # AVG 시계열이 운영 임계치 판정에 가장 적합하다. 없는 경우에만
             # 다른 통계 시계열을 사용하며 동일 dps를 중복 계산하지 않는다.
             entries = []
-            for stat_name in ("avg", "max", "min"):
+            selected_stat_name = ""
+            for stat_name in ("avg", "min", "max"):
                 entries = records(raw_stats.get(stat_name))
                 if entries:
+                    selected_stat_name = stat_name
                     break
             for entry in entries:
                 points = _entry_points(entry)
@@ -151,6 +201,7 @@ def _server_series(report: Any) -> list[dict[str, Any]]:
                 if isinstance(dimensions, Mapping) and dimensions.get("mnt_nm"):
                     resource_name += f" · {dimensions['mnt_nm']}"
                 normalized_name = str(metric_name).strip().casefold()
+                metric_kind = _SERVER_METRIC_KIND.get(normalized_name)
                 dimension_key = tuple(
                     sorted(
                         (str(name), str(value))
@@ -172,11 +223,15 @@ def _server_series(report: Any) -> list[dict[str, Any]]:
                     "resource_name": resource_name,
                     "metric": str(metric_name),
                     "metric_label": _metric_label(
-                        _SERVER_METRIC_KIND.get(normalized_name),
+                        metric_kind,
                         str(metric_name),
                     ),
-                    "kind": _SERVER_METRIC_KIND.get(normalized_name),
+                    "kind": metric_kind,
+                    "alert_eligible": (
+                        selected_stat_name in {"avg", "min"}
+                    ),
                     "unit": "%" if normalized_name in _SERVER_METRIC_KIND else None,
+                    "aggregation": selected_stat_name.upper() or None,
                     "interval_seconds": metric_interval,
                     "points_by_time": {},
                 })
@@ -194,7 +249,8 @@ def _infrastructure_series(report: Any) -> list[dict[str, Any]]:
     for group in records(field(report, "infrastructure_metrics", [])):
         metric = str(group.get("metric") or "")
         unit = str(group.get("unit") or "")
-        kind = _infrastructure_metric_kind(metric, unit)
+        aggregation = str(group.get("aggregation") or "").strip().upper()
+        metric_kind = _infrastructure_metric_kind(metric, unit)
         expected_interval = interval_seconds(group.get("interval"))
         for series in records(group.get("series")):
             points = _normalize_points(series.get("points"))
@@ -206,8 +262,10 @@ def _infrastructure_series(report: Any) -> list[dict[str, Any]]:
                 "resource_name": str(series.get("resource_name") or "-"),
                 "metric": metric,
                 "metric_label": str(group.get("metric_label") or metric),
-                "kind": kind,
+                "kind": metric_kind,
+                "alert_eligible": aggregation in {"AVG", "MIN"},
                 "unit": unit or None,
+                "aggregation": aggregation or None,
                 "interval_seconds": expected_interval,
                 "points": points,
             })
@@ -294,21 +352,35 @@ def _threshold_finding(
 
     resource_name = str(series.get("resource_name") or "-")
     label = str(series.get("metric_label") or series.get("metric") or kind)
+    evidence = [
+        {"label": "임계치", "value": threshold, "unit": "%"},
+        {
+            "label": "최대 연속 지속 시간",
+            "value": int(observed_duration),
+            "unit": "초",
+        },
+        {
+            "label": "P95",
+            "value": summary.get("p95"),
+            "unit": series.get("unit"),
+        },
+        {
+            "label": "최댓값",
+            "value": summary.get("maximum"),
+            "unit": series.get("unit"),
+        },
+    ]
+    if series.get("aggregation"):
+        evidence.insert(0, {
+            "label": "집계 방식",
+            "value": series.get("aggregation"),
+        })
     return Finding(
         rule_id=f"METRIC_{kind}_SUSTAINED",
         severity=severity,
         category="PERFORMANCE",
         title=f"{resource_name}의 {label} 임계치 초과가 지속되었습니다.",
-        evidence=[
-            {"label": "임계치", "value": threshold, "unit": "%"},
-            {
-                "label": "최대 연속 지속 시간",
-                "value": int(observed_duration),
-                "unit": "초",
-            },
-            {"label": "P95", "value": summary.get("p95"), "unit": series.get("unit")},
-            {"label": "최댓값", "value": summary.get("maximum"), "unit": series.get("unit")},
-        ],
+        evidence=evidence,
         impact="자원 포화가 지속되면 응답 지연 또는 서비스 불안정으로 이어질 수 있습니다.",
         recommendation="해당 시간대의 워크로드와 이벤트를 확인하고 자원 증설 또는 부하 분산을 검토하세요.",
         resource={
@@ -339,11 +411,17 @@ def _thresholds(policy: Mapping[str, Any] | None) -> dict[str, dict[str, float]]
         warning = number(raw.get(warning_name))
         critical = number(raw.get(critical_name))
         if warning is not None and warning >= 0:
-            result[kind]["warning"] = warning
+            result[kind]["warning"] = _bounded_utilization_percent(
+                warning
+            )
         if critical is not None and critical >= 0:
-            result[kind]["critical"] = critical
+            result[kind]["critical"] = _bounded_utilization_percent(
+                critical
+            )
         if sustained_minutes is not None and sustained_minutes >= 0:
-            result[kind]["duration_seconds"] = sustained_minutes * 60
+            result[kind]["duration_seconds"] = _bounded_duration_seconds(
+                sustained_minutes * 60
+            )
     for raw_kind, raw_values in raw.items():
         kind = str(raw_kind).upper()
         if kind not in result or not isinstance(raw_values, Mapping):
@@ -351,16 +429,40 @@ def _thresholds(policy: Mapping[str, Any] | None) -> dict[str, dict[str, float]]
         for name in ("warning", "critical", "duration_seconds"):
             parsed = number(raw_values.get(name))
             if parsed is not None and parsed >= 0:
-                result[kind][name] = parsed
-        if result[kind]["critical"] < result[kind]["warning"]:
-            result[kind]["critical"] = result[kind]["warning"]
+                if name in {"warning", "critical"}:
+                    result[kind][name] = _bounded_utilization_percent(
+                        parsed
+                    )
+                else:
+                    result[kind][name] = _bounded_duration_seconds(
+                        parsed
+                    )
+    for values in result.values():
+        if values["critical"] < values["warning"]:
+            values["critical"] = values["warning"]
     return result
+
+
+def _bounded_utilization_percent(value: float) -> float:
+    return min(
+        UTILIZATION_ALERT_MAX_PERCENT,
+        max(UTILIZATION_ALERT_MIN_PERCENT, value),
+    )
+
+
+def _bounded_duration_seconds(value: float) -> float:
+    return min(
+        UTILIZATION_MAX_SUSTAINED_MINUTES * 60,
+        max(UTILIZATION_MIN_SUSTAINED_MINUTES * 60, value),
+    )
 
 
 def _infrastructure_metric_kind(metric: str, unit: str) -> Optional[str]:
     if "%" not in unit and "percent" not in unit.casefold() and "ratio" not in metric.casefold():
         return None
     normalized = metric.casefold()
+    if any(token in normalized for token in _NON_USAGE_METRIC_TOKENS):
+        return None
     for kind, tokens in _PERCENT_METRIC_TOKENS.items():
         if any(token in normalized for token in tokens):
             return kind
@@ -375,4 +477,7 @@ def _metric_label(kind: Optional[str], fallback: str) -> str:
     }.get(kind, fallback)
 
 
-__all__ = ["DEFAULT_THRESHOLDS", "analyze_metrics"]
+__all__ = [
+    "DEFAULT_THRESHOLDS",
+    "analyze_metrics",
+]

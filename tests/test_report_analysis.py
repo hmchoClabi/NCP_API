@@ -54,7 +54,7 @@ class ReportAnalysisTests(unittest.TestCase):
 
         analysis = analyze_report(report)
 
-        self.assertEqual(analysis["version"], "1.1")
+        self.assertEqual(analysis["version"], "1.2")
         self.assertEqual(analysis["period_type"], "DAILY")
 
     def test_runner_period_type_aliases_are_normalized(self):
@@ -156,8 +156,8 @@ class ReportAnalysisTests(unittest.TestCase):
         )
         policy = {
             "thresholds": {
-                "cpu_warning_percent": 80,
-                "cpu_critical_percent": 90,
+                "cpu_warning_percent": 90,
+                "cpu_critical_percent": 95,
                 "sustained_minutes": 3,
             }
         }
@@ -167,10 +167,306 @@ class ReportAnalysisTests(unittest.TestCase):
         summary = analysis["metrics"]["summaries"][0]
         self.assertEqual(summary["sample_count"], 4)
         self.assertAlmostEqual(summary["p95"], 93.85)
-        self.assertEqual(summary["critical_duration_seconds"], 120)
+        self.assertEqual(summary["warning_duration_seconds"], 120)
+        self.assertEqual(summary["critical_duration_seconds"], 0)
         self.assertFalse(any(
             finding["rule_id"] == "METRIC_CPU_SUSTAINED"
             for finding in analysis["findings"]
+        ))
+
+    def test_utilization_alert_starts_at_90_and_becomes_critical_at_95(self):
+        cases = (
+            (89.9, None),
+            (90.0, "WARNING"),
+            (95.0, "CRITICAL"),
+        )
+
+        for value, expected_severity in cases:
+            with self.subTest(value=value):
+                report = self._report(server_metrics=[{
+                    "server_id": "server-1",
+                    "server_name": "web-1",
+                    "metric_interval": "Min1",
+                    "raw_metrics": {
+                        "used_rto": {
+                            "avg": [{
+                                "raw": {
+                                    "dps": [
+                                        [index * 60_000, value]
+                                        for index in range(3)
+                                    ]
+                                }
+                            }]
+                        }
+                    },
+                }])
+
+                analysis = analyze_report(
+                    report,
+                    policy={"thresholds": {"sustained_minutes": 3}},
+                )
+                metric_findings = [
+                    item for item in analysis["findings"]
+                    if item["rule_id"] == "METRIC_CPU_SUSTAINED"
+                ]
+
+                if expected_severity is None:
+                    self.assertEqual(metric_findings, [])
+                    self.assertNotIn(
+                        "alert_severity",
+                        analysis["metrics"]["summaries"][0],
+                    )
+                else:
+                    self.assertEqual(len(metric_findings), 1)
+                    self.assertEqual(
+                        metric_findings[0]["severity"],
+                        expected_severity,
+                    )
+                    self.assertEqual(
+                        analysis["metrics"]["summaries"][0][
+                            "alert_severity"
+                        ],
+                        expected_severity,
+                    )
+
+    def test_zero_duration_policy_cannot_alert_below_90_percent(self):
+        report = self._report(server_metrics=[{
+            "server_id": "server-1",
+            "server_name": "web-1",
+            "metric_interval": "Min1",
+            "raw_metrics": {
+                "used_rto": {
+                    "avg": [{"raw": {"dps": [[0, 89.9]]}}]
+                }
+            },
+        }])
+        policies = (
+            {"thresholds": {"sustained_minutes": 0}},
+            {"thresholds": {"CPU": {"duration_seconds": 0}}},
+        )
+
+        for policy in policies:
+            with self.subTest(policy=policy):
+                analysis = analyze_report(report, policy=policy)
+                metric_findings = [
+                    item for item in analysis["findings"]
+                    if item["rule_id"] == "METRIC_CPU_SUSTAINED"
+                ]
+
+                self.assertEqual(metric_findings, [])
+                self.assertNotIn(
+                    "alert_severity",
+                    analysis["metrics"]["summaries"][0],
+                )
+
+    def test_out_of_range_policy_is_clamped_to_supported_limits(self):
+        report = self._report(server_metrics=[{
+            "server_id": "server-1",
+            "server_name": "web-1",
+            "metric_interval": "Min1",
+            "raw_metrics": {
+                "used_rto": {
+                    "avg": [{
+                        "raw": {
+                            "dps": [
+                                [index * 60_000, 100]
+                                for index in range(1440)
+                            ]
+                        }
+                    }]
+                }
+            },
+        }])
+        policies = (
+            {
+                "thresholds": {
+                    "cpu_warning_percent": 101,
+                    "cpu_critical_percent": 1000,
+                    "sustained_minutes": 999_999,
+                }
+            },
+            {
+                "thresholds": {
+                    "CPU": {
+                        "warning": 101,
+                        "critical": 1000,
+                        "duration_seconds": 999_999_999,
+                    }
+                }
+            },
+        )
+
+        for policy in policies:
+            with self.subTest(policy=policy):
+                analysis = analyze_report(report, policy=policy)
+                summary = analysis["metrics"]["summaries"][0]
+
+                self.assertEqual(summary["warning_threshold"], 100)
+                self.assertEqual(summary["critical_threshold"], 100)
+                self.assertEqual(summary["critical_duration_seconds"], 86_400)
+                self.assertEqual(summary["alert_severity"], "CRITICAL")
+
+    def test_supported_server_nas_and_cdb_utilization_metrics_alert(self):
+        points = [[index * 60_000, 92] for index in range(3)]
+        report = self._report(
+            server_metrics=[{
+                "server_id": "server-1",
+                "server_name": "web-1",
+                "metric_interval": "Min1",
+                "raw_metrics": {
+                    metric: {"avg": [{"raw": {"dps": points}}]}
+                    for metric in ("used_rto", "mem_usert", "fs_usert")
+                },
+            }],
+            infrastructure_metrics=[
+                {
+                    "category": "NAS",
+                    "metric": "volume_used_ratio",
+                    "metric_label": "볼륨 사용률",
+                    "unit": "%",
+                    "interval": "Min1",
+                    "aggregation": "AVG",
+                    "series": [{
+                        "resource_id": "nas-1",
+                        "resource_name": "nas-prod",
+                        "points": points,
+                    }],
+                },
+                {
+                    "category": "CLOUD_DB",
+                    "metric": "disk_data_pct",
+                    "metric_label": "데이터 디스크 사용률",
+                    "unit": "%",
+                    "interval": "Min1",
+                    "aggregation": "AVG",
+                    "series": [{
+                        "resource_id": "cdb-1",
+                        "resource_name": "mysql-prod",
+                        "points": points,
+                    }],
+                },
+            ],
+        )
+
+        analysis = analyze_report(
+            report,
+            policy={"thresholds": {"sustained_minutes": 3}},
+        )
+        summaries = {
+            (item["resource_name"], item["metric"]): item
+            for item in analysis["metrics"]["summaries"]
+        }
+
+        self.assertEqual(len(summaries), 5)
+        self.assertEqual(summaries[("web-1", "used_rto")]["metric_kind"], "CPU")
+        self.assertEqual(summaries[("web-1", "mem_usert")]["metric_kind"], "MEMORY")
+        self.assertEqual(summaries[("web-1", "fs_usert")]["metric_kind"], "FILESYSTEM")
+        self.assertEqual(summaries[("nas-prod", "volume_used_ratio")]["metric_kind"], "FILESYSTEM")
+        self.assertEqual(summaries[("mysql-prod", "disk_data_pct")]["metric_kind"], "FILESYSTEM")
+        self.assertTrue(all(
+            item["alert_severity"] == "WARNING"
+            for item in summaries.values()
+        ))
+        self.assertTrue(all(
+            item["aggregation"] == "AVG"
+            for item in summaries.values()
+        ))
+
+    def test_max_only_series_does_not_create_sustained_alert(self):
+        points = [[index * 60_000, 99] for index in range(3)]
+        report = self._report(
+            server_metrics=[{
+                "server_id": "server-1",
+                "server_name": "web-1",
+                "metric_interval": "Min1",
+                "raw_metrics": {
+                    "used_rto": {
+                        "max": [{"raw": {"dps": points}}]
+                    }
+                },
+            }],
+            infrastructure_metrics=[{
+                "category": "NAS",
+                "metric": "volume_used_ratio",
+                "metric_label": "볼륨 사용률",
+                "unit": "%",
+                "interval": "Min1",
+                "aggregation": "MAX",
+                "series": [{
+                    "resource_id": "nas-1",
+                    "resource_name": "nas-prod",
+                    "points": points,
+                }],
+            }],
+        )
+
+        analysis = analyze_report(
+            report,
+            policy={"thresholds": {"sustained_minutes": 3}},
+        )
+
+        self.assertEqual(len(analysis["metrics"]["summaries"]), 2)
+        self.assertFalse(any(
+            finding["rule_id"].startswith("METRIC_")
+            for finding in analysis["findings"]
+        ))
+        self.assertTrue(all(
+            "alert_severity" not in summary
+            for summary in analysis["metrics"]["summaries"]
+        ))
+        self.assertTrue(all(
+            summary["aggregation"] == "MAX"
+            for summary in analysis["metrics"]["summaries"]
+        ))
+        self.assertEqual(
+            {
+                summary["metric_kind"]
+                for summary in analysis["metrics"]["summaries"]
+            },
+            {"CPU", "FILESYSTEM"},
+        )
+
+    def test_free_and_absolute_metrics_do_not_create_utilization_alerts(self):
+        points = [[index * 60_000, 99] for index in range(3)]
+        report = self._report(infrastructure_metrics=[
+            {
+                "category": "CLOUD_DB",
+                "metric": "cpu_free_ratio",
+                "metric_label": "CPU 여유율",
+                "unit": "%",
+                "interval": "Min1",
+                "series": [{
+                    "resource_id": "cdb-1",
+                    "resource_name": "mysql-prod",
+                    "points": points,
+                }],
+            },
+            {
+                "category": "CLOUD_DB",
+                "metric": "disk_data_size",
+                "metric_label": "데이터 디스크 크기",
+                "unit": "byte",
+                "interval": "Min1",
+                "series": [{
+                    "resource_id": "cdb-1",
+                    "resource_name": "mysql-prod",
+                    "points": points,
+                }],
+            },
+        ])
+
+        analysis = analyze_report(
+            report,
+            policy={"thresholds": {"sustained_minutes": 3}},
+        )
+
+        self.assertTrue(all(
+            item["metric_kind"] is None
+            for item in analysis["metrics"]["summaries"]
+        ))
+        self.assertFalse(any(
+            item["rule_id"].startswith("METRIC_")
+            for item in analysis["findings"]
         ))
 
     def test_sustained_metric_finding_has_stable_fingerprint(self):
@@ -520,39 +816,8 @@ class ReportAnalysisTests(unittest.TestCase):
             "AVAILABLE",
         )
 
-    def test_unmatched_exception_recalculation_keeps_quality_unknown(self):
-        from app.runner import ReportRunner
-
-        analysis = analyze_report(self._report())
-        updated = ReportRunner._apply_analysis_exceptions(
-            analysis,
-            [{"rule_id": "DOES_NOT_MATCH", "resource_id": None}],
-        )
-
-        self.assertEqual(updated["overall_status"], "UNKNOWN")
-
-    def test_wms_security_and_governance_use_only_explicit_evidence(self):
+    def test_wms_and_security_use_only_explicit_evidence(self):
         report = self._report(
-            infrastructure=[
-                {
-                    "category": "BLOCK_STORAGE",
-                    "resource_id": "disk-1",
-                    "resource_name": "data-disk",
-                    "details": {"encrypted": False},
-                },
-                {
-                    "category": "BLOCK_STORAGE",
-                    "resource_id": "disk-unknown",
-                    "resource_name": "unknown-disk",
-                    "details": {},
-                },
-                {
-                    "category": "KUBERNETES",
-                    "resource_id": "cluster-1",
-                    "resource_name": "prod-cluster",
-                    "details": {"termination_protection": False},
-                },
-            ],
             service_availability={
                 "status": "COLLECTED",
                 "source": "NCP_WMS",
@@ -582,47 +847,45 @@ class ReportAnalysisTests(unittest.TestCase):
                 {"key": "security_events", "status": "COLLECTED", "record_count": 1},
             ],
         )
-        policy = {"policies": {
-            "require_block_storage_encryption": True,
-            "require_kubernetes_termination_protection": True,
-            "flag_public_ip": False,
-            "require_owner_tag": False,
-            "require_backup": False,
-        }}
 
-        analysis = analyze_report(report, policy=policy)
+        analysis = analyze_report(report)
         rule_ids = [item["rule_id"] for item in analysis["findings"]]
 
         self.assertIn("WMS_AVAILABILITY_BELOW_THRESHOLD", rule_ids)
         self.assertIn("SECURITY_MONITORING_EVENT_DETECTED", rule_ids)
-        self.assertEqual(rule_ids.count("BLOCK_STORAGE_ENCRYPTION_DISABLED"), 1)
-        self.assertIn("KUBERNETES_TERMINATION_PROTECTION_DISABLED", rule_ids)
         self.assertEqual(analysis["security"]["event_count"], 1)
 
-    def test_missing_governance_evidence_cannot_be_reported_as_normal(self):
+    def test_configuration_only_fields_do_not_create_operational_findings(self):
         report = self._report(
             report_options={"sections": ["infrastructure_inventory"]},
-            infrastructure=[{
-                "category": "BLOCK_STORAGE",
-                "resource_id": "disk-unknown",
-                "resource_name": "unknown-disk",
-                "details": {},
-            }],
+            infrastructure=[
+                {
+                    "category": "BLOCK_STORAGE",
+                    "resource_id": "disk-1",
+                    "resource_name": "data-disk",
+                    "details": {"encrypted": False},
+                },
+                {
+                    "category": "KUBERNETES",
+                    "resource_id": "cluster-1",
+                    "resource_name": "prod-cluster",
+                    "details": {"termination_protection": False},
+                },
+            ],
             dataset_statuses=[{
                 "key": "infrastructure",
                 "status": "COLLECTED",
-                "record_count": 1,
+                "record_count": 2,
             }],
         )
 
         analysis = analyze_report(report)
+        rule_ids = {item["rule_id"] for item in analysis["findings"]}
 
-        self.assertEqual(analysis["overall_status"], "UNKNOWN")
-        self.assertEqual(analysis["governance"]["status"], "PARTIAL")
-        self.assertEqual(analysis["governance"]["indeterminate_count"], 1)
-        self.assertIn(
-            "GOVERNANCE_EVIDENCE_INCOMPLETE",
-            {item["rule_id"] for item in analysis["findings"]},
+        self.assertNotIn("BLOCK_STORAGE_ENCRYPTION_DISABLED", rule_ids)
+        self.assertNotIn(
+            "KUBERNETES_TERMINATION_PROTECTION_DISABLED",
+            rule_ids,
         )
 
     def test_source_states_distinguish_observed_calculated_and_missing_data(self):

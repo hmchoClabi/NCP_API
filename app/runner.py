@@ -13,6 +13,9 @@ from app.report_analysis import analyze_report
 from app.report_options import (
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     ReportOptions,
+    UTILIZATION_ALERT_MIN_PERCENT,
+    UTILIZATION_CRITICAL_PERCENT,
+    UTILIZATION_SUSTAINED_MINUTES,
 )
 from app.report_pipeline import (
     NetworkConfigurationResult,
@@ -1315,62 +1318,64 @@ class ReportRunner:
                 ),
             }
 
-    def _load_analysis_exceptions(
-        self,
-        *,
-        customer: Dict[str, Any],
-    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        repository = getattr(self, "report_repository", None)
-        loader = getattr(repository, "load_active_policy_exceptions", None)
-        if not callable(loader):
-            return [], None
-        try:
-            return list(loader(customer) or []), None
-        except Exception as exc:
-            return [], {
-                "collector": "OperationalAnalysis",
-                "stage": "policy_exception_lookup",
-                "target_type": "policy_exception",
-                "api": "PostgreSQL/policy_exceptions",
-                "exception_type": type(exc).__name__,
-                "message": (
-                    "정책 예외 목록을 불러오지 못해 예외를 적용하지 않았습니다."
-                ),
-            }
-
     @staticmethod
     def _analysis_policy(report_options: ReportOptions) -> Dict[str, Any]:
         configured = report_options.operational_analysis
         thresholds = configured.get("thresholds") or {}
         sustained_seconds = int(
-            thresholds.get("sustained_minutes") or 15
+            thresholds.get("sustained_minutes")
+            or UTILIZATION_SUSTAINED_MINUTES
         ) * 60
         return {
             "thresholds": {
                 "CPU": {
-                    "warning": thresholds.get(
-                        "cpu_warning_percent", 80.0
+                    "warning": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("cpu_warning_percent")
+                            or UTILIZATION_ALERT_MIN_PERCENT
+                        ),
                     ),
-                    "critical": thresholds.get(
-                        "cpu_critical_percent", 90.0
+                    "critical": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("cpu_critical_percent")
+                            or UTILIZATION_CRITICAL_PERCENT
+                        ),
                     ),
                     "duration_seconds": sustained_seconds,
                 },
                 "MEMORY": {
-                    "warning": thresholds.get(
-                        "memory_warning_percent", 85.0
+                    "warning": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("memory_warning_percent")
+                            or UTILIZATION_ALERT_MIN_PERCENT
+                        ),
                     ),
-                    "critical": thresholds.get(
-                        "memory_critical_percent", 95.0
+                    "critical": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("memory_critical_percent")
+                            or UTILIZATION_CRITICAL_PERCENT
+                        ),
                     ),
                     "duration_seconds": sustained_seconds,
                 },
                 "FILESYSTEM": {
-                    "warning": thresholds.get(
-                        "disk_warning_percent", 85.0
+                    "warning": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("disk_warning_percent")
+                            or UTILIZATION_ALERT_MIN_PERCENT
+                        ),
                     ),
-                    "critical": thresholds.get(
-                        "disk_critical_percent", 90.0
+                    "critical": max(
+                        UTILIZATION_ALERT_MIN_PERCENT,
+                        float(
+                            thresholds.get("disk_critical_percent")
+                            or UTILIZATION_CRITICAL_PERCENT
+                        ),
                     ),
                     "duration_seconds": sustained_seconds,
                 },
@@ -1387,7 +1392,6 @@ class ReportRunner:
                     "response_time_warning_ms", 3000.0
                 ),
             },
-            "policies": configured.get("policies") or {},
         }
 
     @staticmethod
@@ -1529,84 +1533,6 @@ class ReportRunner:
             if isinstance(fact, dict) and fact.get("status") == "AVAILABLE":
                 count += 1
         return count
-
-    @staticmethod
-    def _apply_analysis_exceptions(
-        analysis: Dict[str, Any],
-        exceptions: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        if not exceptions:
-            return analysis
-        for finding in analysis.get("findings") or []:
-            if not isinstance(finding, dict):
-                continue
-            resource = finding.get("resource")
-            resource_id = (
-                str(resource.get("id") or "")
-                if isinstance(resource, dict)
-                else ""
-            )
-            match = next((
-                item
-                for item in exceptions
-                if str(item.get("rule_id") or "")
-                == str(finding.get("rule_id") or "")
-                and (
-                    not item.get("resource_id")
-                    or str(item.get("resource_id")) == resource_id
-                )
-            ), None)
-            if match:
-                finding["status"] = "EXCEPTION"
-                finding["exception"] = {
-                    "id": str(match.get("id") or ""),
-                    "reason": str(match.get("reason") or ""),
-                    "expires_at": match.get("expires_at"),
-                }
-
-        active = [
-            finding
-            for finding in analysis.get("findings") or []
-            if isinstance(finding, dict)
-            and finding.get("status") != "EXCEPTION"
-        ]
-        operational = [
-            finding for finding in active
-            if finding.get("category") != "DATA_QUALITY"
-        ]
-        quality_findings = [
-            finding for finding in active
-            if finding.get("category") == "DATA_QUALITY"
-        ]
-        analysis["key_findings"] = [
-            *operational, *quality_findings
-        ][:5]
-        quality = analysis.get("data_quality") or {}
-        if any(
-            item.get("severity") == "CRITICAL" for item in operational
-        ):
-            status = "RISK"
-        elif any(
-            item.get("severity") == "WARNING" for item in operational
-        ):
-            status = "CAUTION"
-        elif int(
-            (analysis.get("governance") or {}).get("indeterminate_count")
-            or 0
-        ) > 0:
-            status = "UNKNOWN"
-        elif quality.get("overall_status") == "COMPLETE":
-            status = "NORMAL"
-        else:
-            status = "UNKNOWN"
-        analysis["overall_status"] = status
-        analysis["overall_status_label"] = {
-            "NORMAL": "수집·검사 범위 내 정상",
-            "CAUTION": "주의",
-            "RISK": "위험",
-            "UNKNOWN": "판정 불가",
-        }[status]
-        return analysis
 
     def _write_prebilling_artifacts(
         self,
@@ -2592,7 +2518,6 @@ class ReportRunner:
         )
 
         comparison_baseline: Optional[Dict[str, Any]] = None
-        policy_exceptions: List[Dict[str, Any]] = []
         if (
             self._operational_analysis_feature_enabled()
             and report_options.analysis_enabled()
@@ -2603,13 +2528,9 @@ class ReportRunner:
                     customer=customer_snapshot,
                 )
             )
-            policy_exceptions, exception_warning = (
-                self._load_analysis_exceptions(customer=customer_snapshot)
-            )
             all_collection_warnings = self._merge_error_lists(
                 all_collection_warnings,
                 [baseline_warning] if baseline_warning else [],
-                [exception_warning] if exception_warning else [],
             )
 
             infrastructure_requested = (
@@ -2714,13 +2635,10 @@ class ReportRunner:
             self._operational_analysis_feature_enabled()
             and report_options.analysis_enabled()
         ):
-            report.analysis = self._apply_analysis_exceptions(
-                analyze_report(
-                    report,
-                    baseline=comparison_baseline,
-                    policy=self._analysis_policy(report_options),
-                ),
-                policy_exceptions,
+            report.analysis = analyze_report(
+                report,
+                baseline=comparison_baseline,
+                policy=self._analysis_policy(report_options),
             )
             report.analysis["report_generation"] = {
                 "status": "SUCCESS",

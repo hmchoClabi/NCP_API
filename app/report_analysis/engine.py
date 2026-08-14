@@ -9,7 +9,6 @@ from .availability import analyze_availability
 from .changes import analyze_changes
 from .costs import analyze_costs
 from .events import analyze_events
-from .governance import analyze_governance
 from .metrics import analyze_metrics
 from .models import sort_findings
 from .provenance import CALCULATED, calculated_source_state
@@ -18,7 +17,7 @@ from .security import analyze_security
 from .support import field, mapping, normalize_period_type
 
 
-ANALYSIS_VERSION = "1.1"
+ANALYSIS_VERSION = "1.2"
 
 _STATUS_LABELS = {
     # 모든 NCP 상품의 정상 여부가 아니라 실제 수집·검사한 범위의 판정이다.
@@ -50,9 +49,15 @@ def analyze_report(
         report, effective_policy
     )
     security, security_findings = analyze_security(report)
-    governance, governance_findings = analyze_governance(
-        report, effective_policy
-    )
+    # 거버넌스 준수 여부는 실제 장애나 자원 포화와 동일한 운영 경고로
+    # 취급하지 않는다. 기존 저장 스냅샷과의 JSON 계약만 빈 요약으로 유지한다.
+    governance = {
+        "status": "NOT_REQUESTED",
+        "source_state": CALCULATED,
+        "rules": [],
+        "finding_count": 0,
+        "indeterminate_count": 0,
+    }
     costs, cost_findings = analyze_costs(
         report,
         baseline=baseline,
@@ -65,7 +70,6 @@ def analyze_report(
         *change_findings,
         *availability_findings,
         *security_findings,
-        *governance_findings,
         *cost_findings,
     ])
     _apply_quality_status(metrics, dataset_status(quality, "monitoring"))
@@ -76,14 +80,8 @@ def analyze_report(
         dataset_status(quality, "service_availability"),
     )
     _apply_quality_status(security, dataset_status(quality, "security_events"))
-    infrastructure_status = dataset_status(quality, "infrastructure")
-    if not (
-        governance.get("status") == "PARTIAL"
-        and infrastructure_status in {"AVAILABLE", "COLLECTED_EMPTY"}
-    ):
-        _apply_quality_status(governance, infrastructure_status)
     _apply_quality_status(costs, dataset_status(quality, "billing"))
-    overall_status = _overall_status(findings, quality, governance)
+    overall_status = _overall_status(findings, quality)
     period = mapping(field(report, "period", {}))
 
     return {
@@ -113,7 +111,6 @@ def analyze_report(
 def _overall_status(
     findings: list[dict[str, Any]],
     quality: Mapping[str, Any],
-    governance: Mapping[str, Any],
 ) -> str:
     operational = [
         finding
@@ -124,8 +121,6 @@ def _overall_status(
         return "RISK"
     if any(finding.get("severity") == "WARNING" for finding in operational):
         return "CAUTION"
-    if int(governance.get("indeterminate_count") or 0) > 0:
-        return "UNKNOWN"
     if quality.get("overall_status") == "COMPLETE":
         return "NORMAL"
     return "UNKNOWN"

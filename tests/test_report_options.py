@@ -100,6 +100,30 @@ class ReportOptionsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "가용성 위험 임계치"):
             validate_report_options(options)
 
+    def test_legacy_low_utilization_thresholds_are_normalized_to_90(self):
+        options = normalize_report_options({
+            "operational_analysis": {
+                "thresholds": {
+                    "cpu_warning_percent": 80,
+                    "cpu_critical_percent": 95,
+                    "memory_warning_percent": 85,
+                    "memory_critical_percent": 95,
+                    "disk_warning_percent": 85,
+                    "disk_critical_percent": 95,
+                },
+                "policies": {
+                    "require_block_storage_encryption": True,
+                },
+            },
+        })
+        analysis = options["operational_analysis"]
+        thresholds = analysis["thresholds"]
+
+        self.assertEqual(thresholds["cpu_warning_percent"], 90)
+        self.assertEqual(thresholds["memory_warning_percent"], 90)
+        self.assertEqual(thresholds["disk_warning_percent"], 90)
+        self.assertNotIn("policies", analysis)
+
 
 if __name__ == "__main__":
     unittest.main()

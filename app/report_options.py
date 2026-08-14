@@ -4,7 +4,13 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 
-REPORT_OPTIONS_SCHEMA_VERSION = "1.2"
+REPORT_OPTIONS_SCHEMA_VERSION = "1.3"
+UTILIZATION_ALERT_MIN_PERCENT = 90.0
+UTILIZATION_ALERT_MAX_PERCENT = 100.0
+UTILIZATION_CRITICAL_PERCENT = 95.0
+UTILIZATION_MIN_SUSTAINED_MINUTES = 1
+UTILIZATION_MAX_SUSTAINED_MINUTES = 1440
+UTILIZATION_SUSTAINED_MINUTES = 15
 
 DEFAULT_OPERATIONAL_ANALYSIS: dict[str, Any] = {
     "enabled": True,
@@ -12,44 +18,54 @@ DEFAULT_OPERATIONAL_ANALYSIS: dict[str, Any] = {
     "collect_wms": False,
     "collect_security_monitoring": False,
     "thresholds": {
-        "cpu_warning_percent": 80.0,
-        "cpu_critical_percent": 90.0,
-        "memory_warning_percent": 85.0,
-        "memory_critical_percent": 95.0,
-        "disk_warning_percent": 85.0,
-        "disk_critical_percent": 90.0,
-        "sustained_minutes": 15,
+        "cpu_warning_percent": UTILIZATION_ALERT_MIN_PERCENT,
+        "cpu_critical_percent": UTILIZATION_CRITICAL_PERCENT,
+        "memory_warning_percent": UTILIZATION_ALERT_MIN_PERCENT,
+        "memory_critical_percent": UTILIZATION_CRITICAL_PERCENT,
+        "disk_warning_percent": UTILIZATION_ALERT_MIN_PERCENT,
+        "disk_critical_percent": UTILIZATION_CRITICAL_PERCENT,
+        "sustained_minutes": UTILIZATION_SUSTAINED_MINUTES,
         "cost_increase_warning_percent": 20.0,
         "availability_warning_percent": 99.0,
         "availability_critical_percent": 95.0,
         "response_time_warning_ms": 3000.0,
     },
-    "policies": {
-        "require_block_storage_encryption": True,
-        "require_kubernetes_termination_protection": False,
-        "flag_public_ip": False,
-        "require_owner_tag": False,
-        "require_backup": False,
-    },
 }
 
 ANALYSIS_THRESHOLD_LIMITS: dict[str, tuple[float, float]] = {
-    "cpu_warning_percent": (0.0, 100.0),
-    "cpu_critical_percent": (0.0, 100.0),
-    "memory_warning_percent": (0.0, 100.0),
-    "memory_critical_percent": (0.0, 100.0),
-    "disk_warning_percent": (0.0, 100.0),
-    "disk_critical_percent": (0.0, 100.0),
-    "sustained_minutes": (1.0, 1440.0),
+    "cpu_warning_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "cpu_critical_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "memory_warning_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "memory_critical_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "disk_warning_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "disk_critical_percent": (
+        UTILIZATION_ALERT_MIN_PERCENT,
+        UTILIZATION_ALERT_MAX_PERCENT,
+    ),
+    "sustained_minutes": (
+        UTILIZATION_MIN_SUSTAINED_MINUTES,
+        UTILIZATION_MAX_SUSTAINED_MINUTES,
+    ),
     "cost_increase_warning_percent": (0.0, 10000.0),
     "availability_warning_percent": (0.0, 100.0),
     "availability_critical_percent": (0.0, 100.0),
     "response_time_warning_ms": (0.0, 3600000.0),
 }
-
-ANALYSIS_POLICY_OPTIONS = tuple(
-    DEFAULT_OPERATIONAL_ANALYSIS["policies"].keys()
-)
 
 REPORT_SECTION_OPTIONS = (
     "executive_summary",
@@ -362,7 +378,6 @@ def _normalize_operational_analysis(value: Any) -> dict[str, Any]:
             defaults["collect_security_monitoring"],
         ),
         "thresholds": {},
-        "policies": {},
     }
 
     raw_thresholds = value.get("thresholds")
@@ -378,13 +393,6 @@ def _normalize_operational_analysis(value: Any) -> dict[str, Any]:
             integer=name == "sustained_minutes",
         )
 
-    raw_policies = value.get("policies")
-    if not isinstance(raw_policies, Mapping):
-        raw_policies = {}
-    for name, default in defaults["policies"].items():
-        normalized["policies"][name] = _as_bool(
-            raw_policies.get(name), default
-        )
     return normalized
 
 
