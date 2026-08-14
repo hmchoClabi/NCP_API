@@ -71,6 +71,51 @@ class LegacyReportPolicyCompatibilityTests(unittest.TestCase):
         )
 
 
+class ReportDetailRepositoryTests(unittest.TestCase):
+    def test_report_detail_replays_dedicated_network_snapshot(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.side_effect = [
+            {
+                "id": "report-1",
+                "tenant_id": "tenant-1",
+                "environment": "public",
+            },
+            {
+                "normalized_data": {
+                    "infrastructure": [
+                        {"category": "SERVER", "resource_name": "server-1"},
+                        {"category": "ROUTE_TABLE", "resource_name": "stale"},
+                    ]
+                }
+            },
+            {
+                "configuration": [
+                    {"category": "ROUTE_TABLE", "resource_name": "route-1"}
+                ]
+            },
+        ]
+
+        report = repository.report_detail("report-1", ["tenant-1"])
+
+        self.assertEqual(
+            report["snapshot"]["infrastructure"],
+            [
+                {"category": "SERVER", "resource_name": "server-1"},
+                {"category": "ROUTE_TABLE", "resource_name": "route-1"},
+            ],
+        )
+        self.assertIn(
+            "public_data.network_configuration_snapshots",
+            cursor.execute.call_args_list[-1].args[0],
+        )
+
+
 class TenantBrandingRepositoryTests(unittest.TestCase):
     def setUp(self):
         self.content = (

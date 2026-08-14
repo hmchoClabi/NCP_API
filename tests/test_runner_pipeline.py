@@ -1033,6 +1033,30 @@ class RunnerPipelineTests(unittest.TestCase):
             ],
             "INFERRED_FROM_CREATE_TIME",
         )
+        persistence_snapshot = report.to_persistence_dict()
+        observation = persistence_snapshot["infrastructure_snapshot"]
+        self.assertEqual(
+            {
+                resource["resource_id"]
+                for resource in observation["infrastructure"]
+            },
+            {
+                "old-server",
+                "boundary-server",
+                "unknown-server",
+                "old-storage",
+                "new-storage",
+            },
+        )
+        self.assertEqual(
+            observation["metadata"]["source"],
+            "LIVE_API_COLLECTION",
+        )
+        self.assertEqual(
+            observation["metadata"]["completed_at"],
+            "2026-08-09T12:00:00+09:00",
+        )
+        self.assertNotIn("infrastructure_snapshot", report.to_dict())
 
     def test_future_period_does_not_use_current_state_fallback(self):
         repository = SnapshotRepository(None)

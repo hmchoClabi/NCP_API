@@ -2236,6 +2236,47 @@ class ReportRunner:
                 collected_infrastructure_warnings,
             )
             infrastructure_completed_at = self._now_kst_iso()
+            if current_state_period_fallback:
+                snapshot_categories = (
+                    set(collection_resource_categories)
+                    - set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+                )
+                snapshot_infrastructure = [
+                    dict(item)
+                    for item in self._dict_records(
+                        infrastructure_collected_data
+                    )
+                    if str(item.get("category") or "").upper()
+                    in ReportResult.PERSISTED_INFRASTRUCTURE_CATEGORIES
+                ]
+                snapshot_issue_count = (
+                    len(server_errors)
+                    + len(infrastructure_errors)
+                    + len(collected_infrastructure_warnings)
+                )
+                resource_result.infrastructure_snapshot = {
+                    "servers": self._dict_records(server_data),
+                    "infrastructure": snapshot_infrastructure,
+                    "metadata": {
+                        "started_at": infrastructure_started_at,
+                        "completed_at": infrastructure_completed_at,
+                        "source": "LIVE_API_COLLECTION",
+                        "time_basis": "POINT_IN_TIME",
+                        "collected_categories": sorted(
+                            snapshot_categories
+                        ),
+                        "persisted_resource_count": len(
+                            snapshot_infrastructure
+                        ),
+                        "persisted_server_count": len(server_data),
+                        "inventory_completeness": (
+                            "PARTIAL"
+                            if snapshot_issue_count
+                            else "COMPLETE_FOR_SELECTED_SCOPE"
+                        ),
+                        "collection_issue_count": snapshot_issue_count,
+                    },
+                }
             live_snapshot_window = self._snapshot_eligibility_window(
                 period,
                 infrastructure_completed_at,
@@ -2407,7 +2448,10 @@ class ReportRunner:
                 observation_check_at=(
                     snapshot_decision.observation_check_at
                 ),
-                requested_categories=collection_resource_categories,
+                requested_categories=(
+                    collection_resource_categories
+                    - set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+                ),
                 initial_warnings=initial_warnings,
             )
         elif (
@@ -2626,6 +2670,9 @@ class ReportRunner:
             collection_metadata=collection_metadata,
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,
+            infrastructure_snapshot=(
+                resource_result.infrastructure_snapshot
+            ),
             network_configuration_snapshot=(
                 network_configuration.generation_snapshot
             ),

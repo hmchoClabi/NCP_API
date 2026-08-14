@@ -307,11 +307,28 @@ class ReportRepositoryTests(unittest.TestCase):
         observed_at = datetime.fromisoformat("2026-08-08T23:00:00+09:00")
         cursor.fetchone = lambda: (
             {
-                "infrastructure": [],
+                "servers": [{"server_id": "filtered-server"}],
+                "infrastructure": [{
+                    "category": "SERVER",
+                    "resource_id": "filtered-server",
+                }],
                 "collection_metadata": {
                     "infrastructure": {
+                        "source": "CURRENT_API_COLLECTION",
                         "completed_at": observed_at.isoformat(),
                     }
+                },
+                "infrastructure_snapshot": {
+                    "servers": [{"server_id": "observed-server"}],
+                    "infrastructure": [{
+                        "category": "SERVER",
+                        "resource_id": "observed-server",
+                    }],
+                    "metadata": {
+                        "source": "LIVE_API_COLLECTION",
+                        "completed_at": observed_at.isoformat(),
+                        "collected_categories": ["SERVER"],
+                    },
                 },
             },
             "report-run-id",
@@ -351,12 +368,28 @@ class ReportRepositoryTests(unittest.TestCase):
 
         self.assertIsNotNone(snapshot)
         self.assertEqual(
+            snapshot["servers"],
+            [{"server_id": "observed-server"}],
+        )
+        self.assertEqual(
+            snapshot["infrastructure"][0]["resource_id"],
+            "observed-server",
+        )
+        self.assertEqual(
+            snapshot["collection_metadata"]["infrastructure"]["source"],
+            "LIVE_API_COLLECTION",
+        )
+        self.assertEqual(
             snapshot["_snapshot_reference"]["report_run_id"],
             "report-run-id",
         )
         query, parameters = cursor.calls[1]
         self.assertIn(
             "'{collection_metadata,infrastructure,source}'",
+            query,
+        )
+        self.assertIn(
+            "'{infrastructure_snapshot,metadata,source}'",
             query,
         )
         self.assertEqual(parameters[:2], ("tenant-id", "account-id"))

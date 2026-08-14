@@ -18,6 +18,7 @@ from database.config import DatabaseSettings
 from webapp.security import CredentialCipher, hash_password, token_hash
 from utils.credentials import NCPCredentials
 from app.customer import CustomerProfile
+from app.network_configuration import replace_configuration_records
 from app.report_branding import CustomerLogo, validate_customer_logo
 from app.report_options import (
     normalize_report_options,
@@ -1318,7 +1319,19 @@ class PortalRepository:
                 (report_id,),
             )
             snapshot = cursor.fetchone()
-            report["snapshot"] = snapshot["normalized_data"] if snapshot else {}
+            payload = dict(snapshot["normalized_data"]) if snapshot else {}
+            cursor.execute(
+                f"SELECT configuration FROM {schema}.network_configuration_snapshots "
+                "WHERE report_run_id = %s",
+                (report_id,),
+            )
+            network_snapshot = cursor.fetchone()
+            if network_snapshot:
+                payload["infrastructure"] = replace_configuration_records(
+                    payload.get("infrastructure"),
+                    network_snapshot["configuration"],
+                )
+            report["snapshot"] = payload
             return report
 
     def delete_report(self, report_id: str, actor_id: str) -> dict[str, Any]:

@@ -141,9 +141,24 @@ class PostgresReportRepository:
         schema = self.SCHEMAS[environment]
         observed_text_expression = (
             "COALESCE(snapshot.normalized_data #>> "
+            "'{infrastructure_snapshot,metadata,completed_at}', "
+            "snapshot.normalized_data #>> "
+            "'{infrastructure_snapshot,metadata,started_at}', "
+            "snapshot.normalized_data #>> "
             "'{collection_metadata,infrastructure,completed_at}', "
             "snapshot.normalized_data #>> "
             "'{collection_metadata,infrastructure,started_at}')"
+        )
+        source_text_expression = (
+            "COALESCE(snapshot.normalized_data #>> "
+            "'{infrastructure_snapshot,metadata,source}', "
+            "snapshot.normalized_data #>> "
+            "'{collection_metadata,infrastructure,source}')"
+        )
+        infrastructure_expression = (
+            "COALESCE(snapshot.normalized_data #> "
+            "'{infrastructure_snapshot,infrastructure}', "
+            "snapshot.normalized_data -> 'infrastructure')"
         )
         observed_expression = (
             f"CASE WHEN ({observed_text_expression}) ~* "
@@ -171,12 +186,8 @@ class PostgresReportRepository:
                      AND report_run.tenant_id = snapshot.tenant_id
                     WHERE snapshot.tenant_id = %s
                       AND report_run.cloud_account_id = %s
-                      AND jsonb_typeof(
-                          snapshot.normalized_data -> 'infrastructure'
-                      ) = 'array'
-                      AND snapshot.normalized_data #>>
-                          '{{collection_metadata,infrastructure,source}}'
-                          = 'LIVE_API_COLLECTION'
+                      AND jsonb_typeof({infrastructure_expression}) = 'array'
+                      AND ({source_text_expression}) = 'LIVE_API_COLLECTION'
                       AND ({observed_expression}) >= %s
                       AND ({observed_expression}) < %s
                     ORDER BY ({observed_expression}) DESC,
@@ -201,6 +212,28 @@ class PostgresReportRepository:
             return None
         observed_at = self._parse_datetime(row[2])
         result = dict(row[0])
+        infrastructure_snapshot = result.get("infrastructure_snapshot")
+        if isinstance(infrastructure_snapshot, Mapping):
+            snapshot_servers = infrastructure_snapshot.get("servers")
+            snapshot_infrastructure = infrastructure_snapshot.get(
+                "infrastructure"
+            )
+            snapshot_metadata = infrastructure_snapshot.get("metadata")
+            if isinstance(snapshot_servers, list):
+                result["servers"] = list(snapshot_servers)
+            if isinstance(snapshot_infrastructure, list):
+                result["infrastructure"] = list(snapshot_infrastructure)
+            if isinstance(snapshot_metadata, Mapping):
+                collection_metadata = result.get("collection_metadata")
+                collection_metadata = (
+                    dict(collection_metadata)
+                    if isinstance(collection_metadata, Mapping)
+                    else {}
+                )
+                collection_metadata["infrastructure"] = dict(
+                    snapshot_metadata
+                )
+                result["collection_metadata"] = collection_metadata
         result["_snapshot_reference"] = {
             "report_run_id": str(row[1]),
             "observed_at": observed_at.isoformat(),

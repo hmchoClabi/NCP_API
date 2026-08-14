@@ -50,6 +50,10 @@ class ReportResult:
     collection_metadata: Dict[str, Any] = field(default_factory=dict)
     collection_errors: List[Dict[str, Any]] = field(default_factory=list)
     collection_warnings: List[Dict[str, Any]] = field(default_factory=list)
+    infrastructure_snapshot: Dict[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
     # Route Table·ACG·Network ACL 원본은 일반 보고서 JSON과 분리해
     # 전용 PostgreSQL 스냅샷 테이블에만 저장한다.
     network_configuration_snapshot: Dict[str, Any] = field(
@@ -381,6 +385,10 @@ class ReportResult:
         snapshot["customer"] = self.customer
         snapshot["servers"] = self.servers
         snapshot["infrastructure"] = self.persisted_infrastructure
+        if self.infrastructure_snapshot:
+            snapshot["infrastructure_snapshot"] = (
+                self.infrastructure_snapshot
+            )
         return snapshot
 
     @classmethod
@@ -424,5 +432,8 @@ class ReportResult:
             collection_metadata=payload.get("collection_metadata") or {},
             collection_errors=payload.get("collection_errors") or [],
             collection_warnings=payload.get("collection_warnings") or [],
+            infrastructure_snapshot=(
+                payload.get("infrastructure_snapshot") or {}
+            ),
             generated_at=str(payload.get("generated_at") or "-"),
         )

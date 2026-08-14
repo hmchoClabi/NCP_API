@@ -48,6 +48,7 @@ class ResourceCollectionResult:
     infrastructure_errors: List[Dict[str, Any]] = field(default_factory=list)
     infrastructure_warnings: List[Dict[str, Any]] = field(default_factory=list)
     collection_metadata: Dict[str, Any] = field(default_factory=dict)
+    infrastructure_snapshot: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

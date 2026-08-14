@@ -7,6 +7,14 @@ class ReportResultSnapshotTests(unittest.TestCase):
     def test_snapshot_round_trip_preserves_raw_metric_series(self):
         report = ReportResult(
             period={"file_suffix": "20260802", "period_type": "day"},
+            infrastructure_snapshot={
+                "servers": [{"server_id": "observed-server"}],
+                "infrastructure": [{
+                    "category": "SERVER",
+                    "resource_id": "observed-server",
+                }],
+                "metadata": {"source": "LIVE_API_COLLECTION"},
+            },
             infrastructure=[{
                 "category": "LOAD_BALANCER",
                 "resource_id": "lb-1",
@@ -33,6 +41,11 @@ class ReportResultSnapshotTests(unittest.TestCase):
             restored.infrastructure_metrics,
             report.infrastructure_metrics,
         )
+        self.assertEqual(
+            restored.infrastructure_snapshot,
+            report.infrastructure_snapshot,
+        )
+        self.assertNotIn("infrastructure_snapshot", report.to_dict())
         self.assertEqual(snapshot["schema_version"], "1.5")
 
     def test_legacy_snapshot_uses_servers_as_infrastructure_fallback(self):
