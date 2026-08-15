@@ -14,7 +14,6 @@ class ReportCollectionPlan:
     """고객별 보고서 옵션을 실제 수집 범위로 해석한 불변 계획."""
 
     report_options: ReportOptions
-    report_options_snapshot: Dict[str, Any]
     selected_resource_categories: FrozenSet[str]
     selected_monitoring_categories: FrozenSet[str]
     monitoring_enabled: bool
@@ -43,7 +42,6 @@ class ResourceCollectionResult:
 
     servers: List[Dict[str, Any]] = field(default_factory=list)
     server_errors: List[Dict[str, Any]] = field(default_factory=list)
-    server_raw_data: Dict[str, Any] = field(default_factory=dict)
     infrastructure: List[Dict[str, Any]] = field(default_factory=list)
     infrastructure_errors: List[Dict[str, Any]] = field(default_factory=list)
     infrastructure_warnings: List[Dict[str, Any]] = field(default_factory=list)
@@ -77,9 +75,6 @@ class ObservabilityResult:
     security_monitoring: Dict[str, Any] = field(default_factory=dict)
     dataset_statuses: List[Dict[str, Any]] = field(default_factory=list)
     activity_errors: List[Dict[str, Any]] = field(default_factory=list)
-    operational_source_errors: List[Dict[str, Any]] = field(
-        default_factory=list
-    )
     insight_event_errors: List[Dict[str, Any]] = field(default_factory=list)
     insight_errors: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)
@@ -115,7 +110,6 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
     )
     return ReportCollectionPlan(
         report_options=report_options,
-        report_options_snapshot=snapshot,
         selected_resource_categories=selected_resources,
         selected_monitoring_categories=selected_monitoring,
         monitoring_enabled=monitoring_enabled,

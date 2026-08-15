@@ -8,6 +8,7 @@ from typing import Any
 from .models import Finding
 from .provenance import OBSERVED, calculated_source_state
 from .support import field, mapping, records
+from utils.event_sort import event_timestamp_millis
 
 
 def analyze_security(report: Any) -> tuple[dict[str, Any], list[Finding]]:
@@ -56,7 +57,12 @@ def analyze_security(report: Any) -> tuple[dict[str, Any], list[Finding]]:
 
     items.sort(
         key=lambda item: (
-            -(int(item.get("detected_at") or 0)),
+            -(
+                event_timestamp_millis(
+                    item.get("detected_at") or item.get("detected_at_kst")
+                )
+                or 0
+            ),
             str(item.get("event_id") or ""),
         )
     )

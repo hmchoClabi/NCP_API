@@ -3,6 +3,7 @@ import math
 import re
 from collections import defaultdict
 from datetime import datetime
+from itertools import batched
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import requests
@@ -1347,7 +1348,7 @@ class InfrastructureMetricCollector:
             ].append(record)
 
         for (_, interval, _), group_records in grouped.items():
-            for chunk in self._chunk_list(group_records, self.MAX_QUERY_SIZE):
+            for chunk in batched(group_records, self.MAX_QUERY_SIZE):
                 for window_start, window_end in self._query_time_windows(
                     start_time=start_time,
                     end_time=end_time,
@@ -1737,16 +1738,6 @@ class InfrastructureMetricCollector:
             result.append((cursor, window_end))
             cursor = window_end + 1
         return result
-
-    def _chunk_list(
-        self,
-        items: List[Any],
-        size: int,
-    ) -> Iterable[List[Any]]:
-        if size <= 0:
-            raise ValueError("chunk size는 1 이상이어야 합니다.")
-        for index in range(0, len(items), size):
-            yield items[index:index + size]
 
     def _classify_exception(
         self,

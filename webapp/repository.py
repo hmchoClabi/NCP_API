@@ -155,30 +155,6 @@ class PortalRepository:
             row_factory=dict_row,
         )
 
-    @staticmethod
-    def _set_tenant_rls_scope(cursor: Any, tenant_id: str) -> str:
-        """대상 고객과 환경을 현재 트랜잭션의 RLS 범위로 설정한다."""
-
-        cursor.execute(
-            "SELECT environment FROM control.tenants WHERE id = %s",
-            (tenant_id,),
-        )
-        tenant = cursor.fetchone()
-        if not tenant:
-            raise ValueError("고객을 찾을 수 없습니다.")
-        environment = str(tenant["environment"])
-        if environment not in {"public", "gov"}:
-            raise ValueError("고객 환경이 올바르지 않습니다.")
-        cursor.execute(
-            "SELECT set_config('app.tenant_id', %s, true)",
-            (tenant_id,),
-        )
-        cursor.execute(
-            "SELECT set_config('app.environment_scope', %s, true)",
-            (environment,),
-        )
-        return environment
-
     def authenticate(self, email: str) -> Optional[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -341,12 +317,7 @@ class PortalRepository:
     ) -> str:
         if role not in {"CUSTOMER_VIEWER", "CUSTOMER_ADMIN"}:
             raise ValueError("Unsupported customer role.")
-        email = email.strip().casefold()
-        display_name = display_name.strip()
-        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 320:
-            raise ValueError("A valid email address is required.")
-        if not display_name or len(display_name) > 200:
-            raise ValueError("Display name must contain 1-200 characters.")
+        email, display_name = _validate_user_fields(email, display_name)
         password_hash = hash_password(password)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(

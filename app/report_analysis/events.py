@@ -26,9 +26,8 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         elif severity == "WARNING":
             warning_count += 1
 
-        start_time = timestamp_millis(
-            event.get("start_time", event.get("event_time"))
-        )
+        start_value = event.get("start_time") or event.get("event_time")
+        start_time = timestamp_millis(start_value)
         end_time = timestamp_millis(event.get("end_time"))
         # Cloud Insight는 진행 중인 이벤트의 endTime을 0으로 반환할 수
         # 있다. Unix epoch 종료로 해석하면 미종료 이벤트가 누락된다.
@@ -53,7 +52,7 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
             "resource_name": resource_name,
             "rule_name": rule_name,
             "metric": event.get("metric"),
-            "start_time": event.get("start_time", event.get("event_time")),
+            "start_time": start_value,
             "end_time": event.get("end_time"),
             "duration_seconds": duration_seconds,
             "is_open": is_open,
@@ -67,7 +66,7 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
                 title=f"{resource_name}에서 {rule_name} 이벤트가 발생했습니다.",
                 evidence=[
                     {"label": "이벤트 등급", "value": severity},
-                    {"label": "시작 시각", "value": event.get("start_time_kst") or event.get("start_time")},
+                    {"label": "시작 시각", "value": event.get("start_time_kst") or start_value},
                     {"label": "종료 시각", "value": event.get("end_time_kst") or event.get("end_time") or "미종료"},
                     {"label": "지속 시간", "value": duration_seconds, "unit": "초"},
                 ],
@@ -82,7 +81,7 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
                     event.get("event_id"),
                     event.get("rule_id") or rule_name,
                     event.get("metric"),
-                    event.get("start_time", event.get("event_time")),
+                    start_value,
                 ),
             ))
 

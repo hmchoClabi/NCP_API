@@ -35,6 +35,12 @@ def extract_required_actions(response: Any) -> tuple[str, ...]:
     ))
 
 
+def extract_provider_code(response: Any) -> str | None:
+    """Return the first non-success provider code from a response payload."""
+
+    return _find_provider_code(_response_payload(response), depth=0)
+
+
 def _response_payload(response: Any) -> Any:
     if isinstance(response, (Mapping, list, tuple)):
         return response
@@ -45,6 +51,21 @@ def _response_payload(response: Any) -> Any:
         return json_method()
     except (TypeError, ValueError):
         return None
+
+
+def _find_provider_code(value: Any, depth: int) -> str | None:
+    if depth > 4 or not isinstance(value, Mapping):
+        return None
+    for key in ("errorCode", "code", "returnCode"):
+        candidate = value.get(key)
+        if candidate not in (None, "", 0, "0", 200, "200"):
+            return str(candidate)[:100]
+    for child in value.values():
+        if isinstance(child, Mapping):
+            candidate = _find_provider_code(child, depth + 1)
+            if candidate:
+                return candidate
+    return None
 
 
 def _collect_messages(value: Any, output: list[str], depth: int) -> None:
@@ -64,4 +85,4 @@ def _collect_messages(value: Any, output: list[str], depth: int) -> None:
             _collect_messages(item, output, depth + 1)
 
 
-__all__ = ["extract_required_actions"]
+__all__ = ["extract_provider_code", "extract_required_actions"]

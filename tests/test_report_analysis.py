@@ -855,6 +855,38 @@ class ReportAnalysisTests(unittest.TestCase):
         self.assertIn("SECURITY_MONITORING_EVENT_DETECTED", rule_ids)
         self.assertEqual(analysis["security"]["event_count"], 1)
 
+    def test_iso_security_times_sort_and_event_time_fallback(self):
+        analysis = analyze_report(self._report(
+            insight_events=[{
+                "event_id": "event-1",
+                "level": "WARNING",
+                "start_time": None,
+                "event_time": 1_720_000_000_000,
+                "end_time": 1_720_000_001_000,
+            }],
+            security_monitoring={
+                "status": "COLLECTED",
+                "events": [
+                    {
+                        "event_id": "older",
+                        "detected_at": "2026-08-14T01:00:00+09:00",
+                    },
+                    {
+                        "event_id": "newer",
+                        "detected_at": "2026-08-14T02:00:00+09:00",
+                    },
+                ],
+            },
+        ))
+
+        self.assertEqual(
+            [item["event_id"] for item in analysis["security"]["items"]],
+            ["newer", "older"],
+        )
+        event = analysis["events"]["items"][0]
+        self.assertEqual(event["start_time"], 1_720_000_000_000)
+        self.assertEqual(event["duration_seconds"], 1)
+
     def test_configuration_only_fields_do_not_create_operational_findings(self):
         report = self._report(
             report_options={"sections": ["infrastructure_inventory"]},

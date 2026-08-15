@@ -1,8 +1,8 @@
 import logging
-import pprint
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Set
+from itertools import batched
+from typing import Any, Dict, List, Optional, Set
 from zoneinfo import ZoneInfo
 
 from dateutil.relativedelta import relativedelta
@@ -46,9 +46,8 @@ class InsightMetricCollector:
     }
     KST = ZoneInfo("Asia/Seoul")
 
-    def __init__(self, api_factory: Any, debug: bool = False):
+    def __init__(self, api_factory: Any):
         self.api_factory = api_factory
-        self.debug = debug
         self.normalizer = InsightMetricNormalizer(
             aggregations=self.AGGREGATIONS,
             simple_metrics=self.SIMPLE_METRICS,
@@ -92,13 +91,6 @@ class InsightMetricCollector:
             if not metric_queries:
                 logger.warning("조회할 Cloud Insight metric 정보가 없습니다.")
                 return self.normalizer.build_empty_reports(eligible_servers)
-
-            self._debug_insight_request(
-                servers=eligible_servers,
-                start_time=start_time,
-                end_time=end_time,
-                metric_queries=metric_queries,
-            )
 
             raw_metrics = self._execute_metric_queries(
                 metric_queries=metric_queries,
@@ -333,7 +325,7 @@ class InsightMetricCollector:
             queries_by_stat[query["stat_name"]].append(query["payload"])
 
         for stat_name, payloads in queries_by_stat.items():
-            for chunk in self._chunk_list(payloads, self.MAX_QUERY_SIZE):
+            for chunk in batched(payloads, self.MAX_QUERY_SIZE):
                 interval = str(chunk[0].get("interval") or "Min5")
                 time_windows = self._query_time_windows(
                     start_time=start_time,
@@ -696,17 +688,6 @@ class InsightMetricCollector:
 
         return self._cw_key_map
 
-    def _chunk_list(
-        self,
-        items: List[Any],
-        size: int,
-    ) -> Iterable[List[Any]]:
-        if size <= 0:
-            raise ValueError("chunk size는 1 이상이어야 합니다.")
-
-        for i in range(0, len(items), size):
-            yield items[i:i + size]
-
     def _filter_servers_for_period(
         self,
         servers: List[Dict[str, Any]],
@@ -884,48 +865,3 @@ class InsightMetricCollector:
             error["exception_type"] = type(exc).__name__
 
         self.last_errors.append(error)
-
-    def _debug_insight_request(
-        self,
-        servers: List[Dict[str, Any]],
-        start_time: int,
-        end_time: int,
-        metric_queries: List[Dict[str, Any]],
-    ) -> None:
-        if not self.debug:
-            return
-
-        logger.debug("=" * 100)
-        logger.debug("CLOUD INSIGHT DEBUG")
-        logger.debug("=" * 100)
-
-        logger.debug("[TIME]")
-        logger.debug("start_time: %s", start_time)
-        logger.debug("end_time  : %s", end_time)
-        logger.debug("start_dt  : %s", datetime.fromtimestamp(start_time / 1000))
-        logger.debug("end_dt    : %s", datetime.fromtimestamp(end_time / 1000))
-
-        logger.debug("[TARGET SERVERS]")
-
-        for server in servers:
-            logger.debug(
-                "%s | id=%s | status=%s | create_date=%s",
-                server.get("server_name"),
-                server.get("server_id"),
-                server.get("status"),
-                server.get("create_date"),
-            )
-
-        logger.debug("[METRIC QUERIES]")
-        logger.debug("count: %s", len(metric_queries))
-        logger.debug(
-            "\n%s",
-            pprint.pformat(
-                metric_queries,
-                indent=2,
-                width=140,
-                sort_dicts=False,
-            ),
-        )
-
-        logger.debug("=" * 100)

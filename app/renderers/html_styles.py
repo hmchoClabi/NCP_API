@@ -141,7 +141,6 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 }
 .finding-card.critical { border-left-color: #dc2626; background: #fff7f7; }
 .finding-card.warning { border-left-color: #f59e0b; background: #fffbeb; }
-.finding-card.exception { border-left-color: #64748b; opacity: .78; }
 .finding-heading { display: flex; align-items: baseline; gap: 10px; }
 .finding-heading span { color: var(--muted); font-size: .7rem; font-weight: 900; }
 .finding-card > p { margin: 4px 0 10px; color: var(--muted); font-size: .78rem; }
@@ -149,15 +148,6 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.1; }
 .finding-card dl div { display: grid; grid-template-columns: 52px 1fr; gap: 8px; }
 .finding-card dt { color: var(--muted); font-size: .74rem; }
 .finding-card dd { margin: 0; font-size: .78rem; }
-.analysis-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-.analysis-kpi-grid div { padding: 13px; background: #f8fafc; border-radius: 9px; }
-.analysis-kpi-grid span { display: block; color: var(--muted); font-size: .74rem; }
-.analysis-kpi-grid strong { display: block; margin-top: 3px; }
 .infra-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -324,14 +314,14 @@ footer { padding: 22px 4px; color: var(--muted); font-size: .78rem; text-align: 
   .report-identity { width: 100%; }
   .report-meta { grid-template-columns: auto 1fr; gap: 4px 14px; }
   .summary-grid, .billing-facts, .infra-summary-grid, .network-snapshot-basis,
-  .operational-status-grid, .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operational-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .report-shell { width: min(100% - 20px, 1440px); margin: 10px auto; }
   .report-header, .report-section { border-radius: 12px; }
   .summary-grid, .billing-facts, .infra-summary-grid, .network-snapshot-basis,
-  .operational-status-grid, .analysis-kpi-grid { grid-template-columns: 1fr; gap: 10px; }
+  .operational-status-grid { grid-template-columns: 1fr; gap: 10px; }
   .section-heading { flex-direction: column; gap: 10px; }
   .report-identity { align-items: flex-start; flex-direction: column; }
   .customer-logo-plate { width: min(100%, 220px); height: 100px; }

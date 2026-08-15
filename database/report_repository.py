@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 from zoneinfo import ZoneInfo
 
+from app.network_configuration import NETWORK_CONFIGURATION_CATEGORIES
 from app.report_models import ReportResult
 from app.report_period import (
     build_snapshot_eligibility_window,
@@ -25,11 +26,6 @@ class DatabasePersistenceError(RuntimeError):
 class PostgresReportRepository:
     KST = ZoneInfo("Asia/Seoul")
     SCHEMAS = {"public": "public_data", "gov": "gov_data"}
-    NETWORK_CONFIGURATION_CATEGORIES = frozenset({
-        "ROUTE_TABLE",
-        "ACCESS_CONTROL_GROUP",
-        "NETWORK_ACL",
-    })
     NETWORK_SNAPSHOT_SCHEMA_VERSION = "1.0"
 
     def __init__(
@@ -733,7 +729,7 @@ class PostgresReportRepository:
                     "Network configuration snapshot entries must be objects."
                 )
             category = str(item.get("category") or "").strip().upper()
-            if category not in self.NETWORK_CONFIGURATION_CATEGORIES:
+            if category not in NETWORK_CONFIGURATION_CATEGORIES:
                 raise DatabasePersistenceError(
                     "Network configuration snapshot contains an unsupported category."
                 )
@@ -749,7 +745,7 @@ class PostgresReportRepository:
                 else []
             )
             if str(category).strip().upper()
-            in self.NETWORK_CONFIGURATION_CATEGORIES
+            in NETWORK_CONFIGURATION_CATEGORIES
         })
         if not selected_categories:
             selected_categories = sorted(configuration_categories)

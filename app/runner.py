@@ -10,12 +10,10 @@ from app.network_configuration import (
 )
 from app.report_models import ReportResult
 from app.report_analysis import analyze_report
+from app.report_analysis.quality import monitoring_observation_count
 from app.report_options import (
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     ReportOptions,
-    UTILIZATION_ALERT_MIN_PERCENT,
-    UTILIZATION_CRITICAL_PERCENT,
-    UTILIZATION_SUSTAINED_MINUTES,
 )
 from app.report_pipeline import (
     NetworkConfigurationResult,
@@ -368,13 +366,6 @@ class ReportRunner:
             period_end,
             requested_reference,
         )
-
-    @staticmethod
-    def _snapshot_window_metadata(
-        window: Optional[Dict[str, datetime]],
-        observed_at: Any = None,
-    ) -> Dict[str, Any]:
-        return snapshot_window_metadata(window, observed_at)
 
     def _snapshot_observed_in_window(
         self,
@@ -971,7 +962,7 @@ class ReportRunner:
             "source": "STORED_REPORT_SNAPSHOT",
             "time_basis": "REPORT_PERIOD",
             "source_report_run_id": snapshot_reference.get("report_run_id"),
-            **self._snapshot_window_metadata(
+            **snapshot_window_metadata(
                 stored_window,
                 parsed_observed_at,
             ),
@@ -1081,7 +1072,7 @@ class ReportRunner:
                     "period_end": period.get("end_dt"),
                     "inventory_completeness": "UNAVAILABLE",
                     "collection_issue_count": 1,
-                    **self._snapshot_window_metadata(
+                    **snapshot_window_metadata(
                         decision.request_window
                     ),
                 }
@@ -1264,7 +1255,6 @@ class ReportRunner:
             security_monitoring=security_monitoring,
             dataset_statuses=dataset_statuses,
             activity_errors=activity_errors,
-            operational_source_errors=operational_source_errors,
             insight_event_errors=insight_event_errors,
             insight_errors=insight_errors,
             errors=self._merge_error_lists(
@@ -1317,82 +1307,6 @@ class ReportRunner:
                     "분석했습니다."
                 ),
             }
-
-    @staticmethod
-    def _analysis_policy(report_options: ReportOptions) -> Dict[str, Any]:
-        configured = report_options.operational_analysis
-        thresholds = configured.get("thresholds") or {}
-        sustained_seconds = int(
-            thresholds.get("sustained_minutes")
-            or UTILIZATION_SUSTAINED_MINUTES
-        ) * 60
-        return {
-            "thresholds": {
-                "CPU": {
-                    "warning": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("cpu_warning_percent")
-                            or UTILIZATION_ALERT_MIN_PERCENT
-                        ),
-                    ),
-                    "critical": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("cpu_critical_percent")
-                            or UTILIZATION_CRITICAL_PERCENT
-                        ),
-                    ),
-                    "duration_seconds": sustained_seconds,
-                },
-                "MEMORY": {
-                    "warning": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("memory_warning_percent")
-                            or UTILIZATION_ALERT_MIN_PERCENT
-                        ),
-                    ),
-                    "critical": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("memory_critical_percent")
-                            or UTILIZATION_CRITICAL_PERCENT
-                        ),
-                    ),
-                    "duration_seconds": sustained_seconds,
-                },
-                "FILESYSTEM": {
-                    "warning": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("disk_warning_percent")
-                            or UTILIZATION_ALERT_MIN_PERCENT
-                        ),
-                    ),
-                    "critical": max(
-                        UTILIZATION_ALERT_MIN_PERCENT,
-                        float(
-                            thresholds.get("disk_critical_percent")
-                            or UTILIZATION_CRITICAL_PERCENT
-                        ),
-                    ),
-                    "duration_seconds": sustained_seconds,
-                },
-                "cost_increase_warning_percent": thresholds.get(
-                    "cost_increase_warning_percent", 20.0
-                ),
-                "availability_warning_percent": thresholds.get(
-                    "availability_warning_percent", 99.0
-                ),
-                "availability_critical_percent": thresholds.get(
-                    "availability_critical_percent", 95.0
-                ),
-                "response_time_warning_ms": thresholds.get(
-                    "response_time_warning_ms", 3000.0
-                ),
-            },
-        }
 
     @staticmethod
     def _wms_observation_count(
@@ -1453,42 +1367,6 @@ class ReportRunner:
             "reason": reason,
             **({"source": source} if source else {}),
         }
-
-    @staticmethod
-    def _monitoring_observation_count(
-        server_metrics: List[Dict[str, Any]],
-        infrastructure_metrics: List[Dict[str, Any]],
-    ) -> int:
-        count = 0
-        for metric in server_metrics:
-            raw_metrics = metric.get("raw_metrics")
-            if not isinstance(raw_metrics, dict):
-                continue
-            for statistics in raw_metrics.values():
-                if not isinstance(statistics, dict):
-                    continue
-                for entries in statistics.values():
-                    if not isinstance(entries, list):
-                        continue
-                    for entry in entries:
-                        if not isinstance(entry, dict):
-                            continue
-                        raw = entry.get("raw")
-                        if isinstance(raw, dict) and isinstance(
-                            raw.get("dps"), list
-                        ):
-                            count += len(raw["dps"])
-                        elif isinstance(entry.get("values"), list):
-                            count += len(entry["values"])
-        for group in infrastructure_metrics:
-            if not isinstance(group, dict):
-                continue
-            for series in group.get("series") or []:
-                if isinstance(series, dict) and isinstance(
-                    series.get("points"), list
-                ):
-                    count += len(series["points"])
-        return count
 
     @staticmethod
     def _grouped_record_count(value: Any) -> int:
@@ -1918,7 +1796,7 @@ class ReportRunner:
             "source_report_run_id": boundary_reference.get(
                 "report_run_id"
             ),
-            **self._snapshot_window_metadata(
+            **snapshot_window_metadata(
                 boundary_window,
                 parsed_boundary_observed_at,
             ),
@@ -2053,7 +1931,6 @@ class ReportRunner:
         collection_metadata: Dict[str, Any],
     ) -> tuple[
         List[Dict[str, Any]],
-        Dict[str, Any],
         List[Dict[str, Any]],
     ]:
         """경계 시각에 적합한 저장 스냅샷이 없음을 명시하고 데이터를 비운다."""
@@ -2064,14 +1941,14 @@ class ReportRunner:
             "period_end": period.get("end_dt"),
             "inventory_completeness": "UNAVAILABLE",
             "collection_issue_count": 1,
-            **self._snapshot_window_metadata(
+            **snapshot_window_metadata(
                 self._snapshot_eligibility_window(
                     period,
                     completed_at,
                 )
             ),
         }
-        return [], {}, []
+        return [], []
 
     def _reselect_snapshot_after_period_boundary(
         self,
@@ -2082,12 +1959,10 @@ class ReportRunner:
         live_snapshot_in_period: bool,
         collection_metadata: Dict[str, Any],
         server_data: List[Dict[str, Any]],
-        server_raw_data: Dict[str, Any],
         infrastructure_collected_data: List[Dict[str, Any]],
         infrastructure_warnings: List[Dict[str, Any]],
     ) -> tuple[
         List[Dict[str, Any]],
-        Dict[str, Any],
         List[Dict[str, Any]],
     ]:
         """실시간 수집 완료가 기간 경계를 넘으면 저장 스냅샷을 다시 선택한다.
@@ -2104,7 +1979,6 @@ class ReportRunner:
         ):
             return (
                 server_data,
-                server_raw_data,
                 infrastructure_collected_data,
             )
 
@@ -2151,7 +2025,7 @@ class ReportRunner:
             collection_metadata=collection_metadata,
             infrastructure_warnings=infrastructure_warnings,
         ):
-            return [], {}, []
+            return [], []
 
         self._update_boundary_snapshot_coverage(
             collection_resource_categories=collection_resource_categories,
@@ -2163,7 +2037,6 @@ class ReportRunner:
         )
         return (
             server_data,
-            server_raw_data,
             infrastructure_collected_data,
         )
 
@@ -2190,7 +2063,7 @@ class ReportRunner:
         collection_metadata = resource_result.collection_metadata
         server_data = resource_result.servers
         server_errors = resource_result.server_errors
-        server_raw_data = resource_result.server_raw_data
+        server_raw_data: Dict[str, Any] = {}
         infrastructure_collected_data = resource_result.infrastructure
         infrastructure_errors = resource_result.infrastructure_errors
         infrastructure_warnings = resource_result.infrastructure_warnings
@@ -2306,7 +2179,7 @@ class ReportRunner:
                     "snapshot_age_seconds": None,
                 }
                 if current_state_period_fallback
-                else self._snapshot_window_metadata(
+                else snapshot_window_metadata(
                     live_snapshot_window,
                     parsed_live_completed_at,
                 )
@@ -2360,7 +2233,6 @@ class ReportRunner:
 
             (
                 server_data,
-                server_raw_data,
                 infrastructure_collected_data,
             ) = self._reselect_snapshot_after_period_boundary(
                 period=period,
@@ -2371,7 +2243,6 @@ class ReportRunner:
                 live_snapshot_in_period=live_snapshot_in_period,
                 collection_metadata=collection_metadata,
                 server_data=server_data,
-                server_raw_data=server_raw_data,
                 infrastructure_collected_data=(
                     infrastructure_collected_data
                 ),
@@ -2381,7 +2252,6 @@ class ReportRunner:
         resource_result.collection_metadata = collection_metadata
         resource_result.servers = server_data
         resource_result.server_errors = server_errors
-        resource_result.server_raw_data = server_raw_data
         resource_result.infrastructure = infrastructure_collected_data
         resource_result.infrastructure_errors = infrastructure_errors
         resource_result.infrastructure_warnings = infrastructure_warnings
@@ -2412,7 +2282,7 @@ class ReportRunner:
             self._selected_report_options()
         )
         report_options = collection_plan.report_options
-        report_options_snapshot = collection_plan.report_options_snapshot
+        report_options_snapshot = report_options.to_dict()
         customer_snapshot = (
             getattr(self, "customer", None).to_dict()
             if getattr(self, "customer", None) is not None
@@ -2599,7 +2469,7 @@ class ReportRunner:
                     key="monitoring",
                     label="모니터링 지표",
                     requested=monitoring_requested,
-                    record_count=self._monitoring_observation_count(
+                    record_count=monitoring_observation_count(
                         insight_data, infrastructure_metric_data
                     ),
                     errors=self._issues_matching(
@@ -2685,7 +2555,7 @@ class ReportRunner:
             report.analysis = analyze_report(
                 report,
                 baseline=comparison_baseline,
-                policy=self._analysis_policy(report_options),
+                policy=report_options.operational_analysis,
             )
             report.analysis["report_generation"] = {
                 "status": "SUCCESS",

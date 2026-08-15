@@ -9,7 +9,10 @@ import requests
 
 from normalizers.wmsnormalizer import WMSNormalizer
 from utils.common_rest import safe_exception_message
-from utils.provider_permissions import extract_required_actions
+from utils.provider_permissions import (
+    extract_provider_code,
+    extract_required_actions,
+)
 from utils.response_validation import validate_collection_response
 
 
@@ -216,44 +219,12 @@ class WMSCollector:
             if isinstance(exc, requests.HTTPError) and exc.response is not None:
                 issue["status_code"] = exc.response.status_code
                 response = exc.response
-        provider_code = self._provider_code(response)
+        provider_code = extract_provider_code(response)
         if provider_code:
             issue["error_code"] = provider_code
         required_actions = extract_required_actions(response)
         if required_actions:
             issue["required_actions"] = list(required_actions)
         self.last_errors.append(issue)
-
-    @classmethod
-    def _provider_code(cls, response: Any) -> str | None:
-        payload = cls._response_payload(response)
-        return cls._find_provider_code(payload)
-
-    @staticmethod
-    def _response_payload(response: Any) -> Any:
-        if isinstance(response, Mapping):
-            return response
-        if isinstance(response, requests.Response):
-            try:
-                return response.json()
-            except ValueError:
-                return None
-        return None
-
-    @classmethod
-    def _find_provider_code(cls, value: Any, depth: int = 0) -> str | None:
-        if depth > 4 or not isinstance(value, Mapping):
-            return None
-        for key in ("errorCode", "code", "returnCode"):
-            candidate = value.get(key)
-            if candidate not in (None, "", 0, "0", 200, "200"):
-                return str(candidate)[:100]
-        for child in value.values():
-            if isinstance(child, Mapping):
-                candidate = cls._find_provider_code(child, depth + 1)
-                if candidate:
-                    return candidate
-        return None
-
 
 __all__ = ["WMSCollector"]

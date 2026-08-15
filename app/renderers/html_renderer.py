@@ -14,10 +14,7 @@ from app.collection_diagnostics import (
 from app.renderers.html_styles import HTML_REPORT_STYLES
 from app.renderers.html_view_models import (
     BillingDisplayData,
-    EventDiagnosticSectionHtml,
-    InfrastructureSectionHtml,
     ReportDisplayData,
-    ReportSectionHtml,
 )
 from app.renderers.infrastructure_presenter import (
     merge_server_details,
@@ -41,7 +38,7 @@ from app.report_options import (
     UTILIZATION_ALERT_MIN_PERCENT,
 )
 from app.report_models import ReportResult
-from utils.event_sort import sort_event_records
+from utils.event_sort import event_timestamp_millis, sort_event_records
 
 
 class HtmlReportRenderer:
@@ -570,7 +567,12 @@ class HtmlReportRenderer:
             )
         return ""
 
-    def _render_operational_analysis(self, report: ReportResult) -> str:
+    def _render_operational_analysis(
+        self,
+        report: ReportResult,
+        *,
+        cost_enabled: bool,
+    ) -> str:
         analysis = self._mapping(report.analysis)
         if not analysis:
             return ""
@@ -587,8 +589,6 @@ class HtmlReportRenderer:
         ]
         findings = active_findings[:5]
         metrics = self._mapping(analysis.get("metrics"))
-        events = self._mapping(analysis.get("events"))
-        changes = self._mapping(analysis.get("changes"))
         costs = self._mapping(analysis.get("costs"))
         availability = self._mapping(analysis.get("availability"))
         security = self._mapping(analysis.get("security"))
@@ -711,7 +711,7 @@ class HtmlReportRenderer:
                 ),
                 cost_card_status,
                 current_cost.get("source_state", UNAVAILABLE),
-            ),
+            ) if cost_enabled else "",
         ))
 
         finding_content = (
@@ -797,13 +797,6 @@ class HtmlReportRenderer:
             }
             for item in self._records(security.get("items"))[:50]
         ]
-        events_known = events.get("status") in {
-            "AVAILABLE", "COLLECTED_EMPTY"
-        }
-        changes_known = changes.get("status") in {
-            "AVAILABLE", "COLLECTED_EMPTY"
-        }
-
         return "".join((
             '<section class="operational-overview" aria-label="운영 판단 요약">',
             f'<div class="operational-status-grid">{status_cards}</div>',
@@ -887,51 +880,25 @@ class HtmlReportRenderer:
                 warning=bool(security_rows),
             ) if security_rows else "",
             self._section(
-                "이벤트·변경·비용 비교",
-                "Cloud Insight 이벤트 시간은 발생~종료 구간이며 MTTA/MTTR이 아닙니다. 비용은 기준·신뢰도·할인·VAT 범위가 같을 때만 비교합니다.",
-                '<div class="analysis-kpi-grid">'
-                + self._analysis_kpi(
-                    "Critical 이벤트",
-                    events.get("critical_count") if events_known else None,
-                    "건",
-                    events.get("source_state", UNAVAILABLE),
-                )
-                + self._analysis_kpi(
-                    "미종료 이벤트",
-                    events.get("open_count") if events_known else None,
-                    "건",
-                    events.get("source_state", UNAVAILABLE),
-                )
-                + self._analysis_kpi(
-                    "전체 활동",
-                    changes.get("total_count") if changes_known else None,
-                    "건",
-                    changes.get("source_state", UNAVAILABLE),
-                )
-                + self._analysis_kpi(
-                    "실패 활동",
-                    changes.get("failure_count") if changes_known else None,
-                    "건",
-                    changes.get("source_state", UNAVAILABLE),
-                )
-                + "</div>"
-                + self._table(
+                "비용 전기 비교",
+                "현재 보고 기간과 직전 동일 기간의 비용을 같은 기준·신뢰도·할인·VAT 범위일 때만 비교합니다.",
+                self._table(
                     comparison_rows,
                     (
                         ("status", "비교 상태"),
                         ("source_state_text", "출처 상태"),
                         ("current_period_display", "현재 대상·수집 기간"),
                         ("baseline_period_display", "이전 대상·수집 기간"),
-                        ("current_amount", "현재", "number0"),
-                        ("baseline_amount", "이전", "number0"),
+                        ("current_amount", "현재 금액", "number0"),
+                        ("baseline_amount", "이전 금액", "number0"),
                         ("amount_change", "증감액", "number0"),
                         ("rate_change", "증감률(%)", "number2"),
                         ("amount_basis", "금액 기준"),
                         ("reason", "근거"),
                     ),
                 ),
-                1,
-            ),
+                len(comparison_rows),
+            ) if cost_enabled else "",
             "</section>",
         ))
 
@@ -1036,22 +1003,6 @@ class HtmlReportRenderer:
         except (TypeError, ValueError):
             return False
 
-    def _analysis_kpi(
-        self,
-        label: str,
-        value: Any,
-        unit: str,
-        source_state: Any = CALCULATED,
-    ) -> str:
-        display = "-" if value is None else self._number(value, decimals=0)
-        return (
-            '<div><span>' + self._text(label) + '</span><strong>'
-            + self._text(display) + ' <small>' + self._text(unit)
-            + '</small></strong><small class="source-state">'
-            + self._text(self._source_state_text(source_state))
-            + '</small></div>'
-        )
-
     def _finding_card(self, finding: Mapping[str, Any]) -> str:
         resource = self._mapping(finding.get("resource"))
         evidence = self._records(finding.get("evidence"))
@@ -1061,8 +1012,6 @@ class HtmlReportRenderer:
             for item in evidence
         )
         severity = str(finding.get("severity") or "INFO").casefold()
-        if finding.get("status") == "EXCEPTION":
-            severity = "exception"
         return f"""
         <article class="finding-card {self._text(severity)}">
           <div class="finding-heading"><span>{self._text(finding.get('severity'))}</span><span>{self._text(self._source_state_text(finding.get('source_state')))}</span><strong>{self._text(finding.get('title'))}</strong></div>
@@ -1074,7 +1023,7 @@ class HtmlReportRenderer:
         self,
         report: ReportResult,
         display: ReportDisplayData,
-    ) -> InfrastructureSectionHtml:
+    ) -> str:
         network_categories = set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
         inventory_resources = [
             resource
@@ -1117,10 +1066,7 @@ class HtmlReportRenderer:
             )
             else ""
         )
-        return InfrastructureSectionHtml(
-            inventory=inventory_html,
-            network_configuration=network_configuration_html,
-        )
+        return inventory_html + network_configuration_html
 
     def _render_monitoring_sections(
         self,
@@ -1155,7 +1101,7 @@ class HtmlReportRenderer:
     def _render_billing_sections(
         self,
         display: ReportDisplayData,
-    ) -> tuple[str, str]:
+    ) -> str:
         billing_html = ""
         if display.billing_enabled:
             billing = display.billing
@@ -1215,13 +1161,13 @@ class HtmlReportRenderer:
             self._organization_cost_sections(display.billing.account_costs)
             if display.organization_billing_enabled else ""
         )
-        return billing_html, organization_billing_html
+        return billing_html + organization_billing_html
 
     def _render_event_diagnostic_sections(
         self,
         report: ReportResult,
         display: ReportDisplayData,
-    ) -> EventDiagnosticSectionHtml:
+    ) -> str:
         insight_events_html = (
             self._section(
                 "Cloud Insight 이벤트",
@@ -1260,49 +1206,33 @@ class HtmlReportRenderer:
                 len(diagnostics),
                 warning=bool(diagnostics),
             )
-        return EventDiagnosticSectionHtml(
-            insight_events=insight_events_html,
-            activity=activity_html,
-            diagnostics=diagnostics_html,
-        )
+        return insight_events_html + activity_html + diagnostics_html
 
     def _render_report_sections(
         self,
         report: ReportResult,
         display: ReportDisplayData,
-    ) -> ReportSectionHtml:
-        summary = self._render_summary_section(report, display)
-        operational_analysis = self._render_operational_analysis(report)
-        infrastructure = self._render_infrastructure_sections(
-            report,
-            display,
-        )
-        monitoring = self._render_monitoring_sections(report, display)
-        billing, organization_billing = self._render_billing_sections(display)
-        event_diagnostics = self._render_event_diagnostic_sections(
-            report,
-            display,
-        )
-        return ReportSectionHtml(
-            summary=summary,
-            operational_analysis=operational_analysis,
-            inventory=infrastructure.inventory,
-            network_configuration=(
-                infrastructure.network_configuration
+    ) -> str:
+        return "".join((
+            self._render_summary_section(report, display),
+            self._render_operational_analysis(
+                report,
+                cost_enabled=(
+                    display.billing_enabled
+                    or display.organization_billing_enabled
+                ),
             ),
-            monitoring=monitoring,
-            billing=billing,
-            organization_billing=organization_billing,
-            insight_events=event_diagnostics.insight_events,
-            activity=event_diagnostics.activity,
-            diagnostics=event_diagnostics.diagnostics,
-        )
+            self._render_infrastructure_sections(report, display),
+            self._render_monitoring_sections(report, display),
+            self._render_billing_sections(display),
+            self._render_event_diagnostic_sections(report, display),
+        ))
 
     def _render_document(
         self,
         report: ReportResult,
         display: ReportDisplayData,
-        sections: ReportSectionHtml,
+        sections: str,
     ) -> str:
         period = display.period
         report_title = display.report_title
@@ -1323,7 +1253,7 @@ class HtmlReportRenderer:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="report-id" content="{self._text(report.report_id)}">
   <title>{self._text(report_title)} · {self._text(report.report_id)}</title>
-  <style>{self._styles()}</style>
+  <style>{HTML_REPORT_STYLES}</style>
 </head>
 <body>
   <main class="report-shell">
@@ -1346,16 +1276,7 @@ class HtmlReportRenderer:
       </div>
     </header>
 
-    {sections.summary}
-    {sections.operational_analysis}
-    {sections.inventory}
-    {sections.network_configuration}
-    {sections.monitoring}
-    {sections.billing}
-    {sections.organization_billing}
-    {sections.insight_events}
-    {sections.activity}
-    {sections.diagnostics}
+    {sections}
 
     <footer>
       <p>이 보고서는 구조화된 NCP 수집 결과로부터 생성되었습니다.</p>
@@ -1741,7 +1662,7 @@ class HtmlReportRenderer:
                         "group": resource.get("resource_name"),
                         "vpc_no": details.get("vpc_no"),
                         "description": (
-                            "설정된 규칙 없음"
+                            "ACG 수집 완료, 명시 규칙 0건"
                             if details.get("rule_snapshot_available") is True
                             else "규칙 수집 결과 없음"
                         ),
@@ -1764,7 +1685,7 @@ class HtmlReportRenderer:
                         "network_acl": resource.get("resource_name"),
                         "vpc_no": details.get("vpc_no"),
                         "description": (
-                            "설정된 규칙 없음"
+                            "NACL 수집 완료, 명시 규칙 0건"
                             if details.get("rule_snapshot_available") is True
                             else "규칙 수집 결과 없음"
                         ),
@@ -1898,22 +1819,15 @@ class HtmlReportRenderer:
         }.get(str(value or "").upper(), "-")
 
     def _infrastructure_create_time(self, value: Any) -> str:
-        timestamp = self._timestamp_millis(value)
+        timestamp = event_timestamp_millis(value)
         if timestamp is not None:
             parsed = datetime.fromtimestamp(timestamp / 1000, tz=self.KST)
             return parsed.strftime("%Y-%m-%d %H:%M KST")
-
-        if not isinstance(value, str) or not value.strip():
-            return "-"
-        try:
-            parsed = datetime.fromisoformat(
-                value.strip().replace("Z", "+00:00")
-            )
-        except ValueError:
-            return value.strip()
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=self.KST)
-        return parsed.astimezone(self.KST).strftime("%Y-%m-%d %H:%M KST")
+        return (
+            str(value).strip()
+            if isinstance(value, str) and value.strip()
+            else "-"
+        )
 
     def _infrastructure_metric_section(
         self,
@@ -2316,37 +2230,14 @@ class HtmlReportRenderer:
         self,
         period: Dict[str, Any],
     ) -> Tuple[int | None, int | None]:
-        start = self._timestamp_millis(period.get("start_time"))
-        end = self._timestamp_millis(period.get("end_time"))
-
-        if start is None:
-            start = self._datetime_text_millis(period.get("start_dt"))
-        if end is None:
-            end = self._datetime_text_millis(period.get("end_dt"))
-        return start, end
-
-    def _timestamp_millis(self, value: Any) -> int | None:
-        if value is None or isinstance(value, bool):
-            return None
-        try:
-            timestamp = float(value)
-        except (TypeError, ValueError):
-            return None
-        if abs(timestamp) < 100_000_000_000:
-            timestamp *= 1000
-        return int(timestamp)
-
-    def _datetime_text_millis(self, value: Any) -> int | None:
-        if not isinstance(value, str) or not value.strip():
-            return None
-        try:
-            parsed = datetime.strptime(
-                value.strip(),
-                "%Y-%m-%d %H:%M:%S",
-            ).replace(tzinfo=self.KST)
-        except ValueError:
-            return None
-        return int(parsed.timestamp() * 1000)
+        return (
+            event_timestamp_millis(
+                period.get("start_time") or period.get("start_dt")
+            ),
+            event_timestamp_millis(
+                period.get("end_time") or period.get("end_dt")
+            ),
+        )
 
     def _is_single_day_period(self, period: Dict[str, Any]) -> bool:
         if period.get("period_type") == "day":
@@ -3392,6 +3283,3 @@ class HtmlReportRenderer:
         if value is None or value == "":
             return "-"
         return escape(str(value), quote=True)
-
-    def _styles(self) -> str:
-        return HTML_REPORT_STYLES

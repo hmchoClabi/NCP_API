@@ -330,7 +330,10 @@ def _record_count(report: Any, key: str) -> int:
             records(field(report, "servers", []))
         )
     if key == "monitoring":
-        return _monitoring_observation_count(report)
+        return monitoring_observation_count(
+            field(report, "server_metrics", []),
+            field(report, "infrastructure_metrics", []),
+        )
     if key == "insight_events":
         return len(records(field(report, "insight_events", [])))
     if key == "activity_events":
@@ -357,9 +360,12 @@ def _record_count(report: Any, key: str) -> int:
     return len(records(field(report, _source_field(key), [])))
 
 
-def _monitoring_observation_count(report: Any) -> int:
+def monitoring_observation_count(
+    server_metrics: Any,
+    infrastructure_metrics: Any,
+) -> int:
     count = 0
-    for metric in records(field(report, "server_metrics", [])):
+    for metric in records(server_metrics):
         raw_metrics = metric.get("raw_metrics")
         if isinstance(raw_metrics, Mapping):
             for stats in raw_metrics.values():
@@ -368,13 +374,16 @@ def _monitoring_observation_count(report: Any) -> int:
                 for entries in stats.values():
                     for entry in records(entries):
                         raw = entry.get("raw")
-                        if isinstance(raw, Mapping) and raw.get("dps"):
+                        if isinstance(raw, Mapping) and isinstance(
+                            raw.get("dps"), list
+                        ):
                             count += len(raw["dps"])
                         elif isinstance(entry.get("values"), list):
                             count += len(entry["values"])
-    for group in records(field(report, "infrastructure_metrics", [])):
+    for group in records(infrastructure_metrics):
         for series in records(group.get("series")):
-            count += len(series.get("points") or [])
+            if isinstance(series.get("points"), list):
+                count += len(series["points"])
     return count
 
 
@@ -388,4 +397,8 @@ def _has_field(source: Any, name: str) -> bool:
     return hasattr(source, name)
 
 
-__all__ = ["analyze_data_quality", "dataset_status"]
+__all__ = [
+    "analyze_data_quality",
+    "dataset_status",
+    "monitoring_observation_count",
+]

@@ -10,6 +10,8 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from typing import Any, Optional
 
+from utils.event_sort import event_timestamp_millis
+
 
 INTERVAL_SECONDS = {
     "Min1": 60,
@@ -71,23 +73,7 @@ def number(value: Any) -> Optional[float]:
     return result if math.isfinite(result) else None
 
 
-def integer(value: Any) -> Optional[int]:
-    parsed = number(value)
-    return int(parsed) if parsed is not None else None
-
-
-def timestamp_millis(value: Any) -> Optional[int]:
-    if isinstance(value, datetime):
-        return int(value.timestamp() * 1000)
-    parsed = number(value)
-    if parsed is None:
-        return None
-    if abs(parsed) < 100_000_000_000:
-        parsed *= 1000
-    try:
-        return int(parsed)
-    except (TypeError, ValueError, OverflowError):
-        return None
+timestamp_millis = event_timestamp_millis
 
 
 def interval_seconds(value: Any) -> Optional[int]:

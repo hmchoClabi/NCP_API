@@ -581,7 +581,8 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("ALLOW", section)
         self.assertIn("empty-acg", section)
         self.assertIn("empty-nacl", section)
-        self.assertEqual(section.count("설정된 규칙 없음"), 2)
+        self.assertIn("ACG 수집 완료, 명시 규칙 0건", section)
+        self.assertIn("NACL 수집 완료, 명시 규칙 0건", section)
 
     def test_infrastructure_charts_preserve_metric_units(self):
         report = self._sample_report()
@@ -993,6 +994,16 @@ class HtmlReportRendererTests(unittest.TestCase):
             "2026-07-01 ~ 2026-07-06",
             html,
         )
+        comparison_section = html.split(
+            "<h2>비용 전기 비교</h2>", 1
+        )[1].split("</section>", 1)[0]
+        self.assertNotIn("이벤트·변경·비용 비교", html)
+        self.assertNotIn("Critical 이벤트", comparison_section)
+        self.assertNotIn("미종료 이벤트", comparison_section)
+        self.assertNotIn("전체 활동", comparison_section)
+        self.assertNotIn("실패 활동", comparison_section)
+        self.assertIn("현재 금액", comparison_section)
+        self.assertIn("이전 금액", comparison_section)
 
     def test_operational_analysis_displays_source_states(self):
         report = self._sample_report()
@@ -1615,6 +1626,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
+        self.assertNotIn("<h2>비용 전기 비교</h2>", html)
 
     def test_collection_diagnostics_merge_warnings_and_errors_with_targets(self):
         report = self._sample_report()

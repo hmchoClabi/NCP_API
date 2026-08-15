@@ -43,36 +43,3 @@ class ReportDisplayData:
     billing_enabled: bool
     organization_billing_enabled: bool
     network_configuration_metadata: Dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class InfrastructureSectionHtml:
-    """인프라 관련 섹션을 최종 문서 순서대로 보관한다."""
-
-    inventory: str = ""
-    network_configuration: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class EventDiagnosticSectionHtml:
-    """이벤트·활동 이력·수집 진단 섹션 묶음."""
-
-    insight_events: str = ""
-    activity: str = ""
-    diagnostics: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class ReportSectionHtml:
-    """최종 HTML 본문에 삽입되는 모든 섹션."""
-
-    summary: str = ""
-    operational_analysis: str = ""
-    inventory: str = ""
-    network_configuration: str = ""
-    monitoring: str = ""
-    billing: str = ""
-    organization_billing: str = ""
-    insight_events: str = ""
-    activity: str = ""
-    diagnostics: str = ""
