@@ -1,9 +1,9 @@
-import json
 import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import requests
 
+from ._collection_support import item_identity
 from normalizers.servernormalizer import ServerNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
@@ -194,7 +194,7 @@ class ServerCollector:
                 )
                 break
             fingerprint = tuple(
-                self._item_identity(item, identity_fields)
+                item_identity(item, identity_fields)
                 for item in items
             )
 
@@ -212,7 +212,7 @@ class ServerCollector:
             added_count = 0
 
             for item in items:
-                identity = self._item_identity(item, identity_fields)
+                identity = item_identity(item, identity_fields)
 
                 if identity in seen_identities:
                     continue
@@ -249,24 +249,6 @@ class ServerCollector:
 
     def _region_kwargs(self) -> Dict[str, str]:
         return {"region_code": self.region_code} if self.region_code else {}
-
-    def _item_identity(
-        self,
-        item: Dict[str, Any],
-        identity_fields: Sequence[str],
-    ) -> str:
-        for field in identity_fields:
-            value = item.get(field)
-
-            if value is not None and str(value).strip():
-                return f"{field}:{value}"
-
-        return "row:" + json.dumps(
-            item,
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
 
     def _dict_items(self, value: Any) -> List[Dict[str, Any]]:
         if not isinstance(value, list):

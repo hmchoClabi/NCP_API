@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from dateutil.relativedelta import relativedelta
 
+from ._collection_support import query_time_windows
 from normalizers.insightmetricnormalizer import InsightMetricNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
@@ -288,29 +289,6 @@ class InsightMetricCollector:
             return "Hour2"
         return "Day1"
 
-    def _query_time_windows(
-        self,
-        start_time: int,
-        end_time: int,
-        interval: str,
-    ) -> List[tuple[int, int]]:
-        day = 24 * 60 * 60 * 1000
-        window_size = {
-            "Min1": day,
-            "Min5": 7 * day,
-            "Min30": 31 * day,
-            "Hour2": 31 * day,
-            "Day1": 366 * day,
-        }.get(interval, 7 * day)
-
-        result = []
-        cursor = start_time
-        while cursor <= end_time:
-            window_end = min(cursor + window_size - 1, end_time)
-            result.append((cursor, window_end))
-            cursor = window_end + 1
-        return result
-
     def _execute_metric_queries(
         self,
         metric_queries: List[Dict[str, Any]],
@@ -327,7 +305,7 @@ class InsightMetricCollector:
         for stat_name, payloads in queries_by_stat.items():
             for chunk in batched(payloads, self.MAX_QUERY_SIZE):
                 interval = str(chunk[0].get("interval") or "Min5")
-                time_windows = self._query_time_windows(
+                time_windows = query_time_windows(
                     start_time=start_time,
                     end_time=end_time,
                     interval=interval,

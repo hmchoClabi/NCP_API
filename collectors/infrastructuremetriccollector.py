@@ -10,6 +10,7 @@ import requests
 from dateutil.relativedelta import relativedelta
 
 from . import _infrastructure_metric_catalog as metric_catalog
+from ._collection_support import query_time_windows
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
 
@@ -1349,7 +1350,7 @@ class InfrastructureMetricCollector:
 
         for (_, interval, _), group_records in grouped.items():
             for chunk in batched(group_records, self.MAX_QUERY_SIZE):
-                for window_start, window_end in self._query_time_windows(
+                for window_start, window_end in query_time_windows(
                     start_time=start_time,
                     end_time=end_time,
                     interval=interval,
@@ -1716,28 +1717,6 @@ class InfrastructureMetricCollector:
             "percent",
             "percentage",
         }
-
-    def _query_time_windows(
-        self,
-        start_time: int,
-        end_time: int,
-        interval: str,
-    ) -> List[Tuple[int, int]]:
-        day = 24 * 60 * 60 * 1000
-        window_size = {
-            "Min1": day,
-            "Min5": 7 * day,
-            "Min30": 31 * day,
-            "Hour2": 31 * day,
-            "Day1": 366 * day,
-        }.get(interval, 7 * day)
-        result = []
-        cursor = start_time
-        while cursor <= end_time:
-            window_end = min(cursor + window_size - 1, end_time)
-            result.append((cursor, window_end))
-            cursor = window_end + 1
-        return result
 
     def _classify_exception(
         self,

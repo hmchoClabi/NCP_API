@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from collectors._collection_support import query_time_windows
 from collectors.activitytracercollector import ActivityTracerEventCollector
 from collectors.insighteventcollector import InsightEventCollector
 from collectors.insightmetriccollector import InsightMetricCollector
@@ -593,10 +594,9 @@ class PipelineCollectorTests(unittest.TestCase):
         )
 
     def test_metric_query_windows_follow_interval_recommendations(self):
-        collector = InsightMetricCollector(FakeFactory())
         day = 24 * 60 * 60 * 1000
 
-        windows = collector._query_time_windows(
+        windows = query_time_windows(
             start_time=0,
             end_time=20 * day - 1,
             interval="Min5",

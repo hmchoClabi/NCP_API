@@ -76,6 +76,19 @@ def number(value: Any) -> Optional[float]:
 timestamp_millis = event_timestamp_millis
 
 
+def date_value(value: Any) -> Optional[date]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return datetime.strptime(text[:8], "%Y%m%d").date()
+        except ValueError:
+            return None
+
+
 def interval_seconds(value: Any) -> Optional[int]:
     text = str(value or "").strip()
     if text in INTERVAL_SECONDS:

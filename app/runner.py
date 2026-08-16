@@ -328,12 +328,6 @@ class ReportRunner:
             "calculated_at": datetime.now(self.KST).isoformat(timespec="seconds"),
         }
 
-    def _selected_report_options(self) -> ReportOptions:
-        customer = getattr(self, "customer", None)
-        return ReportOptions.from_value(
-            getattr(customer, "report_options", None)
-        )
-
     def _now_kst_iso(self) -> str:
         return datetime.now(self.KST).isoformat(timespec="microseconds")
 
@@ -1145,28 +1139,28 @@ class ReportRunner:
         ):
             if report_options.analysis_collector_enabled("wms"):
                 wms_collector = WMSCollector(api_factory=self.api_factory)
+                aggregation = self._wms_aggregation(period)
                 scenarios = wms_collector.collect(
                     start_time=period["start_time"],
                     end_time=period["end_time"],
-                    aggregation=self._wms_aggregation(period),
+                    aggregation=aggregation,
                 )
                 wms_errors = list(wms_collector.last_errors)
+                observation_count = self._wms_observation_count(scenarios)
                 operational_source_errors.extend(wms_errors)
                 service_availability = {
                     "source": "NCP_WMS",
                     "status": wms_collector.last_dataset_status,
-                    "aggregation": self._wms_aggregation(period),
+                    "aggregation": aggregation,
                     "scenarios": scenarios,
-                    "observation_count": self._wms_observation_count(
-                        scenarios
-                    ),
+                    "observation_count": observation_count,
                     "error_count": len(wms_errors),
                 }
                 dataset_statuses.append({
                     "key": "service_availability",
                     "label": "서비스 가용성(WMS)",
                     "status": wms_collector.last_dataset_status,
-                    "record_count": self._wms_observation_count(scenarios),
+                    "record_count": observation_count,
                     "error_count": len(wms_errors),
                     "source": "NCP_WMS",
                 })
@@ -2295,16 +2289,12 @@ class ReportRunner:
         period.update(billing_context)
 
         self.print_period_summary(period)
+        customer = getattr(self, "customer", None)
         collection_plan = build_collection_plan(
-            self._selected_report_options()
+            ReportOptions.from_value(getattr(customer, "report_options", None))
         )
         report_options = collection_plan.report_options
-        report_options_snapshot = report_options.to_dict()
-        customer_snapshot = (
-            getattr(self, "customer", None).to_dict()
-            if getattr(self, "customer", None) is not None
-            else {}
-        )
+        customer_snapshot = customer.to_dict() if customer is not None else {}
         selected_resource_categories = (
             collection_plan.selected_resource_categories
         )
@@ -2554,7 +2544,7 @@ class ReportRunner:
             service_availability=observability.service_availability,
             security_monitoring=observability.security_monitoring,
             dataset_statuses=observability.dataset_statuses,
-            report_options=report_options_snapshot,
+            report_options=report_options.to_dict(),
             collection_metadata=collection_metadata,
             collection_errors=all_collection_errors,
             collection_warnings=all_collection_warnings,

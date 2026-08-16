@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Mapping
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from .models import Finding
 from .provenance import CALCULATED, OBSERVED, UNAVAILABLE
-from .support import field, mapping, normalize_period_type, number, rounded
+from .support import (
+    date_value,
+    field,
+    mapping,
+    normalize_period_type,
+    number,
+    rounded,
+)
 
 
 FACT_NAMES = (
@@ -308,8 +315,8 @@ def _incompatibility(
 
 
 def _date_range(start: Any, end: Any) -> Optional[tuple[date, date]]:
-    parsed_start = _date_value(start)
-    parsed_end = _date_value(end)
+    parsed_start = date_value(start)
+    parsed_end = date_value(end)
     if (
         parsed_start is None
         or parsed_end is None
@@ -317,20 +324,6 @@ def _date_range(start: Any, end: Any) -> Optional[tuple[date, date]]:
     ):
         return None
     return parsed_start, parsed_end
-
-
-def _date_value(value: Any) -> Optional[date]:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    normalized = text.replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(normalized).date()
-    except ValueError:
-        try:
-            return datetime.strptime(text[:8], "%Y%m%d").date()
-        except ValueError:
-            return None
 
 
 def _periods_are_comparable(

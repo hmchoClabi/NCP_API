@@ -1651,7 +1651,7 @@ class BillingCollectorTests(unittest.TestCase):
 
     def test_chunk_rejects_non_positive_size(self):
         collector = BillingCollector(FakeFactory(object()))
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, r"^chunk size는 1 이상이어야 합니다\.$"):
             list(collector.chunk(["1"], 0))
 
     def test_optional_source_failure_preserves_other_billing_results(self):

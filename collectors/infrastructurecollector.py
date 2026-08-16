@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 import requests
 
+from ._collection_support import item_identity
 from normalizers.infrastructurenormalizer import InfrastructureNormalizer
 from utils.response_validation import validate_collection_response
 
@@ -818,7 +818,7 @@ class InfrastructureCollector:
                 break
 
             for item in items:
-                identity = self._item_identity(item, identity_fields)
+                identity = item_identity(item, identity_fields)
                 if identity in seen:
                     continue
                 seen.add(identity)
@@ -899,7 +899,7 @@ class InfrastructureCollector:
                 break
 
             fingerprint = tuple(
-                self._item_identity(item, identity_fields)
+                item_identity(item, identity_fields)
                 for item in items
             )
             if items and fingerprint == previous_fingerprint:
@@ -915,7 +915,7 @@ class InfrastructureCollector:
 
             added = 0
             for item in items:
-                identity = self._item_identity(item, identity_fields)
+                identity = item_identity(item, identity_fields)
                 if identity in seen:
                     continue
                 seen.add(identity)
@@ -1147,7 +1147,7 @@ class InfrastructureCollector:
                 break
 
             fingerprint = tuple(
-                self._item_identity(item, ("nrn", "resourceId"))
+                item_identity(item, ("nrn", "resourceId"))
                 for item in items
             )
             if items and fingerprint == previous_fingerprint:
@@ -1162,7 +1162,7 @@ class InfrastructureCollector:
             previous_fingerprint = fingerprint
 
             for item in items:
-                identity = self._item_identity(item, ("nrn", "resourceId"))
+                identity = item_identity(item, ("nrn", "resourceId"))
                 if identity in seen:
                     continue
                 seen.add(identity)
@@ -1379,22 +1379,6 @@ class InfrastructureCollector:
         if not isinstance(value, list):
             return []
         return [dict(item) for item in value if isinstance(item, Mapping)]
-
-    @staticmethod
-    def _item_identity(
-        item: Mapping[str, Any],
-        identity_fields: Sequence[str],
-    ) -> str:
-        for field in identity_fields:
-            value = item.get(field)
-            if value is not None and str(value).strip():
-                return f"{field}:{value}"
-        return "row:" + json.dumps(
-            item,
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
 
     def _normalize_categories(
         self,

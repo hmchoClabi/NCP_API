@@ -1,7 +1,7 @@
 import json
 import math
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
@@ -31,6 +31,7 @@ from app.report_analysis.provenance import (
     dataset_source_state,
     historical_source_state,
 )
+from app.report_analysis.support import date_value
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
@@ -383,12 +384,12 @@ class HtmlReportRenderer:
         ):
             return False
 
-        report_start = self._billing_date(period.get("start_dt"))
-        report_end = self._billing_date(period.get("end_dt"))
-        coverage_end = self._billing_date(
+        report_start = date_value(period.get("start_dt"))
+        report_end = date_value(period.get("end_dt"))
+        coverage_end = date_value(
             month_to_date_estimate.get("coverage_end")
         )
-        calculated_date = self._billing_date(period.get("calculated_at"))
+        calculated_date = date_value(period.get("calculated_at"))
         if (
             not report_start
             or not report_end
@@ -418,20 +419,6 @@ class HtmlReportRenderer:
         )
 
     @staticmethod
-    def _billing_date(value: Any) -> date | None:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        normalized = text.replace("Z", "+00:00")
-        try:
-            return datetime.fromisoformat(normalized).date()
-        except ValueError:
-            try:
-                return datetime.strptime(text[:8], "%Y%m%d").date()
-            except ValueError:
-                return None
-
-    @staticmethod
     def _billing_coverage_text(fact: Mapping[str, Any]) -> str:
         return (
             f"{fact.get('coverage_start') or '-'} ~ "
@@ -445,10 +432,10 @@ class HtmlReportRenderer:
         preferred_names: Sequence[str],
     ) -> Mapping[str, Any]:
         """보고서 대상 기간과 정확히 일치하는 비용 사실만 요약에 사용한다."""
-        report_start = self._billing_date(
+        report_start = date_value(
             period.get("use_start_date") or period.get("start_dt")
         )
-        report_end = self._billing_date(
+        report_end = date_value(
             period.get("use_end_date") or period.get("end_dt")
         )
         if report_start is None or report_end is None:
@@ -458,8 +445,8 @@ class HtmlReportRenderer:
             for name in preferred_names
             for fact in facts
             if fact.get("name") == name
-            and self._billing_date(fact.get("period_start")) == report_start
-            and self._billing_date(fact.get("period_end")) == report_end
+            and date_value(fact.get("period_start")) == report_start
+            and date_value(fact.get("period_end")) == report_end
         ), {})
 
     @staticmethod
