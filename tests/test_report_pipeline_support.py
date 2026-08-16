@@ -36,6 +36,16 @@ class ReportPipelineSupportTest(unittest.TestCase):
 
         self.assertEqual(second.errors, [])
 
+    def test_network_configuration_does_not_use_inventory_snapshot(self):
+        plan = build_collection_plan(ReportOptions.from_value({
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["ACCESS_CONTROL_GROUP", "NETWORK_ACL"],
+            "monitoring_categories": [],
+        }))
+
+        self.assertTrue(plan.needs_infrastructure_collection)
+        self.assertFalse(plan.needs_resource_snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()

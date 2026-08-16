@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from .models import Finding
@@ -24,6 +24,16 @@ FACT_LABELS = {
     "period_estimate": "보고 기간 추정 금액",
     "month_to_date_estimate": "월 누적 추정 금액",
     "month_end_projection": "월말 추정 금액",
+}
+
+INCOMPATIBILITY_LABELS = {
+    "currency": "통화",
+    "amount_basis": "금액 기준",
+    "confidence": "신뢰도",
+    "includes_discount": "할인 포함 여부",
+    "includes_vat": "VAT 포함 여부",
+    "comparison_period": "비교 기간",
+    "coverage": "실제 수집 범위",
 }
 
 
@@ -123,30 +133,28 @@ def _compare_facts(
     current_facts: list[dict[str, Any]],
     baseline_facts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if not baseline_facts:
-        return {
-            "status": "UNAVAILABLE",
-            "source_state": UNAVAILABLE,
-            "reason": "비교할 이전 보고서가 없습니다.",
-        }
     preferred = _preferred_fact_names(report)
     period = mapping(field(report, "period", {}))
     period_type = normalize_period_type(period.get("period_type"))
-    saw_pair = False
-    incompatible_fields: set[str] = set()
+    current_fact: Optional[dict[str, Any]] = None
+    first_incompatible: Optional[
+        tuple[dict[str, Any], dict[str, Any], list[str]]
+    ] = None
     for name in preferred:
         current = _fact_by_name(current_facts, name)
+        if current_fact is None and current is not None:
+            current_fact = current
         previous = _fact_by_name(baseline_facts, name)
         if not current or not previous:
             continue
-        saw_pair = True
         incompatibility = _incompatibility(
             current,
             previous,
             period_type=period_type,
         )
         if incompatibility:
-            incompatible_fields.update(incompatibility)
+            if first_incompatible is None:
+                first_incompatible = (current, previous, incompatibility)
             continue
         current_amount = number(current.get("total_amount"))
         baseline_amount = number(previous.get("total_amount"))
@@ -163,39 +171,68 @@ def _compare_facts(
                 "조회 기간·실제 수집 범위와 금액 기준·신뢰도·할인·VAT "
                 "범위가 같은 비용 사실을 비교했습니다."
             ),
-            "fact_name": name,
-            "current_amount": rounded(current_amount),
-            "baseline_amount": rounded(baseline_amount),
+            **_comparison_context(current, previous),
             "amount_change": rounded(amount_change),
             "rate_change": rounded(rate_change),
-            "currency": current["currency"],
-            "amount_basis": current.get("amount_basis"),
-            "confidence": current.get("confidence"),
-            "includes_discount": current.get("includes_discount"),
-            "includes_vat": current.get("includes_vat"),
-            "current_period_start": current.get("period_start"),
-            "current_period_end": current.get("period_end"),
-            "current_coverage_start": current.get("coverage_start"),
-            "current_coverage_end": current.get("coverage_end"),
-            "baseline_period_start": previous.get("period_start"),
-            "baseline_period_end": previous.get("period_end"),
-            "baseline_coverage_start": previous.get("coverage_start"),
-            "baseline_coverage_end": previous.get("coverage_end"),
         }
-    if saw_pair:
+    if first_incompatible is not None:
+        current, previous, incompatible_fields = first_incompatible
+        incompatible_fields = sorted(incompatible_fields)
+        labels = ", ".join(
+            INCOMPATIBILITY_LABELS.get(name, name)
+            for name in incompatible_fields
+        )
         return {
             "status": "INCOMPATIBLE",
             "source_state": CALCULATED,
             "reason": (
-                "같은 비용 항목은 있으나 조회 기간·실제 수집 범위 또는 "
-                "금액 기준·신뢰도·할인·VAT 범위가 달라 비교하지 않았습니다."
+                "다음 비교 조건이 일치하지 않아 증감은 계산하지 "
+                f"않았습니다: {labels}."
             ),
-            "incompatible_fields": sorted(incompatible_fields),
+            **_comparison_context(current, previous),
+            "incompatible_fields": incompatible_fields,
+        }
+    if current_fact is not None:
+        return {
+            "status": "UNAVAILABLE",
+            "source_state": UNAVAILABLE,
+            "reason": (
+                "현재 보고 기간 비용은 수집됐지만 직전 비교 기간의 같은 "
+                "비용 항목은 사용할 수 없습니다."
+            ),
+            **_comparison_context(current_fact),
         }
     return {
         "status": "UNAVAILABLE",
         "source_state": UNAVAILABLE,
         "reason": "현재 보고서와 이전 보고서에 공통 비용 항목이 없습니다.",
+    }
+
+
+def _comparison_context(
+    current: Mapping[str, Any],
+    previous: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    previous = previous or {}
+    return {
+        "fact_name": current.get("name"),
+        "current_amount": current.get("total_amount"),
+        "baseline_amount": previous.get("total_amount"),
+        "amount_change": None,
+        "rate_change": None,
+        "currency": current.get("currency"),
+        "amount_basis": current.get("amount_basis"),
+        "confidence": current.get("confidence"),
+        "includes_discount": current.get("includes_discount"),
+        "includes_vat": current.get("includes_vat"),
+        "current_period_start": current.get("period_start"),
+        "current_period_end": current.get("period_end"),
+        "current_coverage_start": current.get("coverage_start"),
+        "current_coverage_end": current.get("coverage_end"),
+        "baseline_period_start": previous.get("period_start"),
+        "baseline_period_end": previous.get("period_end"),
+        "baseline_coverage_start": previous.get("coverage_start"),
+        "baseline_coverage_end": previous.get("coverage_end"),
     }
 
 
@@ -209,6 +246,8 @@ def _preferred_fact_names(report: Any) -> tuple[str, ...]:
             "month_to_date_estimate",
             "month_end_projection",
         )
+    if period_type in {"DAILY", "RANGE"}:
+        return ("period_estimate",)
     return (
         "period_estimate",
         "month_to_date_estimate",
@@ -306,11 +345,16 @@ def _periods_are_comparable(
     previous_days = (previous_end - previous_start).days
 
     if period_type == "DAILY":
-        return current_days == previous_days == 0
+        return (
+            current_days == previous_days == 0
+            and previous_end + timedelta(days=1) == current_start
+        )
     if period_type == "MONTHLY":
         if (
             current_start.day != 1
             or previous_start.day != 1
+            or current_start.year * 12 + current_start.month
+            != previous_start.year * 12 + previous_start.month + 1
             or current_start.month != current_end.month
             or current_start.year != current_end.year
             or previous_start.month != previous_end.month
@@ -328,7 +372,10 @@ def _periods_are_comparable(
             and not previous_full
             and current_days == previous_days
         )
-    return current_days == previous_days
+    return (
+        current_days == previous_days
+        and previous_end + timedelta(days=1) == current_start
+    )
 
 
 def _coverage_is_comparable(

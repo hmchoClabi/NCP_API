@@ -100,6 +100,14 @@ class CollectionDiagnosticTests(unittest.TestCase):
             "API 미확인 (구형 진단 데이터)",
         )
 
+    def test_historical_snapshot_diagnostic_uses_internal_source_label(self):
+        issue = normalize_collection_issue({
+            "collector": "InfrastructureCollector",
+            "stage": "historical_snapshot_lookup",
+        })
+
+        self.assertEqual(issue["called_api"], "내부 저장 스냅샷 판정")
+
     def test_generic_403_uses_api_catalog_as_permission_recommendation(self):
         issue = normalize_collection_issue({
             "collector": "InfrastructureCollector",

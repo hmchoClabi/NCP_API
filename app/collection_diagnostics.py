@@ -116,9 +116,11 @@ def normalize_collection_issue(
     normalized["severity"] = severity
     normalized["severity_label"] = "경고" if severity == "warning" else "오류"
     normalized["service_name"] = service_name
-    normalized["called_api"] = (
-        _first_text(normalized, "api", "source")
-        or "API 미확인 (구형 진단 데이터)"
+    called_api = _first_text(normalized, "api", "source")
+    normalized["called_api"] = called_api or (
+        "내부 저장 스냅샷 판정"
+        if _normalized_key(normalized.get("stage")).startswith("historical_")
+        else "API 미확인 (구형 진단 데이터)"
     )
     normalized["target"] = (
         f"{service_name} · {resource_target}"

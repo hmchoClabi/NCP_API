@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Optional
 
-from app.report_options import ReportOptions
+from app.report_options import (
+    NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
+    ReportOptions,
+)
 
 
 @dataclass(frozen=True)
@@ -105,8 +108,10 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
 
     collection_resource_categories = frozenset(collection_resources)
     needs_infrastructure = bool(collection_resource_categories)
-    needs_snapshot = needs_infrastructure or (
-        monitoring_enabled and "SERVER" in selected_monitoring
+    needs_snapshot = bool(
+        collection_resource_categories.difference(
+            NETWORK_CONFIGURATION_CATEGORY_OPTIONS
+        )
     )
     return ReportCollectionPlan(
         report_options=report_options,

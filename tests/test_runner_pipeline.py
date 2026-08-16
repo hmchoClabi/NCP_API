@@ -920,6 +920,97 @@ class RunnerPipelineTests(unittest.TestCase):
             for warning in report.collection_warnings
         ))
 
+    def test_stored_period_snapshot_also_persists_current_observation(self):
+        snapshot = {
+            "servers": [{
+                "server_id": "stored-server",
+                "server_name": "stored-server",
+                "status": "RUN",
+            }],
+            "infrastructure": [{
+                "category": "SERVER",
+                "resource_id": "stored-server",
+                "resource_name": "stored-server",
+                "details": {"server_instance_no": "stored-server"},
+            }],
+            "report_options": {
+                "resource_categories": ["SERVER", "VPC"],
+            },
+            "collection_metadata": {
+                "infrastructure": {
+                    "completed_at": "2026-08-08T11:00:00+09:00",
+                    "source": "LIVE_API_COLLECTION",
+                    "collected_categories": ["SERVER", "VPC"],
+                    "inventory_completeness": (
+                        "COMPLETE_FOR_SELECTED_SCOPE"
+                    ),
+                    "collection_issue_count": 0,
+                }
+            },
+            "_snapshot_reference": {
+                "report_run_id": "stored-run",
+                "observed_at": "2026-08-08T11:00:00+09:00",
+                "reference_at": "2026-08-09T12:00:00+09:00",
+            },
+        }
+        repository = SnapshotRepository(snapshot)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner = self._runner_without_factory_init(temp_dir)
+            runner.customer = CustomerProfile(
+                customer_id="customer-1",
+                customer_name="Customer 1",
+                cloud_account_id="account-1",
+                report_options={
+                    "sections": ["infrastructure_inventory"],
+                    "resource_categories": ["SERVER", "VPC"],
+                    "monitoring_categories": [],
+                },
+            )
+            runner.report_repository = repository
+            runner._today_kst = lambda: date(2026, 8, 9)
+
+            with (
+                patch("app.runner.ServerCollector", CurrentServerCollector),
+                patch(
+                    "app.runner.InfrastructureCollector",
+                    CurrentInfrastructureCollector,
+                ),
+                patch.object(
+                    runner,
+                    "_now_kst_iso",
+                    return_value="2026-08-09T12:00:00+09:00",
+                ),
+            ):
+                report = runner.run(target_day="2026-08-08")
+
+        self.assertEqual(
+            [item["resource_id"] for item in report.infrastructure],
+            ["stored-server"],
+        )
+        self.assertEqual(
+            report.collection_metadata["infrastructure"]["source"],
+            "STORED_REPORT_SNAPSHOT",
+        )
+        observation = (
+            repository.saved_report.to_persistence_dict()[
+                "infrastructure_snapshot"
+            ]
+        )
+        self.assertEqual(
+            {item["resource_id"] for item in observation["infrastructure"]},
+            {"current-server", "current-vpc"},
+        )
+        self.assertEqual(
+            observation["metadata"]["source"],
+            "LIVE_API_COLLECTION",
+        )
+        self.assertEqual(
+            observation["metadata"]["completed_at"],
+            "2026-08-09T12:00:00+09:00",
+        )
+        self.assertNotIn("infrastructure_snapshot", report.to_dict())
+
     def test_past_period_without_snapshot_uses_creation_time_fallback(self):
         repository = SnapshotRepository(None)
 
@@ -999,6 +1090,10 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertTrue(any(
             warning.get("code")
             == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+            for warning in report.collection_warnings
+        ))
+        self.assertFalse(any(
+            warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
             for warning in report.collection_warnings
         ))
         self.assertTrue(any(
@@ -1097,6 +1192,10 @@ class RunnerPipelineTests(unittest.TestCase):
             report.collection_metadata["infrastructure"]["source"],
             "UNAVAILABLE",
         )
+        self.assertTrue(any(
+            warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
+            for warning in report.collection_warnings
+        ))
 
     def test_datetime_range_uses_exclusive_end_and_time_file_suffix(self):
         runner = self._runner_without_factory_init()

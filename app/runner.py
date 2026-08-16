@@ -875,14 +875,7 @@ class ReportRunner:
         needs_server_collection = (
             period_snapshot is None
             and (live_snapshot_in_period or current_state_period_fallback)
-            and (
-                "SERVER" in collection_plan.collection_resource_categories
-                or (
-                    collection_plan.monitoring_enabled
-                    and "SERVER"
-                    in collection_plan.selected_monitoring_categories
-                )
-            )
+            and "SERVER" in collection_plan.collection_resource_categories
         )
         return SnapshotDecision(
             observation_check_at=observation_check_at,
@@ -1010,7 +1003,7 @@ class ReportRunner:
                 "missing_categories": missing_categories,
                 "message": (
                     "저장된 과거 스냅샷이 현재 선택한 일부 자원 범주를 "
-                    "수집하지 않아 구성도에서 제외했습니다."
+                    "수집하지 않아 자원 목록과 모니터링 대상에서 제외했습니다."
                 ),
             })
         result.collection_metadata["infrastructure"].update({
@@ -1041,27 +1034,17 @@ class ReportRunner:
         initial_warnings: List[Dict[str, Any]],
     ) -> ResourceCollectionResult:
         """보고 기간의 스냅샷을 확보하지 못한 상태를 명시적으로 만든다."""
-        warnings = list(initial_warnings)
-        warnings.append({
+        warnings = [*initial_warnings, {
             "collector": "InfrastructureCollector",
             "stage": "historical_snapshot_lookup",
             "target_type": "infrastructure",
             "severity": "warning",
             "code": "PERIOD_SNAPSHOT_UNAVAILABLE",
             "message": (
-                (
-                    "보고 기간 안에 실제 수집된 인프라 스냅샷이 없어 "
-                    "목록은 현재 자원의 생성 시각으로 보완하고 구성도는 "
-                    "과거 상태를 임의로 대체하지 않습니다."
-                )
-                if decision.current_state_period_fallback
-                else (
-                    "보고 기간이 아직 시작되지 않았거나 기간 안에 "
-                    "수집된 인프라 스냅샷이 없어 현재 상태로 "
-                    "대체하지 않았습니다."
-                )
+                "보고 기간이 아직 시작되지 않아 현재 상태로 "
+                "대체하지 않았습니다."
             ),
-        })
+        }]
         return ResourceCollectionResult(
             infrastructure_warnings=warnings,
             collection_metadata={
@@ -2072,7 +2055,20 @@ class ReportRunner:
         current_state_period_fallback = (
             snapshot_decision.current_state_period_fallback
         )
-        needs_server_collection = snapshot_decision.needs_server_collection
+        capture_current_snapshot = period_snapshot is not None
+        if capture_current_snapshot:
+            server_data = []
+            server_errors = []
+            infrastructure_collected_data = []
+            infrastructure_errors = []
+            infrastructure_warnings = []
+        needs_server_collection = (
+            snapshot_decision.needs_server_collection
+            or (
+                capture_current_snapshot
+                and "SERVER" in collection_resource_categories
+            )
+        )
 
         if needs_server_collection:
             server_collector = ServerCollector(api_factory=self.api_factory)
@@ -2088,9 +2084,9 @@ class ReportRunner:
 
         if (
             needs_infrastructure_collection
-            and period_snapshot is None
             and (
-                live_snapshot_in_period
+                capture_current_snapshot
+                or live_snapshot_in_period
                 or current_state_period_fallback
             )
         ):
@@ -2109,7 +2105,10 @@ class ReportRunner:
                 collected_infrastructure_warnings,
             )
             infrastructure_completed_at = self._now_kst_iso()
-            if current_state_period_fallback:
+            if not self._period_contains_timestamp(
+                period,
+                infrastructure_completed_at,
+            ):
                 snapshot_categories = (
                     set(collection_resource_categories)
                     - set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
@@ -2150,6 +2149,24 @@ class ReportRunner:
                         "collection_issue_count": snapshot_issue_count,
                     },
                 }
+            if capture_current_snapshot:
+                resource_result.server_errors = self._merge_error_lists(
+                    resource_result.server_errors,
+                    server_errors,
+                )
+                resource_result.infrastructure_errors = (
+                    self._merge_error_lists(
+                        resource_result.infrastructure_errors,
+                        infrastructure_errors,
+                    )
+                )
+                resource_result.infrastructure_warnings = (
+                    self._merge_error_lists(
+                        resource_result.infrastructure_warnings,
+                        infrastructure_warnings,
+                    )
+                )
+                return resource_result
             live_snapshot_window = self._snapshot_eligibility_window(
                 period,
                 infrastructure_completed_at,
@@ -2327,6 +2344,7 @@ class ReportRunner:
         elif (
             collection_plan.needs_resource_snapshot
             and not snapshot_decision.live_snapshot_in_period
+            and not snapshot_decision.current_state_period_fallback
         ):
             resource_result = self._unavailable_snapshot_result(
                 period=period,

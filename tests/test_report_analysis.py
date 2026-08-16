@@ -641,21 +641,33 @@ class ReportAnalysisTests(unittest.TestCase):
 
         self.assertEqual(len(fingerprints), 2)
 
-    def test_cost_comparison_requires_matching_basis_and_confidence(self):
-        fact = {
+    @staticmethod
+    def _cost_fact(
+        *,
+        start="2026-08-01",
+        end=None,
+        total_amount=120,
+        **overrides,
+    ):
+        end = end or start
+        return {
             "cost_type": "PERIOD_ESTIMATE",
             "status": "AVAILABLE",
-            "total_amount": 120,
+            "total_amount": total_amount,
             "currency": "KRW",
             "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
             "confidence": "VERIFIED_ESTIMATE",
             "includes_discount": False,
             "includes_vat": False,
-            "period_start": "2026-08-01",
-            "period_end": "2026-08-01",
-            "coverage_start": "2026-08-01",
-            "coverage_end": "2026-08-01",
+            "period_start": start,
+            "period_end": end,
+            "coverage_start": start,
+            "coverage_end": end,
+            **overrides,
         }
+
+    def test_cost_comparison_requires_matching_basis_and_confidence(self):
+        fact = self._cost_fact()
         report = self._report(billing={"period_estimate": fact})
         baseline = self._report(billing={
             "period_estimate": {
@@ -686,23 +698,123 @@ class ReportAnalysisTests(unittest.TestCase):
 
         self.assertEqual(compatible["costs"]["comparison"]["status"], "AVAILABLE")
         self.assertEqual(compatible["costs"]["comparison"]["rate_change"], 20)
-        self.assertEqual(incompatible["costs"]["comparison"]["status"], "INCOMPATIBLE")
+        comparison = incompatible["costs"]["comparison"]
+        self.assertEqual(comparison["status"], "INCOMPATIBLE")
+        self.assertEqual(comparison["current_amount"], 120)
+        self.assertEqual(comparison["baseline_amount"], 100)
+        self.assertEqual(comparison["current_period_start"], "2026-08-01")
+        self.assertEqual(comparison["baseline_period_start"], "2026-07-31")
+        self.assertIsNone(comparison["amount_change"])
+        self.assertIsNone(comparison["rate_change"])
+        self.assertEqual(comparison["incompatible_fields"], ["confidence"])
+        self.assertIn("신뢰도", comparison["reason"])
+
+    def test_daily_cost_ignores_monthly_fallback_when_baseline_day_is_missing(self):
+        current = self._cost_fact(
+            start="2026-08-15",
+            total_amount=38385.48,
+        )
+        monthly = {
+            **current,
+            "cost_type": "MONTH_TO_DATE_ESTIMATE",
+            "total_amount": 628740,
+            "confidence": "PARTIAL",
+            "period_start": "2026-08-01",
+            "coverage_start": "2026-08-01",
+        }
+        analysis = analyze_report(
+            self._report(billing={
+                "period_estimate": current,
+                "month_to_date_estimate": monthly,
+            }),
+            baseline=self._report(billing={
+                "period_estimate": {
+                    **current,
+                    "status": "UNAVAILABLE",
+                    "total_amount": 0,
+                    "period_start": "2026-08-14",
+                    "period_end": "2026-08-14",
+                    "coverage_start": None,
+                    "coverage_end": None,
+                },
+                "month_to_date_estimate": {
+                    **monthly,
+                    "total_amount": 544374.89,
+                    "period_end": "2026-08-14",
+                    "coverage_end": "2026-08-14",
+                },
+            }),
+        )
+
+        comparison = analysis["costs"]["comparison"]
+        self.assertEqual(comparison["status"], "UNAVAILABLE")
+        self.assertEqual(comparison["fact_name"], "period_estimate")
+        self.assertEqual(comparison["current_amount"], 38385.48)
+        self.assertEqual(comparison["current_period_start"], "2026-08-15")
+        self.assertEqual(
+            comparison["amount_basis"], "PRE_DISCOUNT_LIST_PRICE"
+        )
+        self.assertIsNone(comparison["baseline_amount"])
+        self.assertIsNone(comparison["amount_change"])
+        self.assertIsNone(comparison["rate_change"])
+
+    def test_range_cost_uses_only_period_estimate(self):
+        fact = self._cost_fact(start="2026-08-03", end="2026-08-04")
+        fallback = {
+            **fact,
+            "cost_type": "MONTH_TO_DATE_ESTIMATE",
+        }
+        analysis = analyze_report(
+            self._report(
+                period={"period_type": "range"},
+                billing={
+                    "period_estimate": fact,
+                    "month_to_date_estimate": fallback,
+                },
+            ),
+            baseline=self._report(
+                period={"period_type": "range"},
+                billing={
+                    "period_estimate": {**fact, "status": "UNAVAILABLE"},
+                    "month_to_date_estimate": {
+                        **fallback,
+                        "total_amount": 100,
+                        "period_start": "2026-08-01",
+                        "period_end": "2026-08-02",
+                        "coverage_start": "2026-08-01",
+                        "coverage_end": "2026-08-02",
+                    },
+                },
+            ),
+        )
+
+        comparison = analysis["costs"]["comparison"]
+        self.assertEqual(comparison["status"], "UNAVAILABLE")
+        self.assertEqual(comparison["fact_name"], "period_estimate")
+
+    def test_cost_comparison_rejects_nonadjacent_equal_length_periods(self):
+        fact = self._cost_fact(start="2026-08-03")
+        analysis = analyze_report(
+            self._report(billing={"period_estimate": fact}),
+            baseline=self._report(billing={
+                "period_estimate": {
+                    **fact,
+                    "total_amount": 100,
+                    "period_start": "2026-08-01",
+                    "period_end": "2026-08-01",
+                    "coverage_start": "2026-08-01",
+                    "coverage_end": "2026-08-01",
+                }
+            }),
+        )
+
+        comparison = analysis["costs"]["comparison"]
+        self.assertEqual(comparison["status"], "INCOMPATIBLE")
+        self.assertIn("comparison_period", comparison["incompatible_fields"])
+        self.assertIn("비교 기간", comparison["reason"])
 
     def test_cost_threshold_and_distinct_period_are_required(self):
-        fact = {
-            "cost_type": "PERIOD_ESTIMATE",
-            "status": "AVAILABLE",
-            "total_amount": 120,
-            "currency": "KRW",
-            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
-            "confidence": "VERIFIED_ESTIMATE",
-            "includes_discount": False,
-            "includes_vat": False,
-            "period_start": "2026-08-01",
-            "period_end": "2026-08-01",
-            "coverage_start": "2026-08-01",
-            "coverage_end": "2026-08-01",
-        }
+        fact = self._cost_fact()
         report = self._report(billing={"period_estimate": fact})
         distinct_baseline = self._report(billing={
             "period_estimate": {
@@ -737,27 +849,18 @@ class ReportAnalysisTests(unittest.TestCase):
         )
 
     def test_cost_comparison_rejects_different_collection_coverage(self):
-        current = {
-            "cost_type": "PERIOD_ESTIMATE",
-            "status": "AVAILABLE",
-            "total_amount": 120,
-            "currency": "KRW",
-            "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
-            "confidence": "PARTIAL",
-            "includes_discount": False,
-            "includes_vat": False,
-            "period_start": "2026-08-01",
-            "period_end": "2026-08-10",
-            "coverage_start": "2026-08-01",
-            "coverage_end": "2026-08-10",
-        }
+        current = self._cost_fact(
+            start="2026-08-01",
+            end="2026-08-10",
+            confidence="PARTIAL",
+        )
         previous = {
             **current,
             "total_amount": 100,
-            "period_start": "2026-07-01",
-            "period_end": "2026-07-10",
-            "coverage_start": "2026-07-01",
-            "coverage_end": "2026-07-09",
+            "period_start": "2026-07-22",
+            "period_end": "2026-07-31",
+            "coverage_start": "2026-07-22",
+            "coverage_end": "2026-07-30",
         }
 
         analysis = analyze_report(
@@ -774,22 +877,18 @@ class ReportAnalysisTests(unittest.TestCase):
         comparison = analysis["costs"]["comparison"]
         self.assertEqual(comparison["status"], "INCOMPATIBLE")
         self.assertIn("coverage", comparison["incompatible_fields"])
+        self.assertNotIn("comparison_period", comparison["incompatible_fields"])
 
-    def test_monthly_full_periods_remain_comparable_across_month_lengths(self):
-        current = {
-            "cost_type": "CONFIRMED",
-            "status": "AVAILABLE",
-            "total_amount": 120,
-            "currency": "KRW",
-            "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
-            "confidence": "CONFIRMED",
-            "includes_discount": True,
-            "includes_vat": True,
-            "period_start": "2026-07-01",
-            "period_end": "2026-07-31",
-            "coverage_start": "2026-07-01",
-            "coverage_end": "2026-07-31",
-        }
+    def test_consecutive_monthly_periods_remain_comparable(self):
+        current = self._cost_fact(
+            start="2026-07-01",
+            end="2026-07-31",
+            cost_type="CONFIRMED",
+            amount_basis="CURRENT_MONTH_INVOICE_TOTAL",
+            confidence="CONFIRMED",
+            includes_discount=True,
+            includes_vat=True,
+        )
         previous = {
             **current,
             "total_amount": 100,
@@ -813,6 +912,23 @@ class ReportAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["period_type"], "MONTHLY")
         self.assertEqual(
             analysis["costs"]["comparison"]["status"],
+            "AVAILABLE",
+        )
+
+        current["period_end"] = current["coverage_end"] = "2026-07-15"
+        previous["period_end"] = previous["coverage_end"] = "2026-06-15"
+        partial = analyze_report(
+            self._report(
+                period={"period_type": "prev_month"},
+                billing={"invoice_summary": current},
+            ),
+            baseline=self._report(
+                period={"period_type": "prev_month"},
+                billing={"invoice_summary": previous},
+            ),
+        )
+        self.assertEqual(
+            partial["costs"]["comparison"]["status"],
             "AVAILABLE",
         )
 
