@@ -5,6 +5,7 @@ from pathlib import Path
 from app.collection_diagnostics import normalize_collection_issue
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
+from app.report_options import REPORT_OPTIONS_SCHEMA_VERSION
 
 
 class HtmlReportRendererTests(unittest.TestCase):
@@ -1610,8 +1611,55 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertNotIn("must", html)
 
+    def test_customer_report_sections_follow_configured_order(self):
+        report = self._sample_report()
+        report.billing["account_costs"] = [{
+            "display_name": "Member account",
+            "member_no": "member-1",
+        }]
+        report.report_options = {
+            "schema_version": REPORT_OPTIONS_SCHEMA_VERSION,
+            "sections": [
+                "billing",
+                "organization_billing",
+                "insight_events",
+                "activity_history",
+                "collection_diagnostics",
+            ],
+            "section_order": [
+                "collection_diagnostics",
+                "organization_billing",
+                "activity_history",
+                "billing",
+                "insight_events",
+            ],
+            "resource_categories": [],
+            "monitoring_categories": [],
+        }
+
+        html = HtmlReportRenderer().render(report)
+        positions = [
+            html.index(f"<h2>{heading}</h2>")
+            for heading in (
+                "수집 진단",
+                "Organization 계정별 비용",
+                "Cloud Activity Tracer",
+                "과금 데이터 기준",
+                "Cloud Insight 이벤트",
+            )
+        ]
+
+        self.assertEqual(positions, sorted(positions))
+
     def test_customer_report_options_hide_unselected_sections(self):
         report = self._sample_report()
+        report.analysis = {
+            "data_quality": {"overall_status": "COMPLETE", "datasets": []},
+            "metrics": {"summaries": []},
+            "costs": {},
+            "availability": {},
+            "security": {},
+        }
         report.report_options = {
             "sections": ["activity_history"],
             "resource_categories": [],
@@ -1627,6 +1675,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
         self.assertNotIn("<h2>비용 전기 비교</h2>", html)
+        self.assertNotIn('aria-label="운영 판단 요약"', html)
 
     def test_collection_diagnostics_merge_warnings_and_errors_with_targets(self):
         report = self._sample_report()

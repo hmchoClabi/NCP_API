@@ -77,7 +77,7 @@ class HtmlReportRenderer:
         """보고서 원본과 섹션 옵션을 HTML 표시 모델로 정규화한다.
 
         각 section option은 여기서 한 번만 판정한다. 이후 조립 단계는 비활성
-        섹션을 빈 문자열로 유지해 기존 문서 순서와 공개 렌더링 경계를 보존한다.
+        섹션을 빈 문자열로 유지하고 저장된 섹션 순서대로 결합한다.
         """
         period = report.period
         report_options = report.selected_report_options
@@ -491,10 +491,15 @@ class HtmlReportRenderer:
     ) -> str:
         report_options = display.report_options
         if report_options.section_enabled("executive_summary"):
-            # 분석이 포함된 새 보고서는 바로 아래 의사결정 요약을 먼저
-            # 표시한다. 이 블록은 과거 스냅샷 표시 호환용이다.
+            # 분석이 포함된 새 보고서는 기존 요약 카드를 대체한다.
             if report.analysis:
-                return ""
+                return self._render_operational_analysis(
+                    report,
+                    cost_enabled=(
+                        display.billing_enabled
+                        or display.organization_billing_enabled
+                    ),
+                )
             summary_cards = []
             if display.inventory_enabled:
                 summary_cards.append(
@@ -1088,7 +1093,7 @@ class HtmlReportRenderer:
     def _render_billing_sections(
         self,
         display: ReportDisplayData,
-    ) -> str:
+    ) -> Dict[str, str]:
         billing_html = ""
         if display.billing_enabled:
             billing = display.billing
@@ -1148,13 +1153,16 @@ class HtmlReportRenderer:
             self._organization_cost_sections(display.billing.account_costs)
             if display.organization_billing_enabled else ""
         )
-        return billing_html + organization_billing_html
+        return {
+            "billing": billing_html,
+            "organization_billing": organization_billing_html,
+        }
 
     def _render_event_diagnostic_sections(
         self,
         report: ReportResult,
         display: ReportDisplayData,
-    ) -> str:
+    ) -> Dict[str, str]:
         insight_events_html = (
             self._section(
                 "Cloud Insight 이벤트",
@@ -1193,27 +1201,32 @@ class HtmlReportRenderer:
                 len(diagnostics),
                 warning=bool(diagnostics),
             )
-        return insight_events_html + activity_html + diagnostics_html
+        return {
+            "insight_events": insight_events_html,
+            "activity_history": activity_html,
+            "collection_diagnostics": diagnostics_html,
+        }
 
     def _render_report_sections(
         self,
         report: ReportResult,
         display: ReportDisplayData,
     ) -> str:
-        return "".join((
-            self._render_summary_section(report, display),
-            self._render_operational_analysis(
-                report,
-                cost_enabled=(
-                    display.billing_enabled
-                    or display.organization_billing_enabled
-                ),
+        sections = {
+            "executive_summary": self._render_summary_section(
+                report, display
             ),
-            self._render_infrastructure_sections(report, display),
-            self._render_monitoring_sections(report, display),
-            self._render_billing_sections(display),
-            self._render_event_diagnostic_sections(report, display),
-        ))
+            "infrastructure_inventory": (
+                self._render_infrastructure_sections(report, display)
+            ),
+            "monitoring": self._render_monitoring_sections(report, display),
+            **self._render_billing_sections(display),
+            **self._render_event_diagnostic_sections(report, display),
+        }
+        return "".join(
+            sections.get(name, "")
+            for name in display.report_options.ordered_sections
+        )
 
     def _render_document(
         self,

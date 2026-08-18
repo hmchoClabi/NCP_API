@@ -107,14 +107,29 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <fieldset>
-      <legend>보고서 섹션</legend>
-      <div class="option-grid">
+      <legend>보고서 구성 및 순서</legend>
+      <p class="settings-note">체크한 큰 섹션만 보고서에 출력합니다. 화살표로 위에서 아래 순서를 조정하세요.</p>
+      <ol class="report-section-list">
         {% for option in report_section_options %}
-        <label><input type="checkbox" name="sections" value="{{ option }}"{% if option in report_options.sections %} checked{% endif %}> {{ report_section_labels[option] }}</label>
+        <li class="report-section-row">
+          <input type="hidden" name="section_order" value="{{ option }}">
+          <label>
+            <input type="checkbox" name="sections" value="{{ option }}"{% if option in report_options.sections %} checked{% endif %}>
+            <span><strong>{{ report_section_labels[option] }}</strong><small>{{ report_section_descriptions[option] }}</small></span>
+          </label>
+          <span class="report-section-actions">
+            <button class="text-action" type="button" data-move-section="up" aria-label="{{ report_section_labels[option] }} 위로 이동">↑</button>
+            <button class="text-action" type="button" data-move-section="down" aria-label="{{ report_section_labels[option] }} 아래로 이동">↓</button>
+          </span>
+        </li>
         {% endfor %}
-      </div>
+      </ol>
     </fieldset>
 
+    {% set analysis = report_options.operational_analysis %}
+    <details class="report-settings-details">
+      <summary>상세 설정 <small>자원·모니터링 대상과 운영 분석 임계치</small></summary>
+      <div class="report-settings-detail-body">
     <fieldset>
       <legend>자원 현황 대상</legend>
       <div class="option-actions"><button class="text-action" type="button" data-check-group="resource-option" data-check-value="true">전체 선택</button><button class="text-action" type="button" data-check-group="resource-option" data-check-value="false">전체 해제</button></div>
@@ -134,7 +149,6 @@
       </div>
     </fieldset>
 
-    {% set analysis = report_options.operational_analysis %}
     <fieldset>
       <legend>운영 분석 및 추가 데이터 원본</legend>
       <div class="option-grid">
@@ -162,6 +176,8 @@
       </div>
       <p class="settings-note">CPU·메모리·스토리지의 실제 사용률이 90% 이상으로 설정된 지속 시간 동안 이어질 때만 운영 경고를 표시합니다.</p>
     </fieldset>
+      </div>
+    </details>
 
     <button class="primary" type="submit">보고서 출력 설정 저장</button>
   </form>
@@ -170,6 +186,13 @@
 document.querySelectorAll('[data-check-group]').forEach((button) => button.addEventListener('click', () => {
   const checked = button.dataset.checkValue === 'true';
   document.querySelectorAll(`.${button.dataset.checkGroup}`).forEach((item) => { item.checked = checked; });
+}));
+document.querySelectorAll('[data-move-section]').forEach((button) => button.addEventListener('click', () => {
+  const item = button.closest('.report-section-row');
+  const sibling = button.dataset.moveSection === 'up' ? item.previousElementSibling : item.nextElementSibling;
+  if (!sibling) return;
+  if (button.dataset.moveSection === 'up') sibling.before(item);
+  else sibling.after(item);
 }));
 </script>
 {% endif %}

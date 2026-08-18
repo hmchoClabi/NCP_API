@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 
-REPORT_OPTIONS_SCHEMA_VERSION = "1.3"
+REPORT_OPTIONS_SCHEMA_VERSION = "1.4"
 UTILIZATION_ALERT_MIN_PERCENT = 90.0
 UTILIZATION_ALERT_MAX_PERCENT = 100.0
 UTILIZATION_CRITICAL_PERCENT = 95.0
@@ -78,8 +78,19 @@ REPORT_SECTION_OPTIONS = (
     "collection_diagnostics",
 )
 
+DEFAULT_REPORT_SECTION_ORDER = (
+    "executive_summary",
+    "infrastructure_inventory",
+    "monitoring",
+    "billing",
+    "organization_billing",
+    "insight_events",
+    "activity_history",
+    "collection_diagnostics",
+)
+
 REPORT_SECTION_LABELS = {
-    "executive_summary": "주요 요약",
+    "executive_summary": "주요 요약·운영 판정",
     "billing": "청구·예상 비용",
     "organization_billing": "Organization 계정별 비용",
     "infrastructure_inventory": "자원 현황",
@@ -87,6 +98,35 @@ REPORT_SECTION_LABELS = {
     "insight_events": "Cloud Insight 이벤트",
     "activity_history": "Cloud Activity Tracer 이력",
     "collection_diagnostics": "수집 진단",
+}
+
+REPORT_SECTION_DESCRIPTIONS = {
+    "executive_summary": (
+        "상태 카드·즉시 확인·데이터 수집 상태·WMS/보안·비용 전기 "
+        "비교를 표시합니다."
+    ),
+    "billing": (
+        "과금 기준·서비스별 예상 비용·네트워크/서비스 사용량을 "
+        "표시합니다."
+    ),
+    "organization_billing": (
+        "Organization 멤버 계정별 비용 내역을 표시합니다."
+    ),
+    "infrastructure_inventory": (
+        "선택한 서버·스토리지·DB·네트워크 자원과 네트워크 규칙을 "
+        "표시합니다."
+    ),
+    "monitoring": (
+        "선택한 자원의 CPU·메모리·디스크 사용량과 서비스 지표를 "
+        "표시합니다."
+    ),
+    "insight_events": "Cloud Insight 이벤트와 상태를 표시합니다.",
+    "activity_history": (
+        "Cloud Activity Tracer의 API 호출과 자원 변경 이력을 표시합니다."
+    ),
+    "collection_diagnostics": (
+        "수집 중 발생한 경고·오류와 필요한 권한 진단을 표시합니다."
+    ),
 }
 
 NETWORK_CONFIGURATION_CATEGORY_OPTIONS = (
@@ -187,6 +227,7 @@ MONITORING_CATEGORY_OPTIONS = (
 DEFAULT_REPORT_OPTIONS: dict[str, Any] = {
     "schema_version": REPORT_OPTIONS_SCHEMA_VERSION,
     "sections": list(REPORT_SECTION_OPTIONS),
+    "section_order": list(DEFAULT_REPORT_SECTION_ORDER),
     "resource_categories": list(RESOURCE_CATEGORY_OPTIONS),
     "monitoring_categories": list(MONITORING_CATEGORY_OPTIONS),
     "operational_analysis": deepcopy(DEFAULT_OPERATIONAL_ANALYSIS),
@@ -223,6 +264,15 @@ class ReportOptions:
     def section_enabled(self, name: str) -> bool:
         return str(name) in self._value["sections"]
 
+    @property
+    def ordered_sections(self) -> tuple[str, ...]:
+        selected = set(self._value["sections"])
+        return tuple(
+            section
+            for section in self._value["section_order"]
+            if section in selected
+        )
+
     def resource_enabled(self, category: str) -> bool:
         return str(category).upper() in self._value["resource_categories"]
 
@@ -230,7 +280,10 @@ class ReportOptions:
         return str(category).upper() in self._value["monitoring_categories"]
 
     def analysis_enabled(self) -> bool:
-        return bool(self._value["operational_analysis"]["enabled"])
+        return (
+            self.section_enabled("executive_summary")
+            and bool(self._value["operational_analysis"]["enabled"])
+        )
 
     def analysis_collector_enabled(self, name: str) -> bool:
         key = {
@@ -303,6 +356,7 @@ def normalize_report_options(value: Any) -> dict[str, Any]:
             REPORT_SECTION_OPTIONS,
             defaults["sections"],
         ),
+        "section_order": _normalize_section_order(value),
         "resource_categories": _allowed_list(
             value,
             "resource_categories",
@@ -329,6 +383,10 @@ def validate_report_options(value: Any) -> dict[str, Any]:
     for key in ("sections", "resource_categories", "monitoring_categories"):
         if key not in value or not isinstance(value[key], (list, tuple, set)):
             raise ValueError(f"{key} 선택값이 올바르지 않습니다.")
+    if "section_order" in value and not isinstance(
+        value["section_order"], (list, tuple)
+    ):
+        raise ValueError("section_order 선택값이 올바르지 않습니다.")
 
     normalized = normalize_report_options(value)
     if not normalized["sections"]:
@@ -438,3 +496,21 @@ def _allowed_list(
         return list(default)
     requested = {str(item).strip() for item in raw}
     return [item for item in allowed if item in requested]
+
+
+def _normalize_section_order(value: Mapping[str, Any]) -> list[str]:
+    raw = value.get("section_order")
+    if not isinstance(raw, (list, tuple)):
+        return list(DEFAULT_REPORT_SECTION_ORDER)
+
+    allowed = set(REPORT_SECTION_OPTIONS)
+    ordered = list(dict.fromkeys(
+        str(item).strip() for item in raw
+        if str(item).strip() in allowed
+    ))
+    ordered.extend(
+        section
+        for section in DEFAULT_REPORT_SECTION_ORDER
+        if section not in ordered
+    )
+    return ordered

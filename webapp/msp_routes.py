@@ -9,8 +9,8 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, ur
 from app.report_branding import MAX_CUSTOMER_LOGO_BYTES, validate_customer_logo
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
+    REPORT_SECTION_DESCRIPTIONS,
     REPORT_SECTION_LABELS,
-    REPORT_SECTION_OPTIONS,
     RESOURCE_CATEGORY_LABELS,
     RESOURCE_CATEGORY_OPTIONS,
     default_report_options,
@@ -299,8 +299,9 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 g.user, tenant_id, tenant["environment"]
             ),
             can_delete_reports=True,
-            report_section_options=REPORT_SECTION_OPTIONS,
+            report_section_options=tenant["report_options"]["section_order"],
             report_section_labels=REPORT_SECTION_LABELS,
+            report_section_descriptions=REPORT_SECTION_DESCRIPTIONS,
             resource_category_options=RESOURCE_CATEGORY_OPTIONS,
             resource_category_labels=RESOURCE_CATEGORY_LABELS,
             monitoring_category_options=MONITORING_CATEGORY_OPTIONS,
@@ -315,6 +316,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 tenant_id,
                 {
                     "sections": request.form.getlist("sections"),
+                    "section_order": request.form.getlist("section_order"),
                     "resource_categories": request.form.getlist(
                         "resource_categories"
                     ),

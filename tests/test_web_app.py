@@ -793,6 +793,9 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("2분 5초".encode("utf-8"), response.data)
         self.assertIn("보고서 삭제".encode("utf-8"), response.data)
         self.assertIn("고객별 보고서 출력 설정".encode("utf-8"), response.data)
+        self.assertIn("보고서 구성 및 순서".encode("utf-8"), response.data)
+        self.assertIn(b'class="report-settings-details"', response.data)
+        self.assertIn(b'data-move-section="up"', response.data)
         self.assertNotIn(b'name="resource_categories" value="SECRET', response.data)
 
     def test_customer_detail_limits_recent_reports_and_jobs_to_ten(self):
@@ -860,6 +863,7 @@ class MspCustomerDetailTests(unittest.TestCase):
             data={
                 "csrf_token": "csrf-token",
                 "sections": ["billing", "infrastructure_inventory"],
+                "section_order": ["infrastructure_inventory", "billing"],
                 "resource_categories": ["SERVER", "VPC"],
                 "monitoring_categories": ["SERVER"],
             },
@@ -871,6 +875,10 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(options["sections"], [
             "billing", "infrastructure_inventory",
         ])
+        self.assertEqual(
+            options["section_order"],
+            ["infrastructure_inventory", "billing"],
+        )
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
 
@@ -1063,7 +1071,9 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("MSP 계정·사용자 관리".encode("utf-8"), response.data)
-        self.assertIn("신규 MSP 계정".encode("utf-8"), response.data)
+        self.assertIn("MSP 관리자·운영자 추가".encode("utf-8"), response.data)
+        self.assertIn(b'<option value="MSP_ADMIN">', response.data)
+        self.assertNotIn(b'name="environment_scope" required', response.data)
         self.assertIn(b"customer@example.com", response.data)
 
     def test_msp_admin_can_register_portal_user(self):
@@ -1084,15 +1094,15 @@ class MspCustomerDetailTests(unittest.TestCase):
             "new-user@example.com", "temporary-password", "New User",
         )])
 
-    def test_msp_admin_can_register_another_msp_user(self):
+    def test_msp_admin_can_register_another_msp_admin(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
         response = self.client.post(
             "/msp/users/platform",
             data={
                 "csrf_token": "csrf-token",
-                "email": "operator@example.com",
-                "display_name": "Operator",
-                "role": "MSP_OPERATOR",
+                "email": "admin-2@example.com",
+                "display_name": "Second Admin",
+                "role": "MSP_ADMIN",
                 "password": "temporary-password",
                 "password_confirmation": "temporary-password",
             },
@@ -1100,8 +1110,8 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.repository.created_msp_users, [(
-            "operator@example.com", "temporary-password", "Operator",
-            "MSP_OPERATOR", None, "user-1",
+            "admin-2@example.com", "temporary-password", "Second Admin",
+            "MSP_ADMIN", None, "user-1",
         )])
 
     def test_msp_admin_can_explicitly_scope_new_msp_user(self):
