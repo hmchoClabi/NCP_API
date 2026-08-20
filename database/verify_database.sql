@@ -46,8 +46,8 @@ BEGIN
     WHERE table_schema IN ('control', 'public_data', 'gov_data', 'audit')
       AND table_type = 'BASE TABLE';
 
-    IF table_count < 36 THEN
-        RAISE EXCEPTION 'Expected at least 36 tables, found %', table_count;
+    IF table_count < 37 THEN
+        RAISE EXCEPTION 'Expected at least 37 tables, found %', table_count;
     END IF;
 
     IF NOT EXISTS (
@@ -66,6 +66,35 @@ BEGIN
           AND rowsecurity
     ) THEN
         RAISE EXCEPTION 'Policy exceptions table or RLS is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'control'
+          AND tablename = 'artifact_cleanup_outbox'
+          AND rowsecurity
+    ) THEN
+        RAISE EXCEPTION 'Artifact cleanup outbox or RLS is missing';
+    END IF;
+
+    IF NOT has_table_privilege(
+        'ncp_msp_app', 'control.artifact_cleanup_outbox', 'SELECT'
+    ) OR NOT has_table_privilege(
+        'ncp_msp_app', 'control.artifact_cleanup_outbox', 'INSERT'
+    ) OR NOT has_table_privilege(
+        'ncp_msp_app', 'control.artifact_cleanup_outbox', 'UPDATE'
+    ) OR NOT has_table_privilege(
+        'ncp_msp_app', 'control.artifact_cleanup_outbox', 'DELETE'
+    ) THEN
+        RAISE EXCEPTION 'MSP role cannot process the artifact cleanup outbox';
+    END IF;
+
+    IF has_table_privilege(
+        'ncp_public_worker', 'control.artifact_cleanup_outbox', 'SELECT'
+    ) OR has_table_privilege(
+        'ncp_gov_worker', 'control.artifact_cleanup_outbox', 'SELECT'
+    ) THEN
+        RAISE EXCEPTION 'Environment workers can access artifact cleanup outbox';
     END IF;
 
     IF NOT EXISTS (

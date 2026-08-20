@@ -99,6 +99,37 @@ services:
         condition: service_completed_successfully
     command: ["python", "-m", "webapp.scheduler"]
 
+  artifact-cleanup:
+    image: ncp-report:${IMAGE_TAG:-local}
+    container_name: ncp-report-artifact-cleanup
+    restart: unless-stopped
+    environment:
+      REPORT_DB_ENABLED: "true"
+      REPORT_DB_REQUIRED: "true"
+      REPORT_DB_ROLE: msp
+      REPORT_DB_HOST: postgres
+      REPORT_DB_PORT: 5432
+      REPORT_DB_NAME: ${DB_NAME}
+      REPORT_DB_USER: ncp_msp_app
+      REPORT_DB_PASSWORD: ${DB_MSP_APP_PASSWORD}
+      REPORT_DB_SSLMODE: disable
+      REPORT_DB_APPLICATION_NAME: ncp-report-artifact-cleanup
+      REPORT_OUTPUT_DIR: /app/output/report
+      TZ: Asia/Seoul
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ncp_report_artifacts:/app/output
+    command:
+      - python
+      - -m
+      - webapp.artifact_cleanup
+      - --limit
+      - "100"
+      - --interval-seconds
+      - "300"
+
   worker-public:
     image: ncp-report:${IMAGE_TAG:-local}
     restart: unless-stopped

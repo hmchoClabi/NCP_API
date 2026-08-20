@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -37,11 +37,11 @@ $env:PYTHONIOENCODING = "utf-8"
 
 $TargetScripts = @(
     "cne2.ps1"
-    "dongaaadmin.ps1"
+    "dongaadmin.ps1"
     "gbe2.ps1"
     "gbsa.ps1"
     "kea.ps1"
-    "konfort.ps1"
+    "konfoti.ps1"
     "kosis2.ps1"
     "nfram.ps1"
     "sbiz.ps1"

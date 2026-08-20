@@ -70,6 +70,98 @@ class HtmlReportRenderer:
         sections = self._render_report_sections(report, display)
         return self._render_document(report, display, sections)
 
+    def render_email_summary(self, report: ReportResult) -> str:
+        """메일 본문용 핵심 요약을 외부 자원 없이 렌더링한다."""
+        display = self._prepare_display_data(report)
+        analysis = self._mapping(report.analysis)
+        quality = self._mapping(analysis.get("data_quality"))
+        findings = self._active_operational_findings(analysis)
+        if analysis:
+            status = self._visible_operational_status(findings, quality)
+            status_label = {
+                "NORMAL": "정상",
+                "CAUTION": "확인 필요",
+                "RISK": "즉시 대응",
+                "UNKNOWN": "판정 불가",
+            }[status]
+            summary = {
+                "NORMAL": "현재 수집·검사 범위에서 활성 운영 경고가 없습니다.",
+                "CAUTION": f"확인이 필요한 운영 신호가 {len(findings):,}건 있습니다.",
+                "RISK": f"즉시 대응이 필요한 위험 신호가 {len(findings):,}건 있습니다.",
+                "UNKNOWN": "일부 데이터가 수집되지 않아 운영 상태를 완전히 판정할 수 없습니다.",
+            }[status]
+            collection_label = {
+                "COMPLETE": "정상",
+                "PARTIAL": "일부 누락",
+                "FAILED": "실패",
+                "UNKNOWN": "판정 불가",
+            }.get(str(quality.get("overall_status")), "판정 불가")
+        else:
+            status = "NORMAL"
+            status_label = "생성 완료"
+            summary = "NCP 보고서가 생성되었습니다. 아래 핵심 수치와 첨부 보고서를 확인하세요."
+            issue_count = len(report.collection_errors) + len(
+                report.collection_warnings
+            )
+            collection_label = "확인 필요" if issue_count else "정상"
+
+        status_color = {
+            "NORMAL": "#15803d",
+            "CAUTION": "#b45309",
+            "RISK": "#dc2626",
+            "UNKNOWN": "#64748b",
+        }[status]
+        priority = findings[0] if findings else None
+        priority_html = ""
+        if priority:
+            resource = self._mapping(priority.get("resource"))
+            priority_html = f"""
+              <tr><td style="padding:0 28px 24px">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #fed7aa;border-left:5px solid {status_color};border-radius:12px;background:#fffaf0">
+                  <tr><td style="padding:18px 20px">
+                    <div style="font-size:12px;font-weight:800;color:{status_color};margin-bottom:6px">가장 먼저 확인</div>
+                    <div style="font-size:17px;font-weight:800;color:#111827">{self._text(priority.get('title'))}</div>
+                    <div style="font-size:13px;color:#64748b;margin:4px 0 12px">{self._text(resource.get('name') or resource.get('id') or '공통')}</div>
+                    <div style="font-size:13px;line-height:1.65;color:#374151"><strong>영향</strong> · {self._text(priority.get('impact') or '-')}</div>
+                    <div style="font-size:13px;line-height:1.65;color:#1d4ed8"><strong>조치</strong> · {self._text(priority.get('recommendation') or '-')}</div>
+                  </td></tr>
+                </table>
+              </td></tr>"""
+
+        period_text = (
+            f"{self._display_period_start(display.period)} ~ "
+            f"{self._display_period_end(display.period)}"
+        )
+        return f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;background:#eef2f6;font-family:Pretendard,'Noto Sans KR',Arial,sans-serif;color:#111827">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2f6;padding:24px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dbe4ee">
+        <tr><td style="padding:18px 28px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:800">NCP 운영 리포트</td></tr>
+        <tr><td style="padding:32px 28px 24px;background:linear-gradient(135deg,#eff6ff,#ecfdf5)">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#047857">NAVER CLOUD PLATFORM</div>
+          <h1 style="margin:8px 0 10px;font-size:28px;line-height:1.25;color:#0f172a">{self._text(display.report_title)}</h1>
+          <div style="font-size:13px;color:#64748b">{self._text(period_text)}</div>
+        </td></tr>
+        <tr><td style="padding:26px 28px 14px">
+          <h2 style="margin:0 0 6px;font-size:20px">오늘의 요약</h2>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#475569">{self._text(summary)}</p>
+        </td></tr>
+        <tr><td style="padding:0 22px 24px">
+          <table role="presentation" width="100%" cellspacing="6" cellpadding="0"><tr>
+            <td width="33%" valign="top" style="padding:15px;border:1px solid #e2e8f0;border-radius:10px"><div style="font-size:11px;color:#64748b">운영 상태</div><div style="margin-top:6px;font-size:17px;font-weight:800;color:{status_color}">{self._text(status_label)}</div></td>
+            <td width="33%" valign="top" style="padding:15px;border:1px solid #e2e8f0;border-radius:10px"><div style="font-size:11px;color:#64748b">즉시 확인</div><div style="margin-top:6px;font-size:17px;font-weight:800">{len(findings):,}건</div></td>
+            <td width="33%" valign="top" style="padding:15px;border:1px solid #e2e8f0;border-radius:10px"><div style="font-size:11px;color:#64748b">데이터 수집</div><div style="margin-top:6px;font-size:17px;font-weight:800">{self._text(collection_label)}</div></td>
+          </tr></table>
+        </td></tr>
+        {priority_html}
+        <tr><td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.6;color:#64748b">전체 자원·시계열·이벤트·수집 근거는 첨부된 HTML 보고서에 포함되어 있습니다.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
     def _prepare_display_data(
         self,
         report: ReportResult,
@@ -500,6 +592,10 @@ class HtmlReportRenderer:
                         or display.organization_billing_enabled
                     ),
                 )
+            diagnostic_count = (
+                len(report.collection_errors)
+                + len(report.collection_warnings)
+            )
             summary_cards = []
             if display.inventory_enabled:
                 summary_cards.append(
@@ -518,10 +614,6 @@ class HtmlReportRenderer:
                     )
                 )
             if report_options.section_enabled("collection_diagnostics"):
-                diagnostic_count = (
-                    len(report.collection_errors)
-                    + len(report.collection_warnings)
-                )
                 summary_cards.append(
                     self._summary_card(
                         "수집 진단",
@@ -552,11 +644,39 @@ class HtmlReportRenderer:
                         "원" if billing_card_available else "",
                     )
                 )
-            return (
-                '<section class="summary-grid" aria-label="주요 요약">'
-                + "".join(summary_cards)
-                + "</section>"
-            )
+            event_count = len(report.insight_events)
+            if diagnostic_count:
+                summary_text = (
+                    f"수집 진단이 {diagnostic_count:,}건 있습니다. "
+                    "데이터 누락과 필요한 권한을 먼저 확인하세요."
+                )
+            elif event_count:
+                summary_text = (
+                    f"Cloud Insight 이벤트가 {event_count:,}건 수집되었습니다. "
+                    "영향 범위는 접힌 이벤트 상세에서 확인할 수 있습니다."
+                )
+            else:
+                summary_text = (
+                    "보고 기간의 핵심 자원·비용·수집 결과를 요약했습니다. "
+                    "필요한 기술 상세만 펼쳐 확인하세요."
+                )
+            return "".join((
+                '<section class="operational-overview legacy-overview" '
+                'aria-label="핵심 요약">',
+                '<section class="daily-summary">',
+                '<div class="summary-heading">',
+                '<p class="section-eyebrow">REPORT BRIEF</p>',
+                '<h2>오늘의 요약</h2>',
+                '<p>핵심 수치를 먼저 확인하세요.</p>',
+                '</div>',
+                f'<p class="summary-narrative">{self._text(summary_text)}</p>',
+                '<section class="summary-grid" aria-label="주요 요약">',
+                "".join(summary_cards),
+                '</section>',
+                '<p class="legacy-summary-note">이전 형식 보고서에는 운영 위험 판정이 포함되지 않습니다.</p>',
+                '</section>',
+                '</section>',
+            ))
         return ""
 
     def _render_operational_analysis(
@@ -570,20 +690,10 @@ class HtmlReportRenderer:
             return ""
         quality = self._mapping(analysis.get("data_quality"))
         datasets = self._records(quality.get("datasets"))
-        all_findings = self._records(analysis.get("findings"))
-        if not all_findings:
-            # 초기 1.0 분석 스냅샷은 key_findings만 저장할 수 있다.
-            all_findings = self._records(analysis.get("key_findings"))
-        active_findings = [
-            finding
-            for finding in all_findings
-            if self._is_visible_operational_finding(finding)
-        ]
+        active_findings = self._active_operational_findings(analysis)
         findings = active_findings[:5]
-        metrics = self._mapping(analysis.get("metrics"))
         costs = self._mapping(analysis.get("costs"))
         availability = self._mapping(analysis.get("availability"))
-        security = self._mapping(analysis.get("security"))
         status = self._visible_operational_status(active_findings, quality)
         status_label = {
             "NORMAL": "수집·검사 범위 내 정상",
@@ -631,47 +741,8 @@ class HtmlReportRenderer:
             cost_facts,
             preferred_cost_names,
         )
-        availability_value = availability.get(
-            "overall_availability_percent"
-        )
         immediate_status = self._analysis_finding_status(active_findings)
-        availability_findings = [
-            finding for finding in active_findings
-            if finding.get("category") == "AVAILABILITY"
-            or str(finding.get("rule_id") or "").startswith("WMS_")
-        ]
-        cost_findings = [
-            finding for finding in active_findings
-            if finding.get("category") == "COST"
-        ]
-        availability_card_status = (
-            self._analysis_finding_status(availability_findings)
-            if availability_value is not None
-            else "unknown"
-        )
-        cost_card_status = (
-            self._analysis_finding_status(cost_findings)
-            if current_cost
-            else "unknown"
-        )
-
         status_cards = "".join((
-            self._analysis_status_card(
-                "보고서 생성",
-                self._mapping(analysis.get("report_generation")).get(
-                    "status_label", "성공"
-                ),
-                "generation-success",
-                self._mapping(analysis.get("report_generation")).get(
-                    "source_state", OBSERVED
-                ),
-            ),
-            self._analysis_status_card(
-                "데이터 수집",
-                collection_label,
-                str(quality.get("overall_status") or "unknown").casefold(),
-                quality.get("source_state", CALCULATED),
-            ),
             self._analysis_status_card(
                 "클라우드 운영 판정",
                 status_label,
@@ -685,34 +756,139 @@ class HtmlReportRenderer:
                 CALCULATED,
             ),
             self._analysis_status_card(
+                "데이터 수집",
+                collection_label,
+                str(quality.get("overall_status") or "unknown").casefold(),
+                quality.get("source_state", CALCULATED),
+            ),
+        ))
+
+        availability_value = availability.get(
+            "overall_availability_percent"
+        )
+        quick_facts = [
+            self._analysis_quick_fact(
                 "서비스 가용률",
                 (
                     f"{self._number(availability_value, 2)}%"
                     if availability_value is not None
                     else "조회 불가"
                 ),
-                availability_card_status,
                 availability.get("source_state", UNAVAILABLE),
-            ),
-            self._analysis_status_card(
-                self._operational_cost_label(current_cost),
-                (
-                    f"{self._number(current_cost.get('total_amount'), 0)}원"
-                    if current_cost.get("total_amount") is not None
-                    else "조회 불가"
-                ),
-                cost_card_status,
-                current_cost.get("source_state", UNAVAILABLE),
-            ) if cost_enabled else "",
-        ))
+            )
+        ]
+        if cost_enabled:
+            quick_facts.append(
+                self._analysis_quick_fact(
+                    self._operational_cost_label(current_cost),
+                    (
+                        f"{self._number(current_cost.get('total_amount'), 0)}원"
+                        if current_cost.get("total_amount") is not None
+                        else "조회 불가"
+                    ),
+                    current_cost.get("source_state", UNAVAILABLE),
+                )
+            )
 
         finding_content = (
             '<div class="finding-list">'
-            + "".join(self._finding_card(item) for item in findings)
+            + self._finding_card(findings[0], priority=True)
+            + "".join(self._finding_card(item) for item in findings[1:])
             + "</div>"
             if findings
             else '<p class="empty-state">활성 경고가 없습니다. 단, 수집 불가 데이터는 정상으로 판정하지 않습니다.</p>'
         )
+
+        summary_text = {
+            "RISK": (
+                f"현재 수집 범위에서 즉시 대응이 필요한 위험 신호가 "
+                f"{len(active_findings):,}건 있습니다."
+            ),
+            "CAUTION": (
+                f"현재 수집 범위에서 확인이 필요한 운영 신호가 "
+                f"{len(active_findings):,}건 있습니다."
+            ),
+            "NORMAL": (
+                "현재 수집·검사 범위에서 활성 운영 경고가 없습니다."
+            ),
+            "UNKNOWN": (
+                "일부 데이터가 수집되지 않아 운영 상태를 완전히 판정할 수 없습니다."
+            ),
+        }[status]
+        technical_details = self._render_operational_detail_sections(
+            analysis,
+            datasets=datasets,
+            cost_enabled=cost_enabled,
+        )
+
+        return "".join((
+            '<section class="operational-overview" aria-label="운영 판단 요약">',
+            '<section class="daily-summary">',
+            '<div class="summary-heading">',
+            '<p class="section-eyebrow">DAILY BRIEF</p>',
+            '<h2>오늘의 요약</h2>',
+            '<p>현재 상태와 우선 조치를 먼저 확인하세요.</p>',
+            '</div>',
+            f'<p class="summary-narrative">{self._text(summary_text)}</p>',
+            f'<div class="operational-status-grid">{status_cards}</div>',
+            f'<div class="summary-facts">{"".join(quick_facts)}</div>',
+            '</section>',
+            self._section(
+                "우선 확인 및 조치",
+                "위험도 순으로 최대 5건만 표시합니다. 원시 근거와 전체 수집 상태는 아래 기술 부록에서 확인할 수 있습니다.",
+                finding_content,
+                len(findings),
+                warning=bool(findings),
+            ),
+            '<details class="technical-appendix">',
+            '<summary><span class="technical-appendix-copy">'
+            '<span class="technical-appendix-title">운영 근거 및 기술 상세</span>'
+            '<small>수집 상태·임계치·가용성·보안·비용 비교</small>'
+            '</span></summary>',
+            f'<div class="technical-appendix-body">{technical_details}</div>',
+            '</details>',
+            "</section>",
+        ))
+
+    def _active_operational_findings(
+        self,
+        analysis: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        findings = self._records(analysis.get("findings"))
+        if not findings:
+            # 초기 1.0 분석 스냅샷은 key_findings만 저장할 수 있다.
+            findings = self._records(analysis.get("key_findings"))
+        return [
+            finding
+            for finding in findings
+            if self._is_visible_operational_finding(finding)
+        ]
+
+    def _analysis_quick_fact(
+        self,
+        label: str,
+        value: Any,
+        source_state: Any,
+    ) -> str:
+        return (
+            '<div class="summary-fact">'
+            f'<span>{self._text(label)}</span>'
+            f'<strong>{self._text(value)}</strong>'
+            f'<small>{self._text(self._source_state_text(source_state))}</small>'
+            '</div>'
+        )
+
+    def _render_operational_detail_sections(
+        self,
+        analysis: Mapping[str, Any],
+        *,
+        datasets: List[Dict[str, Any]],
+        cost_enabled: bool,
+    ) -> str:
+        metrics = self._mapping(analysis.get("metrics"))
+        costs = self._mapping(analysis.get("costs"))
+        availability = self._mapping(analysis.get("availability"))
+        security = self._mapping(analysis.get("security"))
         dataset_rows = [
             {
                 "label": item.get("label"),
@@ -790,15 +966,6 @@ class HtmlReportRenderer:
             for item in self._records(security.get("items"))[:50]
         ]
         return "".join((
-            '<section class="operational-overview" aria-label="운영 판단 요약">',
-            f'<div class="operational-status-grid">{status_cards}</div>',
-            self._section(
-                "즉시 확인이 필요한 항목 · 상위 5건",
-                "규칙 기반 판정 결과입니다. 전체 활성 항목 수는 상단 카드에 표시하며, 이 목록에는 우선순위 상위 5건만 표시합니다. 숫자와 위험도는 AI 추정이 아니라 저장된 수집 데이터와 고객 임계치로 계산합니다.",
-                finding_content,
-                len(findings),
-                warning=bool(findings),
-            ),
             self._section(
                 "데이터 수집 상태",
                 "수집 완료 0건과 미수집·권한 부족·실패를 분리합니다.",
@@ -891,7 +1058,6 @@ class HtmlReportRenderer:
                 ),
                 len(comparison_rows),
             ) if cost_enabled else "",
-            "</section>",
         ))
 
     def _analysis_status_card(
@@ -995,7 +1161,12 @@ class HtmlReportRenderer:
         except (TypeError, ValueError):
             return False
 
-    def _finding_card(self, finding: Mapping[str, Any]) -> str:
+    def _finding_card(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        priority: bool = False,
+    ) -> str:
         resource = self._mapping(finding.get("resource"))
         evidence = self._records(finding.get("evidence"))
         evidence_text = " · ".join(
@@ -1004,11 +1175,18 @@ class HtmlReportRenderer:
             for item in evidence
         )
         severity = str(finding.get("severity") or "INFO").casefold()
+        priority_class = " priority" if priority else ""
+        priority_label = (
+            '<span class="priority-label">가장 먼저 확인</span>'
+            if priority
+            else ""
+        )
         return f"""
-        <article class="finding-card {self._text(severity)}">
+        <article class="finding-card {self._text(severity)}{priority_class}">
+          {priority_label}
           <div class="finding-heading"><span>{self._text(finding.get('severity'))}</span><span>{self._text(self._source_state_text(finding.get('source_state')))}</span><strong>{self._text(finding.get('title'))}</strong></div>
           <p>{self._text(resource.get('name') or resource.get('id') or '공통')}</p>
-          <dl><div><dt>근거</dt><dd>{self._text(evidence_text or '-')}</dd></div><div><dt>영향</dt><dd>{self._text(finding.get('impact') or '-')}</dd></div><div><dt>권고</dt><dd>{self._text(finding.get('recommendation') or '-')}</dd></div></dl>
+          <dl><div><dt>영향</dt><dd>{self._text(finding.get('impact') or '-')}</dd></div><div><dt>조치</dt><dd>{self._text(finding.get('recommendation') or '-')}</dd></div><div><dt>근거</dt><dd>{self._text(evidence_text or '-')}</dd></div></dl>
         </article>"""
 
     def _render_infrastructure_sections(
@@ -1074,6 +1252,7 @@ class HtmlReportRenderer:
                         "보고 기간의 CPU, 메모리 및 파일시스템 사용률입니다.",
                         self._metric_table(report.display_server_metrics),
                         len(report.display_server_metrics),
+                        collapsed=True,
                     ),
                     self._metric_chart_section(
                         report.server_metrics,
@@ -1116,6 +1295,7 @@ class HtmlReportRenderer:
                         ),
                     ),
                     len(billing.service_summary),
+                    collapsed=True,
                 ),
                 self._section(
                     billing.network_section_title,
@@ -1131,6 +1311,7 @@ class HtmlReportRenderer:
                         ),
                     ),
                     len(billing.network_summary),
+                    collapsed=True,
                 ),
                 self._section(
                     billing.usage_section_title,
@@ -1146,6 +1327,7 @@ class HtmlReportRenderer:
                         ),
                     ),
                     len(billing.usage_summary),
+                    collapsed=True,
                 ),
             ))
 
@@ -1169,6 +1351,7 @@ class HtmlReportRenderer:
                 "보고 기간에 수집된 Cloud Insight 이벤트입니다.",
                 self._event_table(report.insight_events),
                 len(report.insight_events),
+                collapsed=True,
             )
             if display.report_options.section_enabled("insight_events")
             else ""
@@ -1179,6 +1362,7 @@ class HtmlReportRenderer:
                 "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
                 self._activity_table(display.activity_events),
                 len(display.activity_events),
+                collapsed=True,
             )
             if display.report_options.section_enabled("activity_history")
             else ""
@@ -1200,6 +1384,7 @@ class HtmlReportRenderer:
                 self._diagnostic_table(diagnostics),
                 len(diagnostics),
                 warning=bool(diagnostics),
+                collapsed=True,
             )
         return {
             "insight_events": insight_events_html,
@@ -1333,8 +1518,21 @@ class HtmlReportRenderer:
         content: str,
         count: int,
         warning: bool = False,
+        collapsed: bool = False,
     ) -> str:
         status_class = " warning" if warning else ""
+        if collapsed:
+            return f"""
+    <details class="report-section report-disclosure{status_class}">
+      <summary class="section-heading">
+        <span class="section-heading-copy">
+          <span class="section-title" role="heading" aria-level="2">{self._text(title)}</span>
+          <small class="section-description">{self._text(description)}</small>
+        </span>
+        <span class="count">{count:,}건</span>
+      </summary>
+      <div class="report-disclosure-body">{content}</div>
+    </details>"""
         return f"""
     <section class="report-section{status_class}">
       <div class="section-heading">
@@ -1458,6 +1656,7 @@ class HtmlReportRenderer:
             ),
             content,
             len(prepared),
+            collapsed=True,
         )
 
     def _server_section(
@@ -1535,6 +1734,7 @@ class HtmlReportRenderer:
             ),
             self._table(prepared, tuple(columns)),
             len(prepared),
+            collapsed=True,
         )
 
     def _resource_membership_label(
@@ -1778,6 +1978,7 @@ class HtmlReportRenderer:
             metadata_html + tables,
             len(configurations),
             warning=not in_period,
+            collapsed=True,
         )
 
     def _infrastructure_details_text(self, value: Any) -> str:
@@ -2071,6 +2272,9 @@ class HtmlReportRenderer:
                 "fixed",
             ),
         )
+        charts = tuple(chart for chart in charts if chart[2])
+        if not charts:
+            return ""
         chart_cards = "".join(
             f"""
       <article class="chart-card">
@@ -2090,7 +2294,7 @@ class HtmlReportRenderer:
           <h2>보고 기간 메트릭 변화</h2>
           <p>보고서 기간 전체를 기준으로 KST {aggregation_label} 데이터를 표시합니다.</p>
         </div>
-        <span class="count">4개 그룹</span>
+        <span class="count">{len(charts):,}개 그룹</span>
       </div>
       <div class="chart-grid">{chart_cards}</div>
     </section>"""
@@ -3239,6 +3443,7 @@ class HtmlReportRenderer:
             "Organization 마스터 계정으로 확인된 경우에만 하위 계정별 비용을 표시합니다.",
             '<div class="billing-facts">' + "".join(articles) + "</div>",
             len(accounts),
+            collapsed=True,
         )
 
     def _records(self, value: Any) -> List[Dict[str, Any]]:

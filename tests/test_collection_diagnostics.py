@@ -5,6 +5,101 @@ from app.collection_diagnostics import (
     normalize_collection_issue,
 )
 from app.ncp_permission_hints import PERMISSION_HINTS
+from utils.provider_permissions import (
+    extract_provider_code,
+    extract_required_actions,
+)
+
+
+class ProviderPermissionParsingTests(unittest.TestCase):
+    def test_actions_only_come_from_explicit_error_messages(self):
+        response = {
+            "resource": {
+                "description": "View/getServerInstanceList",
+                "message": "View/getVpcList",
+            },
+            "error": {
+                "devMessage": "Grant View/getDomainList to the Sub Account.",
+            },
+        }
+
+        self.assertEqual(
+            extract_required_actions(response),
+            ("View/getDomainList",),
+        )
+
+    def test_error_envelope_supports_description_and_return_message(self):
+        response = {
+            "responseError": {
+                "description": "Grant View/getWAFList.",
+                "returnMessage": "Also grant View/getDomainList.",
+            },
+        }
+
+        self.assertEqual(
+            extract_required_actions(response),
+            ("View/getWAFList", "View/getDomainList"),
+        )
+
+    def test_success_message_is_not_treated_as_permission_error(self):
+        self.assertEqual(
+            extract_required_actions({
+                "returnCode": 0,
+                "message": "Resource label View/getVpcList",
+            }),
+            (),
+        )
+
+    def test_provider_code_is_bounded_and_accepts_depth_five(self):
+        forged = {"error": {"errorCode": "X00004\nforged"}}
+        nested = {
+            "a": {"b": {"c": {"d": {"e": {"errorCode": "X00004"}}}}}
+        }
+
+        self.assertIsNone(extract_provider_code(forged))
+        self.assertEqual(extract_provider_code(nested), "X00004")
+
+    def test_error_envelope_code_precedes_business_resource_code(self):
+        self.assertEqual(
+            extract_provider_code({
+                "resource": {"code": "RESOURCE_OK"},
+                "error": {"errorCode": "X00004"},
+            }),
+            "X00004",
+        )
+
+    def test_generic_error_envelope_code_precedes_nested_business_code(self):
+        self.assertEqual(
+            extract_provider_code({
+                "resource": {"returnCode": "RESOURCE_STATE"},
+                "error": {"code": "X00004"},
+            }),
+            "X00004",
+        )
+
+    def test_confirmed_root_error_supports_description_message(self):
+        self.assertEqual(
+            extract_required_actions({
+                "errorCode": "X00004",
+                "description": "Grant View/getDomainList.",
+            }),
+            ("View/getDomainList",),
+        )
+
+    def test_nested_resource_description_in_error_details_is_not_trusted(self):
+        self.assertEqual(
+            extract_required_actions({
+                "error": {
+                    "message": "Permission denied.",
+                    "details": {
+                        "resource": {
+                            "description": "View/getVpcList",
+                        },
+                    },
+                },
+            }),
+            (),
+        )
 
 
 class CollectionDiagnosticTests(unittest.TestCase):

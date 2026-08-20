@@ -1,0 +1,77 @@
+{{- if .Values.artifacts.persistence.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "ncp-report.fullname" . }}-artifact-cleanup
+  labels:
+    {{- include "ncp-report.labels" . | nindent 4 }}
+    app.kubernetes.io/component: artifact-cleanup
+spec:
+  schedule: {{ .Values.artifactCleanup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "ncp-report.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: artifact-cleanup
+        spec:
+          serviceAccountName: {{ include "ncp-report.fullname" . }}
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          {{- include "ncp-report.imagePullSecrets" . | nindent 10 }}
+          securityContext:
+{{ toYaml .Values.podSecurityContext | indent 12 }}
+          {{- if .Values.migration.waitForSchema }}
+          initContainers:
+{{ include "ncp-report.waitSchema" . | indent 12 }}
+          {{- end }}
+          containers:
+            - name: artifact-cleanup
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - python
+                - -m
+                - webapp.artifact_cleanup
+                - --limit
+                - {{ .Values.artifactCleanup.limit | quote }}
+              env:
+                {{- include "ncp-report.databaseEnv" . | nindent 16 }}
+                - name: REPORT_DB_ROLE
+                  value: "msp"
+                - name: REPORT_DB_USER
+                  value: "ncp_msp_app"
+                - name: REPORT_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.existingSecret }}
+                      key: DB_MSP_APP_PASSWORD
+                - name: REPORT_DB_APPLICATION_NAME
+                  value: "ncp-report-artifact-cleanup"
+                - name: REPORT_OUTPUT_DIR
+                  value: /app/output/report
+                - name: TZ
+                  value: Asia/Seoul
+                - name: LOG_LEVEL
+                  value: INFO
+              resources:
+{{ toYaml .Values.artifactCleanup.resources | indent 16 }}
+              securityContext:
+{{ toYaml .Values.containerSecurityContext | indent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: artifacts
+                  mountPath: /app/output
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: artifacts
+              persistentVolumeClaim:
+                claimName: {{ include "ncp-report.fullname" . }}-artifacts
+{{- end }}

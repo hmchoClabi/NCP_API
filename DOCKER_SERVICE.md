@@ -14,6 +14,7 @@ Kubernetes. The image is stateless so the same image can later run in NKS.
 - immediate daily/monthly generation from MSP and customer screens;
 - per-account daily/monthly schedules backed by a durable PostgreSQL queue;
 - isolated Public and GOV report workers;
+- five-minute durable local artifact cleanup retries;
 - PostgreSQL migration container and health checks;
 - one-command image rebuild and container replacement.
 
@@ -86,8 +87,13 @@ with:
 ```powershell
 docker compose -p ncp-report `
   --env-file .env.db --env-file .env.service `
-  logs --tail 100 scheduler worker-public worker-gov
+  logs --tail 100 scheduler artifact-cleanup worker-public worker-gov
 ```
+
+The `artifact-cleanup` service uses the MSP database role and artifact volume
+to retry durable cleanup rows every five minutes. It does not mount the NCP
+credential master key. Run a one-time retry with
+`python -m webapp.artifact_cleanup --limit 100` inside the web container.
 
 The immediate-generation panel also accepts a KST start and end time. Custom
 time ranges must remain inside one calendar month because the existing billing
@@ -138,7 +144,8 @@ If local PowerShell script execution is restricted, double-click
 not change the system execution policy.
 
 This creates a timestamped image tag, builds it, runs idempotent migrations,
-and replaces the web, scheduler, and worker containers. Inspect status and logs with:
+and replaces the web, scheduler, cleanup, and worker containers. Inspect status
+and logs with:
 
 ```powershell
 docker compose -p ncp-report `

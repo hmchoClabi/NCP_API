@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 import requests
 
 from ._collection_support import item_identity
 from normalizers.infrastructurenormalizer import InfrastructureNormalizer
+from utils.provider_permissions import (
+    extract_provider_code,
+    extract_required_actions,
+)
 from utils.response_validation import validate_collection_response
 
 
@@ -21,9 +24,6 @@ class InfrastructureCollector:
     MAX_PAGES = 10_000
     WARNING_HTTP_STATUSES = frozenset({401, 403, 404, 405, 501})
     _SUB_ACCOUNT_PERMISSION_CODE = "X00004"
-    _REQUIRED_ACTION_PATTERN = re.compile(
-        r"\b(?:View|Change)/[A-Za-z][A-Za-z0-9_-]{0,99}\b"
-    )
     LEGACY_DEFAULT_CATEGORIES = frozenset({
         "SERVER",
         "LOAD_BALANCER",
@@ -1244,8 +1244,8 @@ class InfrastructureCollector:
         is_sub_account_permission_error = False
         if isinstance(exc, requests.HTTPError) and exc.response is not None:
             status_code = exc.response.status_code
-            provider_code = self._provider_error_code(exc.response)
-            required_actions = self._provider_required_actions(exc.response)
+            provider_code = extract_provider_code(exc.response)
+            required_actions = extract_required_actions(exc.response)
             is_sub_account_permission_error = (
                 status_code == 400
                 and provider_code == self._SUB_ACCOUNT_PERMISSION_CODE
@@ -1310,34 +1310,6 @@ class InfrastructureCollector:
             warning["page_no"] = page_no
         self.last_warnings.append(warning)
 
-    @staticmethod
-    def _provider_error_code(response: requests.Response) -> Optional[str]:
-        try:
-            payload = response.json()
-        except ValueError:
-            return None
-        if not isinstance(payload, Mapping):
-            return None
-        error = payload.get("error")
-        if isinstance(error, Mapping):
-            value = error.get("errorCode") or error.get("code")
-            if value is not None:
-                return str(value)[:100]
-        value = payload.get("errorCode") or payload.get("code")
-        return str(value)[:100] if value is not None else None
-
-    @classmethod
-    def _provider_required_actions(
-        cls,
-        response: requests.Response,
-    ) -> tuple[str, ...]:
-        """공급자 오류에서 안전한 Sub Account 액션명만 추출한다."""
-
-        error_text = cls._provider_error_text(response)
-        if not error_text:
-            return ()
-        return tuple(dict.fromkeys(cls._REQUIRED_ACTION_PATTERN.findall(error_text)))
-
     @classmethod
     def _is_sub_account_permission_response(
         cls,
@@ -1353,7 +1325,7 @@ class InfrastructureCollector:
             "sub-account" in normalized_text
             or "sub account" in normalized_text
             or "additional rights" in normalized_text
-            or bool(cls._REQUIRED_ACTION_PATTERN.search(error_text))
+            or bool(extract_required_actions(response))
         )
 
     @staticmethod

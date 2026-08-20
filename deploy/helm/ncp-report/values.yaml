@@ -10,11 +10,12 @@ image:
 
 migration:
   enabled: true
+  waitForSchema: true
   image:
     repository: ncp-report-migrate
     tag: local
     pullPolicy: IfNotPresent
-  schemaVersion: "180"
+  schemaVersion: "190"
   waitSeconds: 300
 
 operationalAnalysis:
@@ -107,6 +108,13 @@ artifacts:
   persistence:
     enabled: true
     storageSize: 20Gi
+
+artifactCleanup:
+  schedule: "*/5 * * * *"
+  limit: 100
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
 
 backups:
   enabled: true

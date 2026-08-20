@@ -1369,25 +1369,13 @@ class RunnerPipelineTests(unittest.TestCase):
             suffix = "20260601_20260630"
             html_path = Path(temp_dir) / f"ncp_report_{suffix}.html"
             json_path = Path(temp_dir) / f"ncp_report_{suffix}.json"
-            infrastructure_path = Path(temp_dir) / (
-                f"infrastructure_inventory_{suffix}.json"
-            )
-            infrastructure_metrics_path = Path(temp_dir) / (
-                f"infrastructure_metrics_{suffix}.json"
-            )
 
             self.assertEqual(report.report_id, suffix)
             self.assertTrue(html_path.exists())
             self.assertTrue(json_path.exists())
             self.assertEqual(
-                json.loads(infrastructure_path.read_text(encoding="utf-8")),
-                [],
-            )
-            self.assertEqual(
-                json.loads(
-                    infrastructure_metrics_path.read_text(encoding="utf-8")
-                ),
-                [],
+                sorted(path.name for path in Path(temp_dir).glob("*.json")),
+                [json_path.name],
             )
             self.assertIn(
                 "NCP 이용 보고서",
@@ -1400,120 +1388,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 "1.5",
             )
 
-    def test_diagnostic_json_excludes_raw_network_configuration(self):
-        sensitive_rule_marker = "must-not-leak-network-rule"
-        network_configuration = [
-            {
-                "category": "ROUTE_TABLE",
-                "resource_id": "rt-1",
-                "details": {
-                    "routes": [{
-                        "destination_cidr": "0.0.0.0/0",
-                        "description": sensitive_rule_marker,
-                    }]
-                },
-            },
-            {
-                "category": "ACCESS_CONTROL_GROUP",
-                "resource_id": "acg-1",
-                "details": {
-                    "rules": [{
-                        "source_ip_block": "10.0.0.0/8",
-                        "description": sensitive_rule_marker,
-                    }]
-                },
-            },
-            {
-                "category": "NETWORK_ACL",
-                "resource_id": "nacl-1",
-                "details": {
-                    "rules": [{
-                        "source_ip_block": "10.0.0.0/8",
-                        "description": sensitive_rule_marker,
-                    }]
-                },
-            },
-        ]
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runner = self._runner_without_factory_init(temp_dir)
-            suffix = "20260601_20260630"
-            runner._write_prebilling_artifacts(
-                period={"file_suffix": suffix},
-                observability=ObservabilityResult(),
-                infrastructure=[
-                    {
-                        "category": "SERVER",
-                        "resource_id": "server-1",
-                    },
-                    *network_configuration,
-                ],
-            )
-
-            inventory_path = Path(temp_dir) / (
-                f"infrastructure_inventory_{suffix}.json"
-            )
-            inventory = json.loads(
-                inventory_path.read_text(encoding="utf-8")
-            )
-            self.assertEqual(
-                [item["category"] for item in inventory],
-                ["SERVER"],
-            )
-            self.assertFalse(
-                (Path(temp_dir) / (
-                    f"network_configuration_snapshot_{suffix}.json"
-                )).exists()
-            )
-            for diagnostic_path in Path(temp_dir).glob("*.json"):
-                with self.subTest(filename=diagnostic_path.name):
-                    self.assertNotIn(
-                        sensitive_rule_marker,
-                        diagnostic_path.read_text(encoding="utf-8"),
-                    )
-
-    def test_period_scoped_empty_summary_files_replace_stale_content(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runner = self._runner_without_factory_init(temp_dir)
-            suffix = "20260601_20260630"
-            metric_path = Path(temp_dir) / (
-                f"server_metric_summary_{suffix}.json"
-            )
-            error_path = Path(temp_dir) / (
-                f"cloud_insight_errors_{suffix}.json"
-            )
-            metric_path.write_text('[{"stale": true}]', encoding="utf-8")
-            error_path.write_text('[{"stale": true}]', encoding="utf-8")
-
-            runner.print_server_metric_summary([], file_suffix=suffix)
-            runner.print_insight_error_summary([], file_suffix=suffix)
-
-            self.assertEqual(
-                json.loads(metric_path.read_text(encoding="utf-8")),
-                [],
-            )
-            self.assertEqual(
-                json.loads(error_path.read_text(encoding="utf-8")),
-                [],
-            )
-            self.assertEqual(
-                json.loads(
-                    (Path(temp_dir) / "server_metric_summary.json").read_text(
-                        encoding="utf-8"
-                    )
-                ),
-                [],
-            )
-            self.assertEqual(
-                json.loads(
-                    (Path(temp_dir) / "cloud_insight_errors.json").read_text(
-                        encoding="utf-8"
-                    )
-                ),
-                [],
-            )
-
-    def test_billing_failure_preserves_completed_nonbilling_outputs(self):
+    def test_billing_failure_does_not_persist_partial_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             runner = self._runner_without_factory_init(temp_dir)
             runner._today_kst = lambda: date(2026, 7, 15)
@@ -1553,25 +1428,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 ):
                     runner.run(target_month="2026-06")
 
-            suffix = "20260601_20260630"
-            for filename in (
-                f"server_metric_summary_{suffix}.json",
-                f"cloud_insight_events_{suffix}.json",
-                f"activity_tracer_events_{suffix}.json",
-                f"collection_errors_{suffix}.json",
-                f"infrastructure_inventory_{suffix}.json",
-                f"infrastructure_metrics_{suffix}.json",
-            ):
-                with self.subTest(filename=filename):
-                    self.assertTrue((Path(temp_dir) / filename).exists())
-
-            errors = json.loads(
-                (
-                    Path(temp_dir)
-                    / f"collection_errors_{suffix}.json"
-                ).read_text(encoding="utf-8")
-            )
-            self.assertEqual(errors[-1]["collector"], "BillingCollector")
+            self.assertEqual(list(Path(temp_dir).glob("*")), [])
 
 
 if __name__ == "__main__":

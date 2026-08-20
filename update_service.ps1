@@ -31,7 +31,7 @@ $composeArguments = @(
 )
 & docker @composeArguments build web
 if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
-& docker @composeArguments up -d postgres migrate web scheduler worker-public worker-gov
+& docker @composeArguments up -d postgres migrate web scheduler artifact-cleanup worker-public worker-gov
 if ($LASTEXITCODE -ne 0) { throw "Service update failed." }
 
 $deadline = (Get-Date).AddSeconds(180)

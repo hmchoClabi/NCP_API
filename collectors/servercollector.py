@@ -6,6 +6,7 @@ import requests
 from ._collection_support import item_identity
 from normalizers.servernormalizer import ServerNormalizer
 from utils.common_rest import safe_exception_message
+from utils.provider_permissions import extract_provider_code
 from utils.response_validation import validate_collection_response
 
 logger = logging.getLogger(__name__)
@@ -287,30 +288,8 @@ class ServerCollector:
             error["exception_type"] = type(exc).__name__
             if isinstance(exc, requests.HTTPError) and exc.response is not None:
                 error["status_code"] = exc.response.status_code
-                provider_code = self._provider_error_code(exc.response)
+                provider_code = extract_provider_code(exc.response)
                 if provider_code:
                     error["error_code"] = provider_code
 
         self.last_errors.append(error)
-
-    @staticmethod
-    def _provider_error_code(response: requests.Response) -> Optional[str]:
-        """Return only the provider code; never persist the raw error body."""
-        try:
-            payload = response.json()
-        except ValueError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        error = payload.get("error")
-        if isinstance(error, dict):
-            value = error.get("errorCode") or error.get("code")
-            if value is not None:
-                return str(value)[:100]
-        response_error = payload.get("responseError")
-        if isinstance(response_error, dict):
-            value = response_error.get("returnCode")
-            if value is not None:
-                return str(value)[:100]
-        value = payload.get("errorCode") or payload.get("code")
-        return str(value)[:100] if value is not None else None

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.apifactory import APIFactory
 from app.customer import CustomerProfile, customer_id_from_name
 from app.mailers import SMTPConfig, SMTPMailer, parse_recipients
+from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
 from database import build_report_repository_from_env
 from app.runner import ReportRunner
@@ -29,8 +30,6 @@ from config.settings import (
 )
 from utils.credential_provider import EnvironmentCredentialProvider
 from utils.credentials import NCPCredentials
-
-LEGACY_DEFAULT_TARGET_MONTH = "2026-07"
 
 DAY_ALIASES = {
     "today": 0,
@@ -389,6 +388,7 @@ def send_report_email(
         body=body,
         recipients=recipients,
         attachments=[attachment],
+        html_body=HtmlReportRenderer().render_email_summary(report),
     )
     logging.getLogger(__name__).info(
         "보고서 메일 전송 완료: message_id=%s, recipients=%d",
@@ -445,18 +445,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         customer
     )
     validate_settings(credentials)
-
-    if not any(
-        (
-            target_month,
-            target_day,
-            args.start_date,
-            args.end_date,
-            args.start_datetime,
-            args.end_datetime,
-        )
-    ):
-        target_month = LEGACY_DEFAULT_TARGET_MONTH
 
     api_factory = APIFactory(
         credentials=credentials

@@ -19,7 +19,9 @@ the runtime Deployment or HPA portions of the Helm chart:
 The generated manifest intentionally contains only the four application
 Deployments and enabled HPAs. PostgreSQL, PVCs, Secrets, Service, Ingress,
 backup jobs and database migrations remain managed by Helm. Runtime deployment
-must not automatically run database migrations.
+must not automatically run database migrations. Each Deployment still keeps a
+schema-wait init container, so a runtime that requires a newer schema cannot
+start before the separately managed migration completes.
 
 ## SourceDeploy project
 

@@ -21,8 +21,11 @@ $manifest = & $Helm template ncp-report $chart `
     -f $ValuesFile `
     --set-string 'image.repository=${registry_endpoint}/ncp-report' `
     --set-string 'image.tag=latest' `
+    --set-string 'migration.image.repository=${registry_endpoint}/ncp-report-migrate' `
+    --set-string 'migration.image.tag=latest' `
     --set-string 'sourceRevision=sourcepipeline' `
     --set migration.enabled=false `
+    --set migration.waitForSchema=true `
     --show-only templates/deployments.yaml `
     --show-only templates/hpa.yaml
 if ($LASTEXITCODE -ne 0) { throw "Helm template failed." }
@@ -43,6 +46,9 @@ if ($content -notmatch '\$\{registry_endpoint\}/ncp-report:latest') {
 }
 if ($content -match 'kind: Job') {
     throw "Runtime manifest must not contain a migration Job."
+}
+if ($content -notmatch 'name: wait-schema') {
+    throw "Runtime manifest must wait for the required database schema."
 }
 if ($content -notmatch 'kind: HorizontalPodAutoscaler') {
     throw "Runtime manifest must contain the enabled HPA resources."

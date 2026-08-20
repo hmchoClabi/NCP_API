@@ -8,33 +8,340 @@ from unittest.mock import MagicMock, patch
 from app.report_branding import validate_customer_logo
 from webapp.repository import (
     PortalRepository,
+    _artifact_fingerprint,
+    _local_report_artifact_paths,
     _preserved_legacy_analysis_policies,
-    _remove_local_report_artifacts,
+    _remove_queued_artifact,
     _validate_msp_status_change,
 )
 
 
 class ReportArtifactCleanupTests(unittest.TestCase):
-    def test_cleanup_only_removes_local_files_below_output_root(self):
+    def test_candidate_selection_stays_below_output_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output_root = root / "output"
             output_root.mkdir()
-            report_file = output_root / "report.html"
+            report_file = output_root / "ncp_report_20260801_20260831.html"
+            legacy_file = output_root / "billing_raw_20260801_20260831.json"
+            unrelated_file = output_root / "billing_raw_other-period.json"
             outside_file = root / "outside.html"
             report_file.write_text("report", encoding="utf-8")
+            legacy_file.write_text("sensitive", encoding="utf-8")
+            unrelated_file.write_text("unrelated", encoding="utf-8")
             outside_file.write_text("outside", encoding="utf-8")
 
             with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": str(output_root)}):
-                removed, failed = _remove_local_report_artifacts([
+                candidates, failed = _local_report_artifact_paths([
                     report_file.as_uri(),
                     outside_file.as_uri(),
                     "s3://archive/report.html",
                 ])
 
-            self.assertEqual((removed, failed), (1, 0))
-            self.assertFalse(report_file.exists())
-            self.assertTrue(outside_file.exists())
+            self.assertEqual(failed, 0)
+            self.assertIn(report_file.resolve(), candidates)
+            self.assertIn(legacy_file.resolve(), candidates)
+            self.assertNotIn(unrelated_file.resolve(), candidates)
+            self.assertNotIn(outside_file.resolve(), candidates)
+
+    def test_candidate_selection_reports_malformed_local_uri(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
+                candidates, failed = _local_report_artifact_paths([
+                    Path(directory).as_uri() + "/%00",
+                ])
+
+            self.assertEqual(candidates, set())
+            self.assertEqual(failed, 1)
+
+    def test_queued_cleanup_preserves_content_that_changed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "report.html"
+            artifact.write_text("original", encoding="utf-8")
+            checksum, byte_size = _artifact_fingerprint(artifact)
+            artifact.write_text("replacement", encoding="utf-8")
+
+            with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
+                completed, result_code = _remove_queued_artifact(
+                    artifact.as_uri(),
+                    checksum,
+                    byte_size,
+                )
+
+            self.assertFalse(completed)
+            self.assertEqual(result_code, "CONTENT_CHANGED")
+            self.assertTrue(artifact.exists())
+
+    def test_queued_cleanup_treats_missing_file_as_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.html"
+            with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
+                self.assertEqual(
+                    _remove_queued_artifact(
+                        missing.as_uri(),
+                        "0" * 64,
+                        0,
+                    ),
+                    (True, "MISSING"),
+                )
+
+
+class TenantDeletionArtifactCleanupTests(unittest.TestCase):
+    def test_queue_rejects_local_file_outside_report_root(self):
+        repository = PortalRepository(MagicMock())
+        cursor = MagicMock()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            output.mkdir()
+            outside = root / "outside.html"
+            outside.write_text("outside", encoding="utf-8")
+
+            with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": str(output)}):
+                with self.assertRaisesRegex(ValueError, "경로 1건"):
+                    repository._queue_artifact_cleanup(
+                        cursor,
+                        tenant_id="tenant-1",
+                        storage_uris=[outside.as_uri()],
+                        owner_column="report_run_id",
+                        owner_id="report-1",
+                    )
+
+        cursor.execute.assert_not_called()
+
+    def test_queue_fingerprints_owned_file_and_skips_shared_file(self):
+        repository = PortalRepository(MagicMock())
+        cursor = MagicMock()
+        with tempfile.TemporaryDirectory() as directory:
+            owned = Path(directory) / "owned.html"
+            shared = Path(directory) / "ncp_report_20260801_20260831.html"
+            shared_legacy = Path(directory) / "billing_raw_20260801_20260831.json"
+            owned.write_text("owned", encoding="utf-8")
+            shared.write_text("shared", encoding="utf-8")
+            shared_legacy.write_text("shared legacy", encoding="utf-8")
+            repository._other_artifact_storage_uris = MagicMock(
+                return_value=[shared.as_uri()]
+            )
+
+            with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
+                operation_id, queued, shared_count = (
+                    repository._queue_artifact_cleanup(
+                        cursor,
+                        tenant_id="tenant-1",
+                        storage_uris=[owned.as_uri(), shared.as_uri()],
+                        owner_column="report_run_id",
+                        owner_id="report-1",
+                    )
+                )
+
+        self.assertIsNotNone(operation_id)
+        self.assertEqual((queued, shared_count), (1, 11))
+        insert = next(
+            call for call in cursor.execute.call_args_list
+            if "INSERT INTO control.artifact_cleanup_outbox" in call.args[0]
+        )
+        self.assertEqual(insert.args[1][2], owned.as_uri())
+        self.assertEqual(insert.args[1][4], 5)
+
+    def test_permanent_delete_commits_before_cleanup_drain(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = {
+            "customer_name": "Customer",
+            "customer_code": "customer",
+            "environment": "public",
+            "status": "OFFBOARDED",
+            "report_count": 1,
+            "has_running_job": False,
+        }
+        cursor.fetchall.side_effect = [
+            [{"storage_uri": "file:///output/report.html"}],
+            [{"storage_uri": "file:///output/raw.json"}],
+            [{"artifact_uri": "file:///output/metrics.json"}],
+        ]
+        repository._queue_artifact_cleanup = MagicMock(
+            return_value=("00000000-0000-0000-0000-000000000001", 3, 0)
+        )
+
+        def finish_after_commit(operation_id, queued_count):
+            self.assertTrue(connection.__exit__.called)
+            return 3, 0
+
+        repository._finish_artifact_cleanup = MagicMock(
+            side_effect=finish_after_commit
+        )
+
+        result = repository.permanently_delete_tenant(
+            "tenant-1",
+            "admin-1",
+            "archive://customer/reports",
+        )
+
+        self.assertEqual(result, ("Customer", 1))
+        repository._finish_artifact_cleanup.assert_called_once()
+        statements = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertLess(
+            next(i for i, sql in enumerate(statements) if "report_artifacts" in sql),
+            next(i for i, sql in enumerate(statements) if "DELETE FROM control.report_runs" in sql),
+        )
+
+    def test_commit_failure_does_not_start_tenant_file_cleanup(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = {
+            "customer_name": "Customer",
+            "customer_code": "customer",
+            "environment": "public",
+            "status": "OFFBOARDED",
+            "report_count": 1,
+            "has_running_job": False,
+        }
+        cursor.fetchall.side_effect = [
+            [{"storage_uri": "file:///output/report.html"}],
+            [],
+            [],
+        ]
+        repository._queue_artifact_cleanup = MagicMock(
+            return_value=("00000000-0000-0000-0000-000000000001", 1, 0)
+        )
+        repository._finish_artifact_cleanup = MagicMock()
+        connection.__exit__.side_effect = RuntimeError("commit failed")
+
+        with self.assertRaisesRegex(RuntimeError, "commit failed"):
+            repository.permanently_delete_tenant(
+                "tenant-1",
+                "admin-1",
+                "archive://customer/reports",
+            )
+
+        repository._finish_artifact_cleanup.assert_not_called()
+
+
+class ReportDeletionArtifactCleanupTests(unittest.TestCase):
+    def test_commit_failure_does_not_start_report_file_cleanup(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = {
+            "id": "report-1",
+            "tenant_id": "tenant-1",
+            "environment": "public",
+            "status": "SUCCESS",
+            "report_type": "MONTHLY",
+            "customer_name": "Customer",
+        }
+        cursor.fetchall.side_effect = [
+            [{"storage_uri": "file:///output/report.html"}],
+            [],
+            [],
+        ]
+        repository._queue_artifact_cleanup = MagicMock(
+            return_value=("00000000-0000-0000-0000-000000000001", 1, 0)
+        )
+        repository._finish_artifact_cleanup = MagicMock()
+        connection.__exit__.side_effect = RuntimeError("commit failed")
+
+        with self.assertRaisesRegex(RuntimeError, "commit failed"):
+            repository.delete_report("report-1", "admin-1")
+
+        repository._finish_artifact_cleanup.assert_not_called()
+
+    @patch("webapp.repository._remove_queued_artifact")
+    def test_retry_deletes_completed_row_and_keeps_failed_row(self, remove):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        rows = [
+            {
+                "id": "cleanup-1",
+                "storage_uri": "file:///output/one.html",
+                "expected_sha256": "1" * 64,
+                "expected_byte_size": 1,
+            },
+            {
+                "id": "cleanup-2",
+                "storage_uri": "file:///output/two.html",
+                "expected_sha256": "2" * 64,
+                "expected_byte_size": 2,
+            },
+        ]
+        cursor.fetchall.side_effect = [rows, []]
+        cursor.fetchone.return_value = {"count": 1}
+        remove.side_effect = [(True, "REMOVED"), (False, "REMOVE_FAILED")]
+
+        self.assertEqual(
+            repository.retry_artifact_cleanup(limit=10),
+            (1, 1),
+        )
+
+        statements = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertIn(
+            "ORDER BY next_attempt_at, created_at, id",
+            statements[0],
+        )
+        self.assertTrue(any(
+            "DELETE FROM control.artifact_cleanup_outbox" in sql
+            for sql in statements
+        ))
+        retry_update = next(
+            sql for sql in statements
+            if "UPDATE control.artifact_cleanup_outbox" in sql
+        )
+        self.assertIn(
+            "1 << LEAST(attempt_count, 8)",
+            retry_update,
+        )
+
+    @patch("webapp.repository._remove_queued_artifact")
+    def test_retry_preserves_file_that_gained_a_new_database_reference(
+        self,
+        remove,
+    ):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        row = {
+            "id": "cleanup-1",
+            "storage_uri": "file:///output/report.html",
+            "expected_sha256": "1" * 64,
+            "expected_byte_size": 1,
+        }
+        cursor.fetchall.side_effect = [
+            [row],
+            [{"storage_uri": row["storage_uri"]}],
+        ]
+        cursor.fetchone.return_value = {"count": 1}
+
+        self.assertEqual(repository.retry_artifact_cleanup(), (0, 1))
+
+        remove.assert_not_called()
+        update = next(
+            call for call in cursor.execute.call_args_list
+            if "UPDATE control.artifact_cleanup_outbox" in call.args[0]
+        )
+        self.assertEqual(update.args[1][0], "STILL_REFERENCED")
 
 
 class LegacyReportPolicyCompatibilityTests(unittest.TestCase):

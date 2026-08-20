@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -10,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from psycopg.rows import dict_row
 
@@ -33,6 +34,18 @@ _PERSONAL_DATA_KEYS = {
 }
 _ACTIVE_REPORT_STATUSES = {"QUEUED", "RUNNING", "RETRYING"}
 _MSP_ACCOUNT_MANAGEMENT_LOCK_ID = 1_311_787_345
+_LEGACY_DIAGNOSTIC_PREFIXES = (
+    "activity_tracer_errors",
+    "activity_tracer_events",
+    "billing_raw",
+    "billing_result",
+    "cloud_insight_errors",
+    "cloud_insight_events",
+    "collection_errors",
+    "infrastructure_inventory",
+    "infrastructure_metrics",
+    "server_metric_summary",
+)
 _LEGACY_ANALYSIS_POLICY_KEYS = (
     "require_block_storage_encryption",
     "require_kubernetes_termination_protection",
@@ -40,6 +53,103 @@ _LEGACY_ANALYSIS_POLICY_KEYS = (
     "require_owner_tag",
     "require_backup",
 )
+LOGGER = logging.getLogger(__name__)
+
+
+def _local_report_artifact_paths(
+    storage_uris: list[str],
+    *,
+    include_legacy: bool = True,
+    reject_outside: bool = False,
+) -> tuple[set[Path], int]:
+    try:
+        output_root = Path(
+            os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
+        ).resolve()
+    except (OSError, ValueError):
+        return set(), max(1, len(set(storage_uris)))
+
+    candidates: set[Path] = set()
+    failed = 0
+    for storage_uri in set(storage_uris):
+        try:
+            parsed = urlparse(storage_uri)
+            if parsed.scheme != "file":
+                continue
+            if parsed.netloc not in {"", "localhost"}:
+                if reject_outside:
+                    failed += 1
+                continue
+            local_path = unquote(parsed.path)
+            if "\x00" in local_path:
+                failed += 1
+                continue
+            if os.name == "nt" and re.match(r"^/[A-Za-z]:", local_path):
+                local_path = local_path[1:]
+            candidate = Path(local_path).resolve()
+        except (OSError, ValueError):
+            failed += 1
+            continue
+        try:
+            candidate.relative_to(output_root)
+        except ValueError:
+            if reject_outside:
+                failed += 1
+            continue
+        candidates.add(candidate)
+        if not include_legacy:
+            continue
+        report_match = re.fullmatch(
+            r"ncp_report_([A-Za-z0-9_-]+)\.(?:html|json)",
+            candidate.name,
+        )
+        if report_match:
+            suffix = report_match.group(1)
+            candidates.update(
+                candidate.with_name(f"{prefix}_{suffix}.json")
+                for prefix in _LEGACY_DIAGNOSTIC_PREFIXES
+            )
+    return candidates, failed
+
+
+def _artifact_fingerprint(candidate: Path) -> tuple[str, int]:
+    digest = sha256()
+    with candidate.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest(), candidate.stat().st_size
+
+
+def _remove_queued_artifact(
+    storage_uri: str,
+    expected_sha256: str,
+    expected_byte_size: int,
+) -> tuple[bool, str]:
+    candidates, failed = _local_report_artifact_paths(
+        [storage_uri],
+        include_legacy=False,
+    )
+    if failed or len(candidates) != 1:
+        return False, "UNSAFE_URI"
+    candidate = next(iter(candidates))
+    try:
+        actual_sha256, actual_byte_size = _artifact_fingerprint(candidate)
+    except FileNotFoundError:
+        return True, "MISSING"
+    except (OSError, ValueError):
+        return False, "READ_FAILED"
+    if (
+        actual_byte_size != expected_byte_size
+        or not secrets.compare_digest(actual_sha256, expected_sha256)
+    ):
+        return False, "CONTENT_CHANGED"
+    try:
+        candidate.unlink()
+    except FileNotFoundError:
+        return True, "MISSING"
+    except (OSError, ValueError):
+        return False, "REMOVE_FAILED"
+    return True, "REMOVED"
 
 
 def _preserved_legacy_analysis_policies(value: Any) -> dict[str, bool]:
@@ -62,32 +172,6 @@ def _preserved_legacy_analysis_policies(value: Any) -> dict[str, bool]:
         for key in _LEGACY_ANALYSIS_POLICY_KEYS
         if isinstance(policies.get(key), bool)
     }
-
-
-def _remove_local_report_artifacts(storage_uris: list[str]) -> tuple[int, int]:
-    output_root = Path(
-        os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
-    ).resolve()
-    removed = 0
-    failed = 0
-    for storage_uri in set(storage_uris):
-        parsed = urlparse(storage_uri)
-        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
-            continue
-        local_path = unquote(parsed.path)
-        if os.name == "nt" and re.match(r"^/[A-Za-z]:", local_path):
-            local_path = local_path[1:]
-        candidate = Path(local_path).resolve()
-        try:
-            candidate.relative_to(output_root)
-        except ValueError:
-            continue
-        try:
-            candidate.unlink(missing_ok=True)
-            removed += 1
-        except OSError:
-            failed += 1
-    return removed, failed
 
 
 def _anonymize_report_payload(value: Any, customer: dict[str, Any]) -> Any:
@@ -1305,8 +1389,260 @@ class PortalRepository:
             report["snapshot"] = payload
             return report
 
+    @staticmethod
+    def _other_artifact_storage_uris(
+        cursor: Any,
+        storage_uris: list[str],
+        *,
+        owner_column: str,
+        owner_id: str,
+    ) -> list[str]:
+        if not storage_uris:
+            return []
+        if owner_column not in {"report_run_id", "tenant_id"}:
+            raise ValueError("Unsupported artifact owner column.")
+        cursor.execute(
+            f"""
+            SELECT DISTINCT storage_uri
+            FROM (
+                SELECT storage_uri
+                FROM control.report_artifacts
+                WHERE {owner_column} <> %s AND storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT storage_uri
+                FROM public_data.raw_payload_refs
+                WHERE {owner_column} <> %s AND storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT storage_uri
+                FROM gov_data.raw_payload_refs
+                WHERE {owner_column} <> %s AND storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT artifact_uri AS storage_uri
+                FROM public_data.metric_series
+                WHERE {owner_column} <> %s AND artifact_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT artifact_uri AS storage_uri
+                FROM gov_data.metric_series
+                WHERE {owner_column} <> %s AND artifact_uri = ANY(%s::text[])
+            ) referenced_artifacts
+            """,
+            (
+                owner_id, storage_uris,
+                owner_id, storage_uris,
+                owner_id, storage_uris,
+                owner_id, storage_uris,
+                owner_id, storage_uris,
+            ),
+        )
+        return [
+            str(row["storage_uri"])
+            for row in cursor.fetchall()
+            if row.get("storage_uri")
+        ]
+
+    @staticmethod
+    def _referenced_artifact_storage_uris(
+        cursor: Any,
+        storage_uris: list[str],
+    ) -> set[str]:
+        if not storage_uris:
+            return set()
+        cursor.execute(
+            """
+            SELECT DISTINCT storage_uri
+            FROM (
+                SELECT storage_uri FROM control.report_artifacts
+                WHERE storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT storage_uri FROM public_data.raw_payload_refs
+                WHERE storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT storage_uri FROM gov_data.raw_payload_refs
+                WHERE storage_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT artifact_uri AS storage_uri FROM public_data.metric_series
+                WHERE artifact_uri = ANY(%s::text[])
+                UNION ALL
+                SELECT artifact_uri AS storage_uri FROM gov_data.metric_series
+                WHERE artifact_uri = ANY(%s::text[])
+            ) referenced_artifacts
+            """,
+            (storage_uris,) * 5,
+        )
+        return {
+            str(row["storage_uri"])
+            for row in cursor.fetchall()
+            if row.get("storage_uri")
+        }
+
+    def _queue_artifact_cleanup(
+        self,
+        cursor: Any,
+        *,
+        tenant_id: str,
+        storage_uris: list[str],
+        owner_column: str,
+        owner_id: str,
+    ) -> tuple[Optional[str], int, int]:
+        candidates, failed = _local_report_artifact_paths(
+            storage_uris,
+            reject_outside=True,
+        )
+        if failed:
+            raise ValueError(
+                f"로컬 보고서 경로 {failed}건을 안전하게 확인하지 못했습니다."
+            )
+        lookup_uris = list(dict.fromkeys((
+            *storage_uris,
+            *(candidate.as_uri() for candidate in candidates),
+        )))
+        shared_uris = self._other_artifact_storage_uris(
+            cursor,
+            lookup_uris,
+            owner_column=owner_column,
+            owner_id=owner_id,
+        )
+        shared_paths, _ = _local_report_artifact_paths(
+            shared_uris,
+            include_legacy=True,
+        )
+        shared_candidates = candidates & shared_paths
+        candidates.difference_update(shared_paths)
+
+        entries: list[tuple[str, str, int]] = []
+        for candidate in sorted(candidates):
+            try:
+                checksum, byte_size = _artifact_fingerprint(candidate)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                failed += 1
+                continue
+            entries.append((candidate.as_uri(), checksum, byte_size))
+        if failed:
+            raise ValueError(
+                f"로컬 보고서 파일 {failed}건을 안전하게 확인하지 못했습니다."
+            )
+        if not entries:
+            return None, 0, len(shared_candidates)
+
+        operation_id = str(uuid4())
+        for storage_uri, checksum, byte_size in entries:
+            cursor.execute(
+                """
+                INSERT INTO control.artifact_cleanup_outbox (
+                    operation_id, tenant_id, storage_uri,
+                    expected_sha256, expected_byte_size
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    operation_id, tenant_id, storage_uri,
+                    checksum, byte_size,
+                ),
+            )
+        return operation_id, len(entries), len(shared_candidates)
+
+    def retry_artifact_cleanup(
+        self,
+        *,
+        limit: int = 100,
+        operation_id: Optional[str] = None,
+    ) -> tuple[int, int]:
+        limit = max(1, min(int(limit), 1_000))
+        operation_filter = ""
+        parameters: list[Any] = []
+        if operation_id:
+            operation_filter = "AND operation_id = %s"
+            parameters.append(operation_id)
+        parameters.append(limit)
+
+        removed = 0
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT id, storage_uri, expected_sha256, expected_byte_size
+                FROM control.artifact_cleanup_outbox
+                WHERE next_attempt_at <= clock_timestamp()
+                  {operation_filter}
+                ORDER BY next_attempt_at, created_at, id
+                FOR UPDATE SKIP LOCKED
+                LIMIT %s
+                """,
+                tuple(parameters),
+            )
+            rows = cursor.fetchall()
+            referenced_uris = self._referenced_artifact_storage_uris(
+                cursor,
+                [str(row["storage_uri"]) for row in rows],
+            )
+            for row in rows:
+                if str(row["storage_uri"]) in referenced_uris:
+                    completed, result_code = False, "STILL_REFERENCED"
+                else:
+                    try:
+                        completed, result_code = _remove_queued_artifact(
+                            str(row["storage_uri"]),
+                            str(row["expected_sha256"]).strip(),
+                            int(row["expected_byte_size"]),
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        completed, result_code = False, "INVALID_OUTBOX_ROW"
+                if completed:
+                    cursor.execute(
+                        "DELETE FROM control.artifact_cleanup_outbox WHERE id = %s",
+                        (row["id"],),
+                    )
+                    if result_code == "REMOVED":
+                        removed += 1
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE control.artifact_cleanup_outbox
+                        SET attempt_count = attempt_count + 1,
+                            next_attempt_at = clock_timestamp() + make_interval(
+                                mins => 5 * (1 << LEAST(attempt_count, 8))
+                            ),
+                            last_error_code = %s
+                        WHERE id = %s
+                        """,
+                        (result_code, row["id"]),
+                    )
+
+            count_filter = ""
+            count_parameters: tuple[Any, ...] = ()
+            if operation_id:
+                count_filter = "WHERE operation_id = %s"
+                count_parameters = (operation_id,)
+            cursor.execute(
+                "SELECT count(*) AS count "
+                "FROM control.artifact_cleanup_outbox "
+                f"{count_filter}",
+                count_parameters,
+            )
+            pending = int(cursor.fetchone()["count"])
+        return removed, pending
+
+    def _finish_artifact_cleanup(
+        self,
+        operation_id: Optional[str],
+        queued_count: int,
+    ) -> tuple[int, int]:
+        if not operation_id:
+            return 0, 0
+        try:
+            return self.retry_artifact_cleanup(operation_id=operation_id)
+        except Exception:
+            LOGGER.warning(
+                "Artifact cleanup operation %s was deferred for retry.",
+                operation_id,
+            )
+            return 0, queued_count
+
     def delete_report(self, report_id: str, actor_id: str) -> dict[str, Any]:
         storage_uris: list[str] = []
+        cleanup_operation_id: Optional[str] = None
+        cleanup_queued_count = 0
+        shared_artifact_count = 0
         result: dict[str, Any]
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -1359,6 +1695,18 @@ class PortalRepository:
                 if row.get("artifact_uri")
             )
 
+            (
+                cleanup_operation_id,
+                cleanup_queued_count,
+                shared_artifact_count,
+            ) = self._queue_artifact_cleanup(
+                cursor,
+                tenant_id=str(report["tenant_id"]),
+                storage_uris=storage_uris,
+                owner_column="report_run_id",
+                owner_id=report_id,
+            )
+
             cursor.execute(
                 """
                 INSERT INTO audit.data_change_logs (
@@ -1372,6 +1720,9 @@ class PortalRepository:
                         "report_type": report["report_type"],
                         "status": report["status"],
                         "artifact_reference_count": len(set(storage_uris)),
+                        "cleanup_operation_id": cleanup_operation_id,
+                        "cleanup_file_count": cleanup_queued_count,
+                        "shared_artifact_count": shared_artifact_count,
                     }),
                 ),
             )
@@ -1384,9 +1735,12 @@ class PortalRepository:
                 "customer_name": report["customer_name"],
             }
 
-        removed, failed = _remove_local_report_artifacts(storage_uris)
+        removed, pending = self._finish_artifact_cleanup(
+            cleanup_operation_id,
+            cleanup_queued_count,
+        )
         result["removed_artifact_files"] = removed
-        result["failed_artifact_files"] = failed
+        result["failed_artifact_files"] = pending
         return result
 
     def jobs_for_tenants(self, tenant_ids: list[str]) -> list[dict[str, Any]]:
@@ -2104,12 +2458,14 @@ class PortalRepository:
         tenant_id: str,
         actor_id: str,
         archive_reference: str = "",
-        *,
-        force: bool = False,
     ) -> tuple[str, int]:
         archive_reference = archive_reference.strip()
         if len(archive_reference) > 500:
             raise ValueError("외부 보관 참조는 500자 이하여야 합니다.")
+        storage_uris: list[str] = []
+        cleanup_operation_id: Optional[str] = None
+        cleanup_queued_count = 0
+        shared_artifact_count = 0
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -2134,8 +2490,61 @@ class PortalRepository:
             if tenant["has_running_job"]:
                 raise ValueError("실행 중인 보고서가 있어 영구 삭제할 수 없습니다.")
             report_count = int(tenant["report_count"] or 0)
-            if report_count and not archive_reference and not force:
+            if report_count and not archive_reference:
                 raise ValueError("보고서가 있는 고객은 외부 보관 참조가 필요합니다.")
+
+            cursor.execute(
+                """
+                SELECT artifact.storage_uri
+                FROM control.report_artifacts artifact
+                JOIN control.report_runs report
+                  ON report.id = artifact.report_run_id
+                WHERE report.tenant_id = %s
+                """,
+                (tenant_id,),
+            )
+            storage_uris.extend(
+                str(row["storage_uri"])
+                for row in cursor.fetchall()
+                if row.get("storage_uri")
+            )
+            schema = (
+                "public_data"
+                if tenant["environment"] == "public"
+                else "gov_data"
+            )
+            cursor.execute(
+                f"SELECT storage_uri FROM {schema}.raw_payload_refs "
+                "WHERE tenant_id = %s",
+                (tenant_id,),
+            )
+            storage_uris.extend(
+                str(row["storage_uri"])
+                for row in cursor.fetchall()
+                if row.get("storage_uri")
+            )
+            cursor.execute(
+                f"SELECT artifact_uri FROM {schema}.metric_series "
+                "WHERE tenant_id = %s AND artifact_uri IS NOT NULL",
+                (tenant_id,),
+            )
+            storage_uris.extend(
+                str(row["artifact_uri"])
+                for row in cursor.fetchall()
+                if row.get("artifact_uri")
+            )
+
+            (
+                cleanup_operation_id,
+                cleanup_queued_count,
+                shared_artifact_count,
+            ) = self._queue_artifact_cleanup(
+                cursor,
+                tenant_id=tenant_id,
+                storage_uris=storage_uris,
+                owner_column="tenant_id",
+                owner_id=tenant_id,
+            )
 
             code_hash = sha256(
                 tenant["customer_code"].casefold().encode("utf-8")
@@ -2149,7 +2558,7 @@ class PortalRepository:
                 """,
                 (
                     code_hash, tenant["environment"], report_count,
-                    archive_reference, force, actor_id,
+                    archive_reference, False, actor_id,
                 ),
             )
             cursor.execute(
@@ -2165,7 +2574,11 @@ class PortalRepository:
                         "permanent": True,
                         "report_count": report_count,
                         "archive_reference": archive_reference or None,
-                        "forced": force,
+                        "artifact_reference_count": len(set(storage_uris)),
+                        "cleanup_operation_id": cleanup_operation_id,
+                        "cleanup_file_count": cleanup_queued_count,
+                        "shared_artifact_count": shared_artifact_count,
+                        "forced": False,
                     }),
                 ),
             )
@@ -2178,7 +2591,18 @@ class PortalRepository:
                 (tenant_id,),
             )
             cursor.execute("DELETE FROM control.tenants WHERE id = %s", (tenant_id,))
-            return tenant["customer_name"], report_count
+            result = tenant["customer_name"], report_count
+
+        _, pending = self._finish_artifact_cleanup(
+            cleanup_operation_id,
+            cleanup_queued_count,
+        )
+        if pending:
+            LOGGER.warning(
+                "Tenant deletion left %d artifact cleanup item(s) queued.",
+                pending,
+            )
+        return result
 
     def account_credentials(
         self, account_id: str, cipher: CredentialCipher

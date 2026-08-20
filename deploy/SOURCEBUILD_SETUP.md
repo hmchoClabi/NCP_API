@@ -212,4 +212,7 @@ by SourceCommit `master`:
 SourceDeploy uses the committed `deploy/sourcedeploy/runtime.yaml` manifest for
 routine application rollouts. Database migration remains a separate,
 deliberate Helm operation and is not part of the automatic runtime pipeline.
+The runtime Deployments retain their schema-wait init containers even when the
+migration Job is omitted, so schema releases must apply the reviewed migration
+before the new rollout can become ready.
 See `deploy/SOURCEPIPELINE_SETUP.md` for the console configuration.

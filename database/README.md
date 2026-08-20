@@ -67,6 +67,7 @@ Object Storage in production. Their URI, checksum and metadata stay in the DB.
 | `report_schedules` | Daily, monthly and custom report schedules |
 | `report_runs` | Idempotent collection/render execution state |
 | `report_artifacts` | HTML, PDF, JSON and Object Storage metadata |
+| `artifact_cleanup_outbox` | Content-checked local artifact deletion retries |
 | `collection_errors` | Collector-stage errors and retry classification |
 | `daily_customer_facts` | Fast MSP daily dashboard aggregates |
 | `email_recipients` | Tenant report and event recipient preferences |
@@ -131,6 +132,10 @@ Customer removal is deliberately split into explicit stages:
 4. **Permanently delete** removes the tenant and reports. Reports require an
    external archive reference; only a SHA-256 customer-code tombstone, counts,
    environment, actor and deletion time remain.
+
+Local report files are removed only after the database deletion commits. Each
+file is fingerprinted in `artifact_cleanup_outbox`; failed removals remain
+retryable with `python -m webapp.artifact_cleanup`.
 
 The web workflow requires the exact customer code and an explicit confirmation
 phrase for anonymization and permanent deletion. A running report job blocks

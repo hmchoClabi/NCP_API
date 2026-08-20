@@ -13,7 +13,12 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 htmlcov/
+tests/
+.tmp/
+tmp/
+/*.pdf
 database/.generated/
+deploy/private/
 *.ps1
 !setup_database.ps1
 !setup_service.ps1

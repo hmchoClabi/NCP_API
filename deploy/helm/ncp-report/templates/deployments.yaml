@@ -41,7 +41,7 @@ spec:
       {{- include "ncp-report.imagePullSecrets" $root | nindent 6 }}
       securityContext:
 {{ toYaml $root.Values.podSecurityContext | indent 8 }}
-      {{- if $root.Values.migration.enabled }}
+      {{- if $root.Values.migration.waitForSchema }}
       initContainers:
         - name: wait-schema
           image: "{{ $root.Values.migration.image.repository }}:{{ $root.Values.migration.image.tag }}"

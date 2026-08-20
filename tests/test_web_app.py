@@ -220,10 +220,12 @@ class FakePortalRepository:
         return "익명 고객 12345678"
 
     def permanently_delete_tenant(
-        self, tenant_id, actor_id, archive_reference="", *, force=False,
+        self, tenant_id, actor_id, archive_reference="",
     ):
+        if not archive_reference:
+            raise ValueError("보고서가 있는 고객은 외부 보관 참조가 필요합니다.")
         self.permanently_deleted_tenants.append(
-            (tenant_id, actor_id, archive_reference, force)
+            (tenant_id, actor_id, archive_reference)
         )
         return "Customer", 1
 
@@ -493,13 +495,9 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.allowed_tenants, ["tenant-1"])
-        self.assertIn(
-            (
-                "<span>자원</span><strong>1</strong>"
-                "<small>수집 대상</small>"
-            ).encode("utf-8"),
-            response.data,
-        )
+        self.assertIn(b'class="report-detail-shell"', response.data)
+        self.assertIn(b'class="report-frame"', response.data)
+        self.assertNotIn(b'class="stat-grid"', response.data)
 
     def test_customer_can_render_full_report_from_stored_snapshot(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -1427,28 +1425,10 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             self.repository.permanently_deleted_tenants,
-            [("tenant-1", "user-1", "s3://archive/customer/report.json", False)],
+            [("tenant-1", "user-1", "s3://archive/customer/report.json")],
         )
 
-    def test_msp_admin_can_force_delete_test_customer_with_reports(self):
-        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
-        response = self.client.post(
-            "/msp/customer/tenant-1/permanent-delete",
-            data={
-                "csrf_token": "csrf-token",
-                "confirm_customer_code": "customer",
-                "confirm_phrase": "강제 삭제",
-                "force_delete": "true",
-            },
-        )
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            self.repository.permanently_deleted_tenants,
-            [("tenant-1", "user-1", "", True)],
-        )
-
-    def test_force_delete_requires_force_confirmation_phrase(self):
+    def test_unverified_force_delete_is_rejected(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
         response = self.client.post(
             "/msp/customer/tenant-1/permanent-delete",

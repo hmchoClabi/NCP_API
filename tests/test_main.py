@@ -8,7 +8,7 @@ class MainTests(unittest.TestCase):
     @patch("main.validate_settings")
     @patch("main.setup_logging")
     @patch("main.ReportRunner")
-    def test_no_period_arguments_preserves_legacy_target_month(
+    def test_no_period_arguments_use_runner_default_period(
         self,
         runner_class,
         _setup_logging,
@@ -27,7 +27,7 @@ class MainTests(unittest.TestCase):
         )
         self.assertIsNotNone(runner_arguments["api_factory"])
         runner.run.assert_called_once_with(
-            target_month=main.LEGACY_DEFAULT_TARGET_MONTH,
+            target_month=None,
             target_day=None,
             start_date=None,
             end_date=None,
@@ -160,6 +160,47 @@ class MainTests(unittest.TestCase):
             recipient_values=[
                 "first@example.com,second@example.com"
             ],
+        )
+
+    @patch("main.HtmlReportRenderer")
+    @patch("main.SMTPMailer")
+    @patch("main.SMTPConfig.from_env")
+    def test_send_report_email_includes_html_summary(
+        self,
+        config_from_env,
+        mailer_class,
+        renderer_class,
+    ):
+        report = MagicMock()
+        report.period = {
+            "period_type": "day",
+            "is_full_month": False,
+            "start_dt": "2026-08-18 00:00:00",
+            "end_dt": "2026-08-18 23:59:59",
+            "file_suffix": "20260818_20260818",
+        }
+        report.customer = {"name": "테스트 고객"}
+        report.generated_at = "2026-08-19 01:00:00"
+        runner = MagicMock(output_dir="output/report/test")
+        renderer_class.return_value.render_email_summary.return_value = (
+            "<html>summary</html>"
+        )
+        mailer_class.return_value.send.return_value = "message-id"
+
+        result = main.send_report_email(
+            report,
+            runner,
+            ["viewer@example.com"],
+        )
+
+        self.assertEqual(result, "message-id")
+        config_from_env.assert_called_once_with()
+        renderer_class.return_value.render_email_summary.assert_called_once_with(
+            report
+        )
+        self.assertEqual(
+            mailer_class.return_value.send.call_args.kwargs["html_body"],
+            "<html>summary</html>",
         )
 
     def test_customer_and_gov_options_are_injected_per_run(self):

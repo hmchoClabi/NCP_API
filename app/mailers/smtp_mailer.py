@@ -145,6 +145,7 @@ class SMTPMailer:
         body: str,
         recipients: Sequence[str],
         attachments: Sequence[str | Path] = (),
+        html_body: str | None = None,
     ) -> str:
         normalized_recipients = parse_recipients(recipients)
         if not normalized_recipients:
@@ -157,6 +158,8 @@ class SMTPMailer:
         message["Date"] = formatdate(localtime=True)
         message["Message-ID"] = make_msgid()
         message.set_content(body)
+        if html_body is not None:
+            message.add_alternative(html_body, subtype="html")
 
         for attachment in attachments:
             self._attach_file(message, Path(attachment))

@@ -154,6 +154,21 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn('name="viewport"', html)
         self.assertIn("@media print", html)
         self.assertIn("NCP 이용 보고서", html)
+        self.assertIn("오늘의 요약", html)
+        self.assertIn("운영 위험 판정이 포함되지 않습니다", html)
+        self.assertIn(
+            '<details class="report-section report-disclosure">',
+            html,
+        )
+        self.assertIn(
+            'class="section-title" role="heading" aria-level="2"',
+            html,
+        )
+        self.assertIn(
+            ".report-disclosure[open] > summary::after",
+            html,
+        )
+        self.assertIn(".event-details:not([open]) > dl", html)
         self.assertIn("12,345 <small>원</small>", html)
         self.assertIn("Cloud Activity Tracer", html)
         self.assertIn("보고 기간 메트릭 변화", html)
@@ -183,6 +198,57 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("상세 2개", html)
         self.assertIn("&lt;target details&gt;", html)
         self.assertNotIn("must-not-be-rendered", html)
+
+    def test_operational_report_leads_with_actions_and_folds_details(self):
+        report = self._sample_report()
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [{
+                    "label": "서버",
+                    "status": "AVAILABLE",
+                    "status_label": "수집 완료",
+                    "record_count": 1,
+                    "error_count": 0,
+                    "warning_count": 0,
+                    "source_state": "OBSERVED",
+                }],
+            },
+            "findings": [{
+                "rule_id": "METRIC_CPU",
+                "severity": "WARNING",
+                "category": "PERFORMANCE",
+                "title": "CPU 확인 필요",
+                "impact": "응답 지연 가능",
+                "recommendation": "부하 원인을 확인하세요.",
+                "resource": {"name": "web-01"},
+                "evidence": [{
+                    "label": "threshold",
+                    "value": 90,
+                    "unit": "%",
+                }],
+                "source_state": "CALCULATED",
+            }],
+            "metrics": {"summaries": []},
+            "availability": {},
+            "security": {},
+            "costs": {},
+        }
+
+        html = HtmlReportRenderer().render(report)
+        email_html = HtmlReportRenderer().render_email_summary(report)
+
+        self.assertIn("오늘의 요약", html)
+        self.assertIn("우선 확인 및 조치", html)
+        self.assertIn('class="finding-card warning priority"', html)
+        self.assertIn('class="technical-appendix"', html)
+        self.assertIn("데이터 수집 상태", html)
+        self.assertIn("오늘의 요약", email_html)
+        self.assertIn("CPU 확인 필요", email_html)
+        self.assertIn("첨부된 HTML 보고서", email_html)
 
     def test_infrastructure_inventory_renders_only_allowed_categories(self):
         report = self._sample_report()
@@ -231,14 +297,16 @@ class HtmlReportRendererTests(unittest.TestCase):
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
-            "</section>",
+        server_inventory = html.split(
+            ">서버 현황</span>", 1
+        )[1].split(
+            "</details>",
             1,
         )[0]
         resource_inventory = html.split(
-            "<h2>기타 자원 현황</h2>",
+            ">기타 자원 현황</span>",
             1,
-        )[1].split("</section>", 1)[0]
+        )[1].split("</details>", 1)[0]
 
         self.assertIn("allowed-1", server_inventory)
         self.assertNotIn("allowed-1", resource_inventory)
@@ -320,12 +388,14 @@ class HtmlReportRendererTests(unittest.TestCase):
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
+        server_inventory = html.split(
+            ">서버 현황</span>", 1
+        )[1].split(
             "</section>",
             1,
         )[0]
         resource_inventory = html.split(
-            "<h2>기타 자원 현황</h2>",
+            ">기타 자원 현황</span>",
             1,
         )[1].split("</section>", 1)[0]
 
@@ -372,8 +442,8 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
 
-        self.assertIn("<h2>서버 현황</h2>", html)
-        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
+        self.assertIn(">서버 현황</span>", html)
+        self.assertNotIn(">기타 자원 현황</span>", html)
 
     def test_server_only_inventory_uses_collected_network_names(self):
         report = self._sample_report()
@@ -410,14 +480,16 @@ class HtmlReportRendererTests(unittest.TestCase):
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split("<h2>서버 현황</h2>", 1)[1].split(
+        server_inventory = html.split(
+            ">서버 현황</span>", 1
+        )[1].split(
             "</section>",
             1,
         )[0]
 
         self.assertIn("production-vpc (vpc-1)", server_inventory)
         self.assertIn("private-a (subnet-1)", server_inventory)
-        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
+        self.assertNotIn(">기타 자원 현황</span>", html)
 
     def test_non_server_only_inventory_omits_empty_server_section(self):
         report = self._sample_report()
@@ -437,8 +509,8 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
 
-        self.assertNotIn("<h2>서버 현황</h2>", html)
-        self.assertIn("<h2>기타 자원 현황</h2>", html)
+        self.assertNotIn(">서버 현황</span>", html)
+        self.assertIn(">기타 자원 현황</span>", html)
 
     def test_network_snapshot_marks_generation_time_and_renders_rules(self):
         report = self._sample_report()
@@ -555,7 +627,7 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
         section = html.split(
-            "<h2>네트워크 구성 스냅샷</h2>",
+            ">네트워크 구성 스냅샷</span>",
             1,
         )[1].split("</section>", 1)[0]
 
@@ -1534,6 +1606,15 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn(">23:59</text>", html)
         self.assertNotIn("2026-06-16 KST", html)
 
+    def test_report_omits_empty_metric_chart_section(self):
+        report = self._sample_report()
+        for metric in report.server_metrics:
+            metric.pop("raw_metrics", None)
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertNotIn("보고 기간 메트릭 변화", html)
+
     def test_chart_splits_lines_across_missing_intervals(self):
         renderer = HtmlReportRenderer()
         two_hours = 2 * 60 * 60 * 1000
@@ -1639,13 +1720,13 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
         positions = [
-            html.index(f"<h2>{heading}</h2>")
+            html.index(heading)
             for heading in (
-                "수집 진단",
-                "Organization 계정별 비용",
-                "Cloud Activity Tracer",
-                "과금 데이터 기준",
-                "Cloud Insight 이벤트",
+                ">수집 진단</span>",
+                ">Organization 계정별 비용</span>",
+                ">Cloud Activity Tracer</span>",
+                "<h2>과금 데이터 기준</h2>",
+                ">Cloud Insight 이벤트</span>",
             )
         ]
 
@@ -1668,11 +1749,11 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
 
-        self.assertIn("<h2>Cloud Activity Tracer</h2>", html)
-        self.assertNotIn("<h2>서버 현황</h2>", html)
-        self.assertNotIn("<h2>기타 자원 현황</h2>", html)
+        self.assertIn(">Cloud Activity Tracer</span>", html)
+        self.assertNotIn(">서버 현황</span>", html)
+        self.assertNotIn(">기타 자원 현황</span>", html)
         self.assertNotIn("<h2>과금 데이터 기준</h2>", html)
-        self.assertNotIn("<h2>Cloud Insight 이벤트</h2>", html)
+        self.assertNotIn(">Cloud Insight 이벤트</span>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
         self.assertNotIn("<h2>비용 전기 비교</h2>", html)
         self.assertNotIn('aria-label="운영 판단 요약"', html)
@@ -1704,12 +1785,12 @@ class HtmlReportRendererTests(unittest.TestCase):
         }]
 
         html = HtmlReportRenderer().render(report)
-        diagnostics = html.split("<h2>수집 진단</h2>", 1)[1].split(
+        diagnostics = html.split(">수집 진단</span>", 1)[1].split(
             "</section>",
             1,
         )[0]
 
-        self.assertEqual(html.count("<h2>수집 진단</h2>"), 1)
+        self.assertEqual(html.count(">수집 진단</span>"), 1)
         self.assertNotIn("<h2>수집 경고</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
         for heading in (

@@ -1389,71 +1389,6 @@ class ReportRunner:
                 count += 1
         return count
 
-    def _write_prebilling_artifacts(
-        self,
-        *,
-        period: Dict[str, Any],
-        observability: ObservabilityResult,
-        infrastructure: List[Dict[str, Any]],
-    ) -> None:
-        """과금 단계와 무관하게 완료된 수집 산출물을 먼저 보존한다.
-
-        Billing API가 실패해도 서버·인프라·이벤트 수집 결과는 진단에
-        필요하므로 이 저장 단계는 과금 수집보다 반드시 먼저 실행한다.
-        """
-        file_suffix = period["file_suffix"]
-        network_categories = set(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
-        self.print_server_metric_summary(
-            observability.server_metrics,
-            file_suffix=file_suffix,
-        )
-        self.print_insight_event_summary(observability.insight_events)
-        self.print_insight_error_summary(
-            observability.insight_errors,
-            file_suffix=file_suffix,
-        )
-        self.save_json_file(
-            data={
-                "events": observability.insight_events,
-                "grouped_events": observability.grouped_insight_events,
-                "errors": observability.insight_event_errors,
-            },
-            output_dir=self.output_dir,
-            filename=f"cloud_insight_events_{file_suffix}.json",
-        )
-        self.save_json_file(
-            data=observability.activity_events,
-            output_dir=self.output_dir,
-            filename=f"activity_tracer_events_{file_suffix}.json",
-        )
-        self.save_json_file(
-            data=observability.errors,
-            output_dir=self.output_dir,
-            filename=f"collection_errors_{file_suffix}.json",
-        )
-        self.save_json_file(
-            data=[
-                resource
-                for resource in infrastructure
-                if str(resource.get("category") or "").upper()
-                not in network_categories
-            ],
-            output_dir=self.output_dir,
-            filename=f"infrastructure_inventory_{file_suffix}.json",
-        )
-        self.save_json_file(
-            data=observability.infrastructure_metrics,
-            output_dir=self.output_dir,
-            filename=f"infrastructure_metrics_{file_suffix}.json",
-        )
-
-        # 기존 진단 파일 계약상 Activity 오류는 병합 파일과 별도로도 남긴다.
-        self.save_json_file(
-            data=observability.activity_errors,
-            output_dir=self.output_dir,
-            filename=f"activity_tracer_errors_{file_suffix}.json",
-        )
-
     def _collect_billing(
         self,
         *,
@@ -1505,19 +1440,6 @@ class ReportRunner:
                 collection_warnings,
                 getattr(billing_collector, "last_warnings", []),
             )
-            self.save_json_file(
-                data=collection_errors,
-                output_dir=self.output_dir,
-                filename=(
-                    f"collection_errors_{period['file_suffix']}.json"
-                ),
-            )
-            self.save_json_file(
-                data=billing_raw,
-                output_dir=self.output_dir,
-                filename=f"billing_raw_{period['file_suffix']}.json",
-            )
-
             billing_stage = "normalization"
             billing_result = BillingNormalizer().normalize(
                 raw_data=billing_raw,
@@ -1527,11 +1449,6 @@ class ReportRunner:
                 comparison_enabled=bool(period.get("is_closed_month", False)),
                 report_period=period,
                 calculated_at=period["calculated_at"],
-            )
-            self.save_json_file(
-                data=billing_result,
-                output_dir=self.output_dir,
-                filename=f"billing_result_{period['file_suffix']}.json",
             )
         except Exception as exc:
             billing_failure = {
@@ -1551,20 +1468,15 @@ class ReportRunner:
                 getattr(billing_collector, "last_errors", []),
                 [billing_failure],
             )
-            self.save_json_file(
-                data=collection_errors,
-                output_dir=self.output_dir,
-                filename=(
-                    f"collection_errors_{period['file_suffix']}.json"
-                ),
-            )
             raise
 
-        self.print_network_usage_summary(
-            billing_result.get("network_usage_summary", [])
+        logging.getLogger(__name__).info(
+            "과금 수집 완료: 비용 요약 %d건, 네트워크 요약 %d건, "
+            "사용량 요약 %d건",
+            self._billing_available_fact_count(billing_result),
+            len(billing_result.get("network_usage_summary", [])),
+            len(billing_result.get("usage_summary", [])),
         )
-        self.print_billing_summary(billing_result, period=period)
-        self.print_usage_summary(billing_result.get("usage_summary", []))
         return billing_result, collection_errors, collection_warnings
 
     def _persist_report_artifacts(
@@ -2288,7 +2200,13 @@ class ReportRunner:
         billing_context = self._billing_period_context(period)
         period.update(billing_context)
 
-        self.print_period_summary(period)
+        logging.getLogger(__name__).info(
+            "보고서 기간: type=%s start=%s end=%s billing_month=%s",
+            period["period_type"],
+            period["start_dt"],
+            period["end_dt"],
+            period["billing_month"],
+        )
         customer = getattr(self, "customer", None)
         collection_plan = build_collection_plan(
             ReportOptions.from_value(getattr(customer, "report_options", None))
@@ -2422,10 +2340,14 @@ class ReportRunner:
         all_collection_errors = observability.errors
         all_collection_warnings = observability.warnings
 
-        self._write_prebilling_artifacts(
-            period=period,
-            observability=observability,
-            infrastructure=infrastructure_data,
+        logging.getLogger(__name__).info(
+            "관측 수집 완료: 서버 지표 %d건, 인프라 지표 %d건, "
+            "Insight 이벤트 %d건, Activity 이벤트 %d건, 오류 %d건",
+            len(observability.server_metrics),
+            len(observability.infrastructure_metrics),
+            len(observability.insight_events),
+            self._grouped_record_count(observability.activity_events),
+            len(observability.errors),
         )
 
         (
@@ -2576,15 +2498,6 @@ class ReportRunner:
             file_suffix=period["file_suffix"],
         )
         return report
-
-    def print_period_summary(self, period: Dict[str, Any]) -> None:
-        print("\n" + "=" * 80)
-        print("보고서 기준 기간")
-        print("=" * 80)
-        print(f"구분     : {period['period_type']}")
-        print(f"시작일시 : {period['start_dt']}")
-        print(f"종료일시 : {period['end_dt']}")
-        print(f"청구월   : {period['billing_month']}")
 
     def collect_insight_metrics(
         self,
@@ -2932,271 +2845,6 @@ class ReportRunner:
                 result.append(normalized_error)
 
         return result
-
-    def print_server_metric_summary(
-        self,
-        insight_data: List[Dict[str, Any]],
-        file_suffix: Optional[str] = None,
-    ) -> None:
-        print()
-        print("=" * 80)
-        print("서버 메트릭")
-        print("=" * 80)
-
-        if not insight_data:
-            print("서버 메트릭 없음")
-
-        summaries = []
-
-        for item in insight_data or []:
-            if not isinstance(item, dict):
-                continue
-
-            summary = {
-                key: value
-                for key, value in item.items()
-                if key != "raw_metrics"
-            }
-            summaries.append(summary)
-
-            os_fs_text = ", ".join(
-                f"{fs.get('mount')}:min={fs.get('min')} avg={fs.get('avg')} max={fs.get('max')}%"
-                for fs in (summary.get("os_fs_details") or [])
-            )
-
-            data_fs_text = ", ".join(
-                f"{fs.get('mount')}:min={fs.get('min')} avg={fs.get('avg')} max={fs.get('max')}%"
-                for fs in (summary.get("data_fs_details") or [])
-            )
-
-            print(
-                f"{summary.get('server_name', '-'):<35} "
-                f"CPU min={summary.get('cpu_min')} avg={summary.get('cpu_avg')} max={summary.get('cpu_max')} | "
-                f"MEM min={summary.get('mem_min')} avg={summary.get('mem_avg')} max={summary.get('mem_max')} | "
-                f"OS=[{os_fs_text}] | "
-                f"DATA=[{data_fs_text}]"
-            )
-
-        self.save_json_file(
-            data=summaries,
-            output_dir=self.output_dir,
-            filename=(
-                f"server_metric_summary_{file_suffix}.json"
-                if file_suffix
-                else "server_metric_summary.json"
-            ),
-        )
-        if file_suffix:
-            self.save_json_file(
-                data=summaries,
-                output_dir=self.output_dir,
-                filename="server_metric_summary.json",
-            )
-
-    def print_insight_event_summary(
-        self,
-        insight_events: List[Dict[str, Any]],
-    ) -> None:
-        print()
-        print("=" * 80)
-        print("Cloud Insight 이벤트")
-        print("=" * 80)
-
-        if not insight_events:
-            print("Cloud Insight 이벤트 없음")
-            return
-
-        for event in insight_events:
-            event_time = (
-                event.get("event_time")
-                or event.get("time")
-                or event.get("timestamp")
-                or event.get("start_time")
-                or "-"
-            )
-
-            severity = (
-                event.get("severity")
-                or event.get("level")
-                or event.get("event_level")
-                or event.get("status")
-                or "-"
-            )
-
-            resource = (
-                event.get("resource_name")
-                or event.get("resource_id")
-                or event.get("target_name")
-                or event.get("target_id")
-                or event.get("nrn")
-                or "-"
-            )
-
-            event_type = (
-                event.get("event_type")
-                or event.get("type")
-                or event.get("rule_name")
-                or event.get("metric")
-                or "-"
-            )
-
-            message = (
-                event.get("message")
-                or event.get("description")
-                or event.get("reason")
-                or event.get("event_message")
-                or "-"
-            )
-
-            print(
-                f"{event_time} | "
-                f"severity={severity} | "
-                f"resource={resource} | "
-                f"type={event_type} | "
-                f"message={message}"
-            )
-
-    def print_insight_error_summary(
-        self,
-        insight_errors: List[Dict[str, Any]],
-        file_suffix: Optional[str] = None,
-    ) -> None:
-        print()
-        print("=" * 80)
-        print("Cloud Insight 수집 오류")
-        print("=" * 80)
-
-        if not insight_errors:
-            print("Cloud Insight 수집 오류 없음")
-
-        for error in insight_errors or []:
-            if not isinstance(error, dict):
-                continue
-
-            target = (
-                error.get("target_name")
-                or error.get("target_id")
-                or error.get("resource_id")
-                or "-"
-            )
-
-            print(
-                f"[{error.get('collector', '-')}] "
-                f"stage={error.get('stage', '-')} | "
-                f"target_type={error.get('target_type', '-')} | "
-                f"target={target} | "
-                f"product_key={error.get('product_key', '-')} | "
-                f"metric={error.get('metric', '-')} | "
-                f"api={error.get('api', '-')} | "
-                f"status={error.get('status_code', '-')} | "
-                f"code={error.get('error_code', '-')} | "
-                f"message={error.get('message', '-')}"
-            )
-
-        self.save_json_file(
-            data=self._dict_records(insight_errors),
-            output_dir=self.output_dir,
-            filename=(
-                f"cloud_insight_errors_{file_suffix}.json"
-                if file_suffix
-                else "cloud_insight_errors.json"
-            ),
-        )
-        if file_suffix:
-            self.save_json_file(
-                data=self._dict_records(insight_errors),
-                output_dir=self.output_dir,
-                filename="cloud_insight_errors.json",
-            )
-
-    def print_network_usage_summary(
-        self,
-        network_usage_summary: List[Dict[str, Any]],
-    ) -> None:
-        print()
-        print("=" * 80)
-        print("네트워크 사용량")
-        print("=" * 80)
-
-        if not network_usage_summary:
-            print("네트워크 사용량 없음")
-            return
-
-        for item in network_usage_summary:
-            print(
-                f"{item['service_name']:<35} "
-                f"{item['direction']:<10} "
-                f"{item['name']:<45} "
-                f"{item['usage_gb']:>10,.3f} GB "
-                f"({item['row_count']}건)"
-            )
-
-    def print_billing_summary(
-        self,
-        billing_result: Dict[str, Any],
-        period: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        summary = billing_result["summary"]
-        use_estimated_cost = bool(
-            period and period.get("is_closed_month") is False
-        )
-
-        if use_estimated_cost:
-            title = "예상 비용 (미확정)"
-            total = summary.get("expected_total_amount", 0)
-            rows = [
-                {
-                    "service_name": row.get("service_name"),
-                    "amount": row.get("expected_amount", 0),
-                    "row_count": row.get("row_count", 0),
-                }
-                for row in billing_result.get("expected_by_service", [])
-                if isinstance(row, dict)
-            ]
-        else:
-            title = "확정 청구 금액"
-            total = summary.get("confirmed_total_amount", 0)
-            rows = billing_result.get("service_summary", [])
-
-        print("\n" + "=" * 80)
-        print(title)
-        print("=" * 80)
-        print(f"청구월 : {summary['billing_month']}")
-        print(f"{title} : {total:,.0f} 원")
-        print(f"청구 항목 수 : {summary.get('row_count', summary.get('service_count', 0))} 건")
-
-        print("\n" + "=" * 80)
-        print(f"서비스별 {title}")
-        print("=" * 80)
-
-        for service in rows:
-            print(
-                f"{service['service_name']:<35} "
-                f"{service['amount']:>15,.0f} 원 "
-                f"({service['row_count']}건)"
-            )
-
-    def print_usage_summary(
-        self,
-        usage_summary: List[Dict[str, Any]],
-    ) -> None:
-        print()
-        print("=" * 80)
-        print("서비스별 사용량")
-        print("=" * 80)
-
-        if not usage_summary:
-            print("서비스별 사용량 없음")
-            return
-
-        for item in usage_summary:
-            print(
-                f"{item['service_name']:<35} "
-                f"{item['item_name']:<45} "
-                f"{item['usage_quantity']:>15,.3f} "
-                f"{item['unit_code']} "
-                f"({item['row_count']}건)"
-            )
 
     def save_json_file(
         self,

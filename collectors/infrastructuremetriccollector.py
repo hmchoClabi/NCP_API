@@ -12,6 +12,7 @@ from dateutil.relativedelta import relativedelta
 from . import _infrastructure_metric_catalog as metric_catalog
 from ._collection_support import query_time_windows
 from utils.common_rest import safe_exception_message
+from utils.provider_permissions import extract_provider_code
 from utils.response_validation import validate_collection_response
 
 
@@ -1735,7 +1736,7 @@ class InfrastructureMetricCollector:
                 metadata["status_code"] = status_code
                 metadata["retryable"] = status_code >= 500 or status_code == 429
 
-            provider_code = self._provider_error_code(response)
+            provider_code = extract_provider_code(response)
             if provider_code:
                 metadata["error_code"] = provider_code
 
@@ -1745,40 +1746,6 @@ class InfrastructureMetricCollector:
             else "error"
         )
         return severity, metadata
-
-    def _provider_error_code(self, response: Any) -> Optional[str]:
-        try:
-            payload = response.json()
-        except (TypeError, ValueError, AttributeError):
-            return None
-
-        value = self._find_provider_code(payload)
-        if value is None:
-            return None
-        safe_code = "".join(
-            character
-            for character in str(value)[:64]
-            if character.isalnum() or character in {"-", "_", "."}
-        )
-        return safe_code or None
-
-    def _find_provider_code(
-        self,
-        value: Any,
-        depth: int = 0,
-    ) -> Any:
-        if depth > 5 or not isinstance(value, dict):
-            return None
-        for key in ("errorCode", "returnCode", "code"):
-            candidate = value.get(key)
-            if candidate not in (None, ""):
-                return candidate
-        for child in value.values():
-            if isinstance(child, dict):
-                candidate = self._find_provider_code(child, depth + 1)
-                if candidate not in (None, ""):
-                    return candidate
-        return None
 
     def _record_issue(
         self,

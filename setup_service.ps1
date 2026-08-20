@@ -62,8 +62,8 @@ Write-Host "Building the application image..."
 & docker @composeArguments build web
 if ($LASTEXITCODE -ne 0) { throw "Docker image build failed." }
 
-Write-Host "Starting database migration, web, scheduler, and workers..."
-& docker @composeArguments up -d postgres migrate web scheduler worker-public worker-gov
+Write-Host "Starting database migration, web, scheduler, cleanup, and workers..."
+& docker @composeArguments up -d postgres migrate web scheduler artifact-cleanup worker-public worker-gov
 if ($LASTEXITCODE -ne 0) { throw "Docker Compose startup failed." }
 
 $deadline = (Get-Date).AddSeconds($HealthTimeoutSeconds)

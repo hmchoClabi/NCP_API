@@ -10,6 +10,7 @@ image:
 
 migration:
   enabled: false
+  waitForSchema: true
   image:
     repository: qoyw4pih.kr.private-ncr.ntruss.com/ncp-report-migrate
     tag: pilot-20260805-002

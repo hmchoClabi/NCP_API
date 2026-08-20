@@ -356,7 +356,7 @@ class PortalIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "외부 보관 참조"):
             self.repository.permanently_delete_tenant(tenant_id, admin_id)
         deleted_name, report_count = self.repository.permanently_delete_tenant(
-            tenant_id, admin_id, force=True
+            tenant_id, admin_id, "archive://portal-integration/report"
         )
         self.assertEqual(deleted_name, anonymous_name)
         self.assertEqual(report_count, 1)
@@ -373,7 +373,10 @@ class PortalIntegrationTests(unittest.TestCase):
                         ).hexdigest(),
                     ),
                 )
-                self.assertEqual(cursor.fetchone(), (1, True, None))
+                self.assertEqual(
+                    cursor.fetchone(),
+                    (1, False, "archive://portal-integration/report"),
+                )
 
 
 if __name__ == "__main__":

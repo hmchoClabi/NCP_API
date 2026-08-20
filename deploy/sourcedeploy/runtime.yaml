@@ -41,6 +41,35 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: wait-schema
+          image: "${registry_endpoint}/ncp-report-migrate:latest"
+          imagePullPolicy: IfNotPresent
+          args: ["wait", "190"]
+          env:
+            - name: PGHOST
+              value: "ncp-report-postgresql"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "ncp_report"
+            - name: PGUSER
+              value: "ncp_msp_app"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_MSP_APP_PASSWORD
+            - name: PGSSLMODE
+              value: "disable"
+            - name: DB_WAIT_SECONDS
+              value: "300"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
       containers:
         - name: web
           image: "${registry_endpoint}/ncp-report:latest"
@@ -75,6 +104,8 @@ spec:
               value: Asia/Seoul
             - name: LOG_LEVEL
               value: INFO
+            - name: REPORT_OPERATIONAL_ANALYSIS_ENABLED
+              value: "true"
             - name: SMTP_HOST
               valueFrom:
                 secretKeyRef:
@@ -230,6 +261,35 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: wait-schema
+          image: "${registry_endpoint}/ncp-report-migrate:latest"
+          imagePullPolicy: IfNotPresent
+          args: ["wait", "190"]
+          env:
+            - name: PGHOST
+              value: "ncp-report-postgresql"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "ncp_report"
+            - name: PGUSER
+              value: "ncp_msp_app"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_MSP_APP_PASSWORD
+            - name: PGSSLMODE
+              value: "disable"
+            - name: DB_WAIT_SECONDS
+              value: "300"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
       containers:
         - name: scheduler
           image: "${registry_endpoint}/ncp-report:latest"
@@ -268,6 +328,8 @@ spec:
               value: Asia/Seoul
             - name: LOG_LEVEL
               value: INFO
+            - name: REPORT_OPERATIONAL_ANALYSIS_ENABLED
+              value: "true"
             - name: SMTP_HOST
               valueFrom:
                 secretKeyRef:
@@ -383,6 +445,35 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: wait-schema
+          image: "${registry_endpoint}/ncp-report-migrate:latest"
+          imagePullPolicy: IfNotPresent
+          args: ["wait", "190"]
+          env:
+            - name: PGHOST
+              value: "ncp-report-postgresql"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "ncp_report"
+            - name: PGUSER
+              value: "ncp_public_worker"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_PUBLIC_WORKER_PASSWORD
+            - name: PGSSLMODE
+              value: "disable"
+            - name: DB_WAIT_SECONDS
+              value: "300"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
       containers:
         - name: worker-public
           image: "${registry_endpoint}/ncp-report:latest"
@@ -423,6 +514,8 @@ spec:
               value: Asia/Seoul
             - name: LOG_LEVEL
               value: INFO
+            - name: REPORT_OPERATIONAL_ANALYSIS_ENABLED
+              value: "true"
             - name: SMTP_HOST
               valueFrom:
                 secretKeyRef:
@@ -554,6 +647,35 @@ spec:
         runAsUser: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: wait-schema
+          image: "${registry_endpoint}/ncp-report-migrate:latest"
+          imagePullPolicy: IfNotPresent
+          args: ["wait", "190"]
+          env:
+            - name: PGHOST
+              value: "ncp-report-postgresql"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "ncp_report"
+            - name: PGUSER
+              value: "ncp_gov_worker"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ncp-report-secrets
+                  key: DB_GOV_WORKER_PASSWORD
+            - name: PGSSLMODE
+              value: "disable"
+            - name: DB_WAIT_SECONDS
+              value: "300"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
       containers:
         - name: worker-gov
           image: "${registry_endpoint}/ncp-report:latest"
@@ -594,6 +716,8 @@ spec:
               value: Asia/Seoul
             - name: LOG_LEVEL
               value: INFO
+            - name: REPORT_OPERATIONAL_ANALYSIS_ENABLED
+              value: "true"
             - name: SMTP_HOST
               valueFrom:
                 secretKeyRef:

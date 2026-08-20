@@ -12,6 +12,7 @@ def test_kubernetes_deployment_assets_exist():
         "values-pilot.yaml",
         "values-production.yaml",
         "templates/deployments.yaml",
+        "templates/artifact-cleanup-cronjob.yaml",
         "templates/hpa.yaml",
         "templates/ingress.yaml",
         "templates/migration-job.yaml",
@@ -83,15 +84,78 @@ def test_forced_test_customer_deletion_is_audited():
     migration = (
         ROOT / "database" / "schema" / "110_forced_test_customer_deletion.sql"
     ).read_text(encoding="utf-8")
-    values = (CHART / "values.yaml").read_text(encoding="utf-8")
 
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
     assert "COALESCE(length(btrim(archive_reference)), 0) > 0" in migration
-    assert 'schemaVersion: "180"' in values
-    assert 'REPORT_SCHEMA_VERSION:-180' in (
+
+
+def test_artifact_cleanup_outbox_is_durable_and_msp_only():
+    migration = (
+        ROOT / "database" / "schema" / "190_artifact_cleanup_outbox.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS control.artifact_cleanup_outbox" in migration
+    assert "expected_sha256 char(64) NOT NULL" in migration
+    assert "expected_byte_size bigint NOT NULL" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "FOR ALL TO ncp_msp_app" in migration
+    assert "REFERENCES control.tenants" not in migration
+    assert "VALUES ('190'" in migration
+    assert 'schemaVersion: "190"' in (
+        CHART / "values.yaml"
+    ).read_text(encoding="utf-8")
+    assert "waitForSchema: true" in (
+        CHART / "values.yaml"
+    ).read_text(encoding="utf-8")
+    assert 'REPORT_SCHEMA_VERSION:-190' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
+
+
+def test_artifact_cleanup_has_a_scheduled_least_privilege_consumer():
+    cleanup = (
+        CHART / "templates" / "artifact-cleanup-cronjob.yaml"
+    ).read_text(encoding="utf-8")
+    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert ".Values.artifacts.persistence.enabled" in cleanup
+    assert "kind: CronJob" in cleanup
+    assert "concurrencyPolicy: Forbid" in cleanup
+    assert "webapp.artifact_cleanup" in cleanup
+    assert 'value: "msp"' in cleanup
+    assert 'value: "ncp_msp_app"' in cleanup
+    assert "DB_MSP_APP_PASSWORD" in cleanup
+    assert "mountPath: /app/output" in cleanup
+    assert "credential-master-key" not in cleanup
+    assert "SystemExit(1)" not in cli
+
+
+def test_compose_artifact_cleanup_is_recurring_and_secret_free():
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(
+        encoding="utf-8"
+    )
+    cleanup = compose.split("\n  artifact-cleanup:\n", 1)[1].split(
+        "\n  worker-public:\n", 1
+    )[0]
+
+    assert "REPORT_DB_ROLE: msp" in cleanup
+    assert "REPORT_DB_USER: ncp_msp_app" in cleanup
+    assert "DB_MSP_APP_PASSWORD" in cleanup
+    assert "ncp_report_artifacts:/app/output" in cleanup
+    assert "--interval-seconds" in cleanup
+    assert '- "300"' in cleanup
+    assert "CREDENTIAL_MASTER_KEY_FILE" not in cleanup
+    assert "WEB_SECRET_KEY" not in cleanup
+    assert "\n    secrets:" not in cleanup
+    assert 'parser.add_argument("--interval-seconds"' in cli
+    assert "time.sleep(args.interval_seconds)" in cli
+    for script_name in ("setup_service.ps1", "update_service.ps1"):
+        script = (ROOT / script_name).read_text(encoding="utf-8")
+        assert "scheduler artifact-cleanup worker-public" in script
 
 
 def test_period_aware_billing_cost_facts_are_migrated():
@@ -153,7 +217,7 @@ def test_tenant_branding_is_size_limited_and_tenant_isolated():
         ROOT / "database" / "verify_database.sql"
     ).read_text(encoding="utf-8")
     assert "tenant_branding" in verification
-    assert "Expected at least 36 tables" in verification
+    assert "Expected at least 37 tables" in verification
 
 
 def test_report_topology_settings_are_removed_safely():
@@ -257,7 +321,7 @@ def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
     assert "Event case tenant boundary constraints are missing" in verification
     assert "Customer role can mutate policy exceptions" in verification
     assert "Daily fact account boundary constraints are missing" in verification
-    assert "Expected at least 36 tables" in verification
+    assert "Expected at least 37 tables" in verification
 
 
 def test_sourcebuild_deployment_waits_for_migration_job():
@@ -315,16 +379,22 @@ def test_registry_secret_script_does_not_accept_secret_as_parameter():
     assert "--ignore-not-found -o name" in script
 
 
-def test_migration_can_be_disabled_and_hpa_owns_web_replicas():
+def test_migration_job_and_schema_wait_are_independently_configured():
     deployments = (CHART / "templates" / "deployments.yaml").read_text(
         encoding="utf-8"
     )
     migration = (CHART / "templates" / "migration-job.yaml").read_text(
         encoding="utf-8"
     )
+    cleanup = (
+        CHART / "templates" / "artifact-cleanup-cronjob.yaml"
+    ).read_text(encoding="utf-8")
     hpa = (CHART / "templates" / "hpa.yaml").read_text(encoding="utf-8")
 
-    assert ".Values.migration.enabled" in deployments
+    assert ".Values.migration.waitForSchema" in deployments
+    assert ".Values.migration.enabled" not in deployments
+    assert ".Values.migration.waitForSchema" in cleanup
+    assert ".Values.migration.enabled" not in cleanup
     assert ".Values.migration.enabled" in migration
     assert "autoscaling/v2" in hpa
     assert "HorizontalPodAutoscaler" in hpa
@@ -347,7 +417,9 @@ def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
     assert "kind: HorizontalPodAutoscaler" in manifest
     assert '${registry_endpoint}/ncp-report:latest' in manifest
     assert "kind: Job" not in manifest
-    assert "ncp-report-migrate" not in manifest
+    assert manifest.count("name: wait-schema") == 4
+    assert '${registry_endpoint}/ncp-report-migrate:latest' in manifest
+    assert '"190"' in manifest
     assert "namespace: ncp-report" in manifest
 
 
@@ -438,11 +510,14 @@ def test_sourcebuild_test_dependencies_are_separate_from_runtime():
     runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     build_requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     setup = (ROOT / "deploy" / "SOURCEBUILD_SETUP.md").read_text(encoding="utf-8")
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
     assert "pytest" not in runtime_requirements.lower()
     assert "-r requirements.txt" in build_requirements
     assert "pytest" in build_requirements.lower()
     assert "requirements-dev.txt" in setup
+    assert "tests/" in dockerignore.splitlines()
+    assert "deploy/private/" in dockerignore.splitlines()
 
 
 def test_normal_release_does_not_build_images_locally():

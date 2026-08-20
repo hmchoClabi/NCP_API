@@ -534,22 +534,19 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
         try:
             code = request.form.get("confirm_customer_code", "").strip()
             phrase = request.form.get("confirm_phrase", "").strip()
-            force = request.form.get("force_delete") == "true"
-            expected_phrase = "강제 삭제" if force else "영구 삭제"
-            if code != tenant["customer_code"] or phrase != expected_phrase:
+            if code != tenant["customer_code"] or phrase != "영구 삭제":
                 raise ValueError(
-                    f"고객 코드와 확인 문구 '{expected_phrase}'를 정확히 입력하세요."
+                    "고객 코드와 확인 문구 '영구 삭제'를 정확히 입력하세요."
                 )
             customer_name, report_count = repository.permanently_delete_tenant(
                 tenant_id,
                 str(g.user["id"]),
                 request.form.get("archive_reference", ""),
-                force=force,
             )
-            deletion_type = "강제 삭제" if force else "영구 삭제"
             flash(
-                f"{customer_name} 고객을 {deletion_type}했습니다. "
-                f"삭제된 보고서 {report_count}건의 원장은 보존됩니다.",
+                f"{customer_name} 고객을 영구 삭제했습니다. "
+                f"삭제된 보고서 {report_count}건의 원장은 보존됩니다. "
+                "로컬 산출물 정리는 재시도 큐에서 처리됩니다.",
                 "success",
             )
             return redirect(

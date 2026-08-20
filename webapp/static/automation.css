@@ -23,11 +23,35 @@
 .muted { color: var(--muted); }
 .schedule-form > small { color: var(--muted); }
 .status.pending { background: #e8f0fb; color: #1559b5; }
+.report-detail-shell {
+  position: fixed;
+  inset: 0 0 0 250px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--surface);
+}
+.report-detail-shell ~ footer { display: none; }
+.report-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.report-title { min-width: 0; }
+.report-title h1 { margin: 3px 0; font-size: 20px; letter-spacing: -.03em; }
+.report-title p { margin: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-actions { display: flex; align-items: center; gap: 10px; }
 .report-actions .secondary { display: inline-flex; }
-.report-viewer-panel { padding: 12px; }
-.report-viewer-panel .panel-heading { padding: 11px 11px 0; }
-.report-frame { width: 100%; min-height: 78vh; border: 1px solid var(--line); border-radius: 12px; background: #f4f7fb; }
+.report-actions form { margin: 0; }
+.report-frame { width: 100%; flex: 1 1 auto; min-height: 0; border: 0; background: #f4f7fb; }
 .section-title { margin: 0 0 13px; font-size: 14px; }
 .management-form { padding: 17px; background: #f8fafc; border-radius: 12px; }
 .form-stack { display: grid; gap: 11px; }
@@ -36,3 +60,8 @@
 .form-note { margin-top: 11px !important; font-size: 11px !important; line-height: 1.5; }
 .membership-chip { display: block; margin: 3px 0; white-space: nowrap; }
 @media (max-width: 1000px) { .automation-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .report-detail-shell { position: relative; inset: auto; width: calc(100% + 32px); margin: -24px -16px; }
+  .report-toolbar { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
+  .report-actions { width: 100%; flex-wrap: wrap; }
+}

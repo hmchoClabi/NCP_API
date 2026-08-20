@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+import argparse
+import time
+
+from database.config import DatabaseSettings
+from webapp.repository import PortalRepository
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Retry durable local report artifact cleanup jobs"
+    )
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--interval-seconds", type=int, default=0)
+    args = parser.parse_args()
+    if not 1 <= args.limit <= 1_000:
+        parser.error("--limit must be between 1 and 1000.")
+    if args.interval_seconds and args.interval_seconds < 60:
+        parser.error("--interval-seconds must be 0 or at least 60.")
+
+    repository = PortalRepository(DatabaseSettings.from_env())
+    while True:
+        removed, pending = repository.retry_artifact_cleanup(limit=args.limit)
+        print(
+            f"Removed artifact files: {removed}; pending cleanup rows: {pending}",
+            flush=True,
+        )
+        if not args.interval_seconds:
+            return
+        time.sleep(args.interval_seconds)
+
+
+if __name__ == "__main__":
+    main()

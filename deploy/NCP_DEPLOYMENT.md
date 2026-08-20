@@ -68,6 +68,7 @@ image:
   repository: your-registry.kr.ncr.ntruss.com/ncp-report
   tag: pilot-001
 migration:
+  enabled: true
   image:
     repository: your-registry.kr.ncr.ntruss.com/ncp-report-migrate
     tag: pilot-001
@@ -157,15 +158,26 @@ helm upgrade --install ncp-report deploy/helm/ncp-report \
   --wait --wait-for-jobs --timeout 15m
 ```
 
-The app containers wait for schema version `180`. The migration Job is created
+The app containers wait for schema version `190`. The migration Job is created
 with the other resources, connects as the DB administrator, creates the
 application roles and applies all SQL files in filename order. This avoids a
 first-install deadlock between a post-install hook and `helm --wait`.
+For routine runtime-only releases, disable only `migration.enabled`; keep
+`migration.waitForSchema` enabled so incompatible application pods fail closed.
 
 ```sh
 kubectl -n ncp-report get pods,pvc,jobs
 kubectl -n ncp-report logs -l app.kubernetes.io/component=migration
 kubectl -n ncp-report rollout status deployment/ncp-report-web
+```
+
+Failed local artifact deletions remain in a durable outbox. When artifact
+persistence is enabled, the `artifact-cleanup` CronJob retries them every five
+minutes with the MSP database role and artifact volume. For an immediate retry,
+run the same command from a web pod:
+
+```sh
+python -m webapp.artifact_cleanup --limit 100
 ```
 
 ## 6. Verify the portal before creating the ALB

@@ -86,6 +86,10 @@ class SMTPMailerTests(unittest.TestCase):
                     "second@example.com",
                 ],
                 attachments=[attachment],
+                html_body=(
+                    "<html><body><strong>The report is attached."
+                    "</strong></body></html>"
+                ),
             )
 
         smtp_class.assert_called_once_with(
@@ -106,6 +110,10 @@ class SMTPMailerTests(unittest.TestCase):
         self.assertEqual(
             message.get_body(preferencelist=("plain",)).get_content().strip(),
             "The report is attached.",
+        )
+        self.assertIn(
+            "<strong>The report is attached.</strong>",
+            message.get_body(preferencelist=("html",)).get_content(),
         )
         attachments = list(message.iter_attachments())
         self.assertEqual(len(attachments), 1)
