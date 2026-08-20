@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import math
 from collections import defaultdict
@@ -42,15 +44,100 @@ from app.report_models import ReportResult
 from utils.event_sort import event_timestamp_millis, sort_event_records
 
 
+REPORT_INTERACTION_SCRIPT = r"""(() => {
+  const buttonForSeries = (series) => Array.from(
+    series.closest(".chart").querySelectorAll("[data-chart-toggle]")
+  ).find((button) => button.dataset.chartToggle === series.id);
+
+  const toggleSeries = (button) => {
+    const chart = button.closest(".chart");
+    const targetSeries = document.getElementById(
+      button.dataset.chartToggle || ""
+    );
+    if (!chart || !targetSeries || !chart.contains(targetSeries)) return;
+    const buttons = Array.from(
+      chart.querySelectorAll("[data-chart-toggle]")
+    );
+    const isolate = button.getAttribute("aria-pressed") !== "true";
+    buttons.forEach((item) => {
+      const series = document.getElementById(item.dataset.chartToggle || "");
+      if (!series || !chart.contains(series)) return;
+      const selected = isolate && item === button;
+      const visible = !isolate || selected;
+      item.setAttribute("aria-pressed", String(selected));
+      item.classList.toggle("is-muted", !visible);
+      series.toggleAttribute("hidden", !visible);
+    });
+  };
+
+  const downloadPng = (button) => {
+    const chart = button.closest(".chart");
+    const svg = chart && chart.querySelector("svg");
+    if (!svg) return;
+    button.disabled = true;
+    const copy = svg.cloneNode(true);
+    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const source = new XMLSerializer().serializeToString(copy);
+    const sourceUrl = URL.createObjectURL(new Blob(
+      [source], {type: "image/svg+xml;charset=utf-8"}
+    ));
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2000;
+      canvas.height = 600;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(sourceUrl);
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = `${chart.id || "monitoring-chart"}.png`;
+      link.click();
+      button.disabled = false;
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(sourceUrl);
+      button.disabled = false;
+    };
+    image.src = sourceUrl;
+  };
+
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-chart-toggle]");
+    if (toggle) {
+      toggleSeries(toggle);
+      return;
+    }
+    const series = event.target.closest("[data-chart-series]");
+    if (series) {
+      const button = buttonForSeries(series);
+      if (button) toggleSeries(button);
+      return;
+    }
+    const download = event.target.closest("[data-chart-download]");
+    if (download) downloadPng(download);
+  });
+
+})();"""
+REPORT_INTERACTION_CSP_SOURCE = "'sha256-{}'".format(
+    base64.b64encode(
+        hashlib.sha256(REPORT_INTERACTION_SCRIPT.encode("utf-8")).digest()
+    ).decode("ascii")
+)
+
+
 class HtmlReportRenderer:
     """웹 프레임워크 의존성 없이 독립형 반응형 HTML 보고서를 만든다."""
 
     KST = ZoneInfo("Asia/Seoul")
+    INTERACTION_SCRIPT_CSP_SOURCE = REPORT_INTERACTION_CSP_SOURCE
     MAX_CHART_POINTS_PER_SEGMENT = 600
     CHART_COLORS = (
-        "#03c75a",
+        "#15803d",
         "#2563eb",
-        "#f97316",
+        "#c2410c",
         "#8b5cf6",
         "#0891b2",
         "#dc2626",
@@ -741,6 +828,7 @@ class HtmlReportRenderer:
             cost_facts,
             preferred_cost_names,
         )
+        resource_changes = self._mapping(analysis.get("resource_changes"))
         immediate_status = self._analysis_finding_status(active_findings)
         status_cards = "".join((
             self._analysis_status_card(
@@ -762,6 +850,33 @@ class HtmlReportRenderer:
                 quality.get("source_state", CALCULATED),
             ),
         ))
+        if (
+            resource_changes
+            and analysis.get("period_type") == "MONTHLY"
+            and resource_changes.get("reason_code")
+            != "INFRASTRUCTURE_NOT_REQUESTED"
+        ):
+            if resource_changes.get("status") == "AVAILABLE":
+                resource_change_label = (
+                    f"생성 {int(resource_changes.get('created_count') or 0)} · "
+                    f"제거 {int(resource_changes.get('removed_count') or 0)} · "
+                    "스펙 변경 "
+                    f"{int(resource_changes.get('spec_changed_count') or 0)}"
+                )
+            elif resource_changes.get("status") == "NOT_REQUESTED":
+                resource_change_label = "비교 대상 없음"
+            else:
+                resource_change_label = "비교 불가"
+            status_cards += self._analysis_status_card(
+                "전월 대비 자원",
+                resource_change_label,
+                (
+                    "normal"
+                    if resource_changes.get("status") == "AVAILABLE"
+                    else "unknown"
+                ),
+                resource_changes.get("source_state", UNAVAILABLE),
+            )
 
         availability_value = availability.get(
             "overall_availability_percent"
@@ -820,13 +935,16 @@ class HtmlReportRenderer:
             datasets=datasets,
             cost_enabled=cost_enabled,
         )
+        monthly = analysis.get("period_type") == "MONTHLY"
+        brief_eyebrow = "MONTHLY BRIEF" if monthly else "DAILY BRIEF"
+        brief_title = "이번 달 요약" if monthly else "오늘의 요약"
 
         return "".join((
             '<section class="operational-overview" aria-label="운영 판단 요약">',
             '<section class="daily-summary">',
             '<div class="summary-heading">',
-            '<p class="section-eyebrow">DAILY BRIEF</p>',
-            '<h2>오늘의 요약</h2>',
+            f'<p class="section-eyebrow">{brief_eyebrow}</p>',
+            f'<h2>{brief_title}</h2>',
             '<p>현재 상태와 우선 조치를 먼저 확인하세요.</p>',
             '</div>',
             f'<p class="summary-narrative">{self._text(summary_text)}</p>',
@@ -843,7 +961,7 @@ class HtmlReportRenderer:
             '<details class="technical-appendix">',
             '<summary><span class="technical-appendix-copy">'
             '<span class="technical-appendix-title">운영 근거 및 기술 상세</span>'
-            '<small>수집 상태·임계치·가용성·보안·비용 비교</small>'
+            '<small>자원 변화·수집 상태·임계치·가용성·보안·비용 비교</small>'
             '</span></summary>',
             f'<div class="technical-appendix-body">{technical_details}</div>',
             '</details>',
@@ -889,6 +1007,7 @@ class HtmlReportRenderer:
         costs = self._mapping(analysis.get("costs"))
         availability = self._mapping(analysis.get("availability"))
         security = self._mapping(analysis.get("security"))
+        resource_changes = self._mapping(analysis.get("resource_changes"))
         dataset_rows = [
             {
                 "label": item.get("label"),
@@ -965,7 +1084,101 @@ class HtmlReportRenderer:
             }
             for item in self._records(security.get("items"))[:50]
         ]
+        change_labels = {
+            "CREATED": ("생성", "created"),
+            "REMOVED": ("제거", "removed"),
+            "SPEC_CHANGED": ("스펙 변경", "spec-changed"),
+        }
+        resource_change_rows = []
+        for item in self._records(resource_changes.get("items")):
+            change_type = str(item.get("change_type") or "").upper()
+            label, style = change_labels.get(
+                change_type,
+                (change_type or "-", "unknown"),
+            )
+            resource_change_rows.append({
+                **item,
+                "change_badge": (
+                    f'<span class="change-badge {style}">'
+                    f"{self._text(label)}</span>"
+                ),
+                "resource_name_html": (
+                    '<strong class="resource-change-name">'
+                    f"{self._text(item.get('resource_name') or '-')}</strong>"
+                ),
+                "change_detail": self._resource_change_detail(
+                    item.get("changed_fields"),
+                    change_type,
+                ),
+            })
+        resource_change_status = str(
+            resource_changes.get("status") or ""
+        ).upper()
+        raw_lifecycle_only = resource_changes.get(
+            "lifecycle_only_categories"
+        )
+        lifecycle_only_labels = (
+            [
+                RESOURCE_CATEGORY_LABELS.get(
+                    str(category).strip().upper(),
+                    str(category).strip(),
+                )
+                for category in raw_lifecycle_only
+                if isinstance(category, str) and category.strip()
+            ]
+            if isinstance(raw_lifecycle_only, (list, tuple, set))
+            else []
+        )
+        resource_change_description = (
+            "생성·제거는 선택한 전체 자원, 스펙 변경은 수집 API가 "
+            "비교 필드를 제공하는 자원을 비교 대상으로 합니다."
+        )
+        if lifecycle_only_labels:
+            resource_change_description += (
+                " 스펙 변경 비교 제외: "
+                + ", ".join(lifecycle_only_labels)
+                + "."
+            )
+        show_resource_changes = (
+            bool(resource_changes)
+            and resource_change_status != "NOT_APPLICABLE"
+            and resource_changes.get("reason_code")
+            != "INFRASTRUCTURE_NOT_REQUESTED"
+        )
+        if resource_change_status == "AVAILABLE":
+            resource_change_content = (
+                self._table(
+                    resource_change_rows,
+                    (
+                        ("change_badge", "구분", "html"),
+                        ("category_label", "자원 유형"),
+                        ("resource_name_html", "자원", "html"),
+                        ("platform", "플랫폼"),
+                        ("change_detail", "변경 내용"),
+                    ),
+                )
+                if resource_change_rows
+                else '<p class="empty-state">직전 월 대비 변경된 자원이 없습니다.</p>'
+            )
+            resource_change_count: int | None = len(resource_change_rows)
+        else:
+            resource_change_content = (
+                f'<p class="empty-state">'
+                f"{self._text(resource_changes.get('message') or '비교할 수 없습니다.')}</p>"
+            )
+            resource_change_count = None
+        resource_change_section = (
+            self._section(
+                "전월 대비 자원 변화",
+                resource_change_description,
+                resource_change_content,
+                resource_change_count,
+            )
+            if show_resource_changes
+            else ""
+        )
         return "".join((
+            resource_change_section,
             self._section(
                 "데이터 수집 상태",
                 "수집 완료 0건과 미수집·권한 부족·실패를 분리합니다.",
@@ -1059,6 +1272,35 @@ class HtmlReportRenderer:
                 len(comparison_rows),
             ) if cost_enabled else "",
         ))
+
+    def _resource_change_detail(
+        self,
+        changed_fields: Any,
+        change_type: str,
+    ) -> str:
+        if change_type == "CREATED":
+            return "신규 생성"
+        if change_type == "REMOVED":
+            return "제거됨"
+
+        parts = []
+        for item in self._records(changed_fields):
+            label = str(item.get("label") or item.get("field") or "스펙")
+            values = []
+            for key in ("before", "after"):
+                value = item.get(key)
+                if isinstance(value, (dict, list)):
+                    rendered = json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                else:
+                    rendered = "-" if value is None else str(value)
+                values.append(rendered)
+            parts.append(f"{label}: {values[0]} → {values[1]}")
+        return ", ".join(parts) or "-"
 
     def _analysis_status_card(
         self,
@@ -1248,11 +1490,11 @@ class HtmlReportRenderer:
             if display.report_options.monitoring_enabled("SERVER"):
                 monitoring_parts.extend((
                     self._section(
-                        "서버 메트릭",
-                        "보고 기간의 CPU, 메모리 및 파일시스템 사용률입니다.",
+                        "서버 이용 현황",
+                        "보고 기간의 서버별 CPU, 메모리, 파일시스템 평균 사용률입니다.",
                         self._metric_table(report.display_server_metrics),
                         len(report.display_server_metrics),
-                        collapsed=True,
+                        collapsed=len(report.display_server_metrics) > 20,
                     ),
                     self._metric_chart_section(
                         report.server_metrics,
@@ -1421,6 +1663,11 @@ class HtmlReportRenderer:
     ) -> str:
         period = display.period
         report_title = display.report_title
+        interaction_script = (
+            f"<script>{REPORT_INTERACTION_SCRIPT}</script>"
+            if "data-chart-" in sections
+            else ""
+        )
         logo = (
             f'<img src="{self._text(display.customer_logo_data_uri)}" '
             f'alt="{self._text(display.customer_name)} 로고">'
@@ -1467,6 +1714,7 @@ class HtmlReportRenderer:
       <p>이 보고서는 구조화된 NCP 수집 결과로부터 생성되었습니다.</p>
     </footer>
   </main>
+  {interaction_script}
 </body>
 </html>
 """
@@ -1516,11 +1764,16 @@ class HtmlReportRenderer:
         title: str,
         description: str,
         content: str,
-        count: int,
+        count: int | None,
         warning: bool = False,
         collapsed: bool = False,
     ) -> str:
         status_class = " warning" if warning else ""
+        count_html = (
+            f'<span class="count">{count:,}건</span>'
+            if count is not None
+            else ""
+        )
         if collapsed:
             return f"""
     <details class="report-section report-disclosure{status_class}">
@@ -1529,7 +1782,7 @@ class HtmlReportRenderer:
           <span class="section-title" role="heading" aria-level="2">{self._text(title)}</span>
           <small class="section-description">{self._text(description)}</small>
         </span>
-        <span class="count">{count:,}건</span>
+        {count_html}
       </summary>
       <div class="report-disclosure-body">{content}</div>
     </details>"""
@@ -1540,7 +1793,7 @@ class HtmlReportRenderer:
           <h2>{self._text(title)}</h2>
           <p>{self._text(description)}</p>
         </div>
-        <span class="count">{count:,}건</span>
+        {count_html}
       </div>
       {content}
     </section>"""
@@ -2063,7 +2316,7 @@ class HtmlReportRenderer:
 
         cards = []
         rendered_categories = set()
-        for group in groups:
+        for chart_index, group in enumerate(groups, start=1):
             category = str(group.get("category") or "").upper()
             series = self._infrastructure_metric_series(group)
             interval = str(group.get("interval") or "Min5")
@@ -2114,6 +2367,7 @@ class HtmlReportRenderer:
             y_axis,
             interval,
             unit=unit,
+            chart_id=f"infrastructure-chart-{chart_index}",
         )}
       </article>""")
             rendered_categories.add(category)
@@ -2136,7 +2390,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다.</p>
+          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 누르면 해당 자원만 보이고, 다시 누르면 전체를 표시합니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
@@ -2188,14 +2442,22 @@ class HtmlReportRenderer:
     def _metric_table(self, rows: List[Dict[str, Any]]) -> str:
         prepared = []
         for row in rows:
+            filesystem_averages = []
+            for key in ("os_fs_details", "data_fs_details"):
+                for detail in self._records(row.get(key)):
+                    try:
+                        value = float(detail.get("avg"))
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(value):
+                        filesystem_averages.append(value)
             prepared.append(
                 {
                     **row,
-                    "os_fs": self._filesystem_text(
-                        row.get("os_fs_details")
-                    ),
-                    "data_fs": self._filesystem_text(
-                        row.get("data_fs_details")
+                    "disk_avg": (
+                        sum(filesystem_averages) / len(filesystem_averages)
+                        if filesystem_averages
+                        else None
                     ),
                 }
             )
@@ -2204,14 +2466,9 @@ class HtmlReportRenderer:
             prepared,
             (
                 ("server_name", "서버"),
-                ("cpu_min", "CPU 최소", "percent"),
                 ("cpu_avg", "CPU 평균", "percent"),
-                ("cpu_max", "CPU 최대", "percent"),
-                ("mem_min", "MEM 최소", "percent"),
-                ("mem_avg", "MEM 평균", "percent"),
-                ("mem_max", "MEM 최대", "percent"),
-                ("os_fs", "OS 파일시스템"),
-                ("data_fs", "DATA 파일시스템"),
+                ("mem_avg", "메모리 평균", "percent"),
+                ("disk_avg", "파일시스템 평균", "percent"),
             ),
         )
 
@@ -2227,47 +2484,32 @@ class HtmlReportRenderer:
         aggregation_label = self._metric_interval_label(interval)
         charts = (
             (
-                "CPU 그룹",
-                f"서버별 CPU {aggregation_label} 사용률",
-                self._metric_series(
-                    server_metrics,
-                    metric_name="used_rto",
-                    period=period,
-                ),
-                "auto",
-            ),
-            (
-                "MEM 그룹",
+                "Memory Utilization Average",
                 f"서버별 메모리 {aggregation_label} 사용률",
                 self._metric_series(
                     server_metrics,
                     metric_name="mem_usert",
                     period=period,
                 ),
-                "auto",
+                "fixed",
             ),
             (
-                "루트 디스크 그룹",
-                f"서버별 루트 디스크 {aggregation_label} 사용률",
+                "CPU Utilization Average",
+                f"서버별 CPU {aggregation_label} 사용률",
                 self._metric_series(
                     server_metrics,
-                    metric_name="fs_usert",
+                    metric_name="used_rto",
                     period=period,
-                    filesystem_group="root",
                 ),
                 "fixed",
             ),
             (
-                "DATA 디스크 그룹",
-                (
-                    "서버 및 마운트별 DATA 디스크 "
-                    f"{aggregation_label} 사용률"
-                ),
+                "File System Utilization Average",
+                f"서버별 전체 파일시스템 {aggregation_label} 평균 사용률",
                 self._metric_series(
                     server_metrics,
                     metric_name="fs_usert",
                     period=period,
-                    filesystem_group="data",
                 ),
                 "fixed",
             ),
@@ -2282,17 +2524,25 @@ class HtmlReportRenderer:
           <h3>{self._text(title)}</h3>
           <p>{self._text(description)}</p>
         </div>
-        {self._line_chart(title, series, period, y_axis, interval)}
+        {self._line_chart(
+            title,
+            series,
+            period,
+            y_axis,
+            interval,
+            chart_id=f"server-chart-{index}",
+        )}
       </article>"""
-            for title, description, series, y_axis in charts
+            for index, (title, description, series, y_axis)
+            in enumerate(charts, start=1)
         )
 
         return f"""
     <section class="report-section metric-trends">
       <div class="section-heading">
         <div>
-          <h2>보고 기간 메트릭 변화</h2>
-          <p>보고서 기간 전체를 기준으로 KST {aggregation_label} 데이터를 표시합니다.</p>
+          <h2>All Server 사용률 추이</h2>
+          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 누르면 해당 서버만 보이고, 다시 누르면 전체를 표시합니다.</p>
         </div>
         <span class="count">{len(charts):,}개 그룹</span>
       </div>
@@ -2304,7 +2554,6 @@ class HtmlReportRenderer:
         server_metrics: List[Dict[str, Any]],
         metric_name: str,
         period: Dict[str, Any],
-        filesystem_group: str | None = None,
     ) -> Dict[str, List[Tuple[int, float]]]:
         period_start, period_end = self._period_bounds(period)
         buckets: Dict[str, Dict[int, List[float]]] = defaultdict(
@@ -2332,14 +2581,6 @@ class HtmlReportRenderer:
                 or server_metric.get("server_id")
                 or "unknown"
             )
-            data_mounts = {
-                str(detail.get("mount"))
-                for detail in self._records(
-                    server_metric.get("data_fs_details")
-                )
-                if detail.get("mount") is not None
-            }
-
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
@@ -2347,18 +2588,7 @@ class HtmlReportRenderer:
                 dimensions = entry.get("dimensions")
                 if not isinstance(dimensions, dict):
                     dimensions = {}
-                mount = dimensions.get("mnt_nm")
-
-                if filesystem_group == "root":
-                    if not self._is_root_mount(mount):
-                        continue
-                elif filesystem_group == "data":
-                    if mount is None or str(mount) not in data_mounts:
-                        continue
-
                 label = server_name
-                if filesystem_group and mount is not None:
-                    label = f"{server_name} · {mount}"
 
                 for point_time, point_value in self._metric_points(entry):
                     if (
@@ -2490,14 +2720,6 @@ class HtmlReportRenderer:
 
         return result
 
-    def _is_root_mount(self, mount: Any) -> bool:
-        if mount is None:
-            return False
-        normalized = str(mount).strip().replace("\\", "/")
-        if len(normalized) > 1:
-            normalized = normalized.rstrip("/")
-        return normalized == "/" or normalized.upper() == "C:"
-
     def _line_chart(
         self,
         title: str,
@@ -2506,6 +2728,8 @@ class HtmlReportRenderer:
         y_axis: str,
         interval: str,
         unit: str = "%",
+        *,
+        chart_id: str,
     ) -> str:
         populated = {
             label: points
@@ -2585,6 +2809,8 @@ class HtmlReportRenderer:
         expected_interval = self._metric_interval_millis(interval)
         for index, (label, points) in enumerate(populated.items()):
             color = self.CHART_COLORS[index % len(self.CHART_COLORS)]
+            series_id = f"{chart_id}-series-{index + 1}"
+            series_parts = []
             for segment in self._split_chart_points(
                 points,
                 expected_interval=expected_interval,
@@ -2620,24 +2846,39 @@ class HtmlReportRenderer:
                             "</title></circle>"
                         )
 
-                line_parts.append(
+                series_parts.append(
                     f'<polyline points="{" ".join(coordinates)}" '
                     f'stroke="{color}" class="chart-line"><title>'
                     f"{self._text(label)}</title></polyline>"
                     + "".join(circles)
                 )
+            line_parts.append(
+                f'<g id="{series_id}" data-chart-series>'
+                + "".join(series_parts)
+                + "</g>"
+            )
             legend_parts.append(
-                '<span class="chart-legend-item">'
-                f'<i style="background:{color}"></i>'
-                f"{self._text(label)}</span>"
+                '<button type="button" class="chart-legend-item" '
+                f'data-chart-toggle="{series_id}" aria-controls="{series_id}" '
+                'aria-pressed="false">'
+                f'<i style="background:{color}" aria-hidden="true"></i>'
+                f"<span>{self._text(label)}</span></button>"
             )
 
         return (
-            f'<div class="chart" role="img" '
+            f'<div class="chart" id="{chart_id}" role="group" '
             f'aria-label="{self._text(title)} '
             f'{self._text(aggregation_label)} 변화 그래프">'
+            '<div class="chart-toolbar">'
+            '<button type="button" data-chart-download>그래프 PNG 저장</button>'
+            '</div>'
             f'<svg viewBox="0 0 {width} {height}" '
-            'preserveAspectRatio="xMidYMid meet">'
+            'preserveAspectRatio="xMidYMid meet" role="img" '
+            f'aria-label="{self._text(title)}">'
+            '<style>.chart-grid-line{stroke:#e2e8f0;stroke-width:1}'
+            '.chart-axis-label{fill:#64748b;font:11px Arial,sans-serif}'
+            '.chart-line{fill:none;stroke-width:2.4;stroke-linejoin:round;'
+            'stroke-linecap:round}[hidden]{display:none}</style>'
             + "".join(grid_parts)
             + "".join(line_parts)
             + "</svg><div class=\"chart-legend\">"

@@ -256,7 +256,9 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             content_type="text/html; charset=utf-8",
         )
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            f"script-src {HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE}; "
+            "img-src data: blob:; "
             "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"

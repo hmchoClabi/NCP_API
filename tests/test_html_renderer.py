@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -171,22 +173,54 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn(".event-details:not([open]) > dl", html)
         self.assertIn("12,345 <small>원</small>", html)
         self.assertIn("Cloud Activity Tracer", html)
-        self.assertIn("보고 기간 메트릭 변화", html)
+        self.assertIn("All Server 사용률 추이", html)
         self.assertIn("KST 2시간 AVG", html)
         self.assertIn(">06-01</text>", html)
         self.assertIn(">06-30</text>", html)
-        self.assertIn("CPU 그룹", html)
-        self.assertIn("MEM 그룹", html)
-        self.assertIn("루트 디스크 그룹", html)
-        self.assertIn("DATA 디스크 그룹", html)
-        self.assertEqual(html.count("<polyline"), 4)
-        self.assertIn("web-01 · /data", html)
-        cpu_chart = html.split("<h3>CPU 그룹</h3>", 1)[1].split(
+        self.assertIn("Memory Utilization Average", html)
+        self.assertIn("CPU Utilization Average", html)
+        self.assertIn("File System Utilization Average", html)
+        self.assertEqual(html.count("<polyline"), 3)
+        self.assertIn('data-chart-toggle="server-chart-1-series-1"', html)
+        self.assertEqual(
+            html.count('<button type="button" data-chart-download>'),
+            3,
+        )
+        self.assertIn("PNG 저장", html)
+        self.assertIn('series.toggleAttribute("hidden", !visible)', html)
+        self.assertIn(
+            'const selected = isolate && item === button;',
+            html,
+        )
+        self.assertIn(
+            'item.setAttribute("aria-pressed", String(selected));',
+            html,
+        )
+        self.assertIn(
+            'data-chart-toggle="server-chart-1-series-1" '
+            'aria-controls="server-chart-1-series-1" aria-pressed="false"',
+            html,
+        )
+        self.assertIn("해당 서버만 보이고", html)
+        self.assertIn("다시 누르면 전체를 표시", html)
+        self.assertNotIn('data-chart-series tabindex=', html)
+        self.assertNotIn('series.setAttribute("aria-pressed"', html)
+        self.assertNotIn('document.addEventListener("keydown"', html)
+        self.assertEqual(
+            HtmlReportRenderer.CHART_COLORS[:3],
+            ("#15803d", "#2563eb", "#c2410c"),
+        )
+        self.assertIn("파일시스템 평균</th>", html)
+        self.assertIn("45.00%</td>", html)
+        self.assertNotIn("CPU 최소</th>", html)
+        cpu_chart = html.split(
+            "<h3>CPU Utilization Average</h3>", 1
+        )[1].split(
             "</article>",
             1,
         )[0]
         self.assertIn(">25%</text>", cpu_chart)
-        self.assertNotIn(">100%</text>", cpu_chart)
+        self.assertIn(">100%</text>", cpu_chart)
         self.assertIn("발생 시각 (KST)", html)
         self.assertIn("2026-06-15 13:45:12.345 KST", html)
         self.assertIn("수행 계정", html)
@@ -198,6 +232,15 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("상세 2개", html)
         self.assertIn("&lt;target details&gt;", html)
         self.assertNotIn("must-not-be-rendered", html)
+
+        script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        script_hash = base64.b64encode(
+            hashlib.sha256(script.encode("utf-8")).digest()
+        ).decode("ascii")
+        self.assertEqual(
+            HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE,
+            f"'sha256-{script_hash}'",
+        )
 
     def test_operational_report_leads_with_actions_and_folds_details(self):
         report = self._sample_report()
@@ -249,6 +292,116 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("오늘의 요약", email_html)
         self.assertIn("CPU 확인 필요", email_html)
         self.assertIn("첨부된 HTML 보고서", email_html)
+
+    def test_monthly_resource_changes_render_as_information_not_warning(self):
+        report = self._sample_report()
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "MONTHLY",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "findings": [],
+            "metrics": {"summaries": []},
+            "availability": {},
+            "security": {},
+            "costs": {},
+            "resource_changes": {
+                "status": "AVAILABLE",
+                "source_state": "CALCULATED",
+                "created_count": 1,
+                "removed_count": 1,
+                "spec_changed_count": 1,
+                "lifecycle_compared_categories": [
+                    "SERVER",
+                    "NAS",
+                    "OBJECT_STORAGE",
+                ],
+                "spec_compared_categories": ["SERVER", "NAS"],
+                "lifecycle_only_categories": ["OBJECT_STORAGE"],
+                "items": [
+                    {
+                        "change_type": "CREATED",
+                        "category_label": "서버",
+                        "resource_name": "<new-server>",
+                        "platform": "VPC",
+                        "changed_fields": [],
+                    },
+                    {
+                        "change_type": "REMOVED",
+                        "category_label": "NAS",
+                        "resource_name": "old-nas",
+                        "platform": "VPC",
+                        "changed_fields": [],
+                    },
+                    {
+                        "change_type": "SPEC_CHANGED",
+                        "category_label": "서버",
+                        "resource_name": "web-01",
+                        "platform": "VPC",
+                        "changed_fields": [{
+                            "field": "cpu_count",
+                            "label": "vCPU",
+                            "before": 2,
+                            "after": "<4>",
+                        }],
+                    },
+                ],
+            },
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("생성 1 · 제거 1 · 스펙 변경 1", html)
+        self.assertIn("전월 대비 자원 변화", html)
+        self.assertIn("스펙 변경 비교 제외: Object Storage.", html)
+        self.assertIn('class="change-badge created">생성</span>', html)
+        self.assertIn('class="change-badge removed">제거</span>', html)
+        self.assertIn(
+            'class="change-badge spec-changed">스펙 변경</span>',
+            html,
+        )
+        self.assertIn("&lt;new-server&gt;", html)
+        self.assertIn("vCPU: 2 → &lt;4&gt;", html)
+        self.assertNotIn("<new-server>", html)
+        self.assertNotIn('report-section warning', html.split(
+            "전월 대비 자원 변화", 1
+        )[0][-200:])
+
+    def test_unavailable_resource_change_does_not_render_zero_counts(self):
+        report = self._sample_report()
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "MONTHLY",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [],
+            },
+            "findings": [],
+            "metrics": {"summaries": []},
+            "availability": {},
+            "security": {},
+            "costs": {},
+            "resource_changes": {
+                "status": "UNAVAILABLE",
+                "source_state": "UNAVAILABLE",
+                "reason_code": "BASELINE_UNAVAILABLE",
+                "message": "비교할 이전 월 보고서가 없습니다.",
+                "created_count": None,
+                "removed_count": None,
+                "spec_changed_count": None,
+                "items": [],
+            },
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("비교 불가", html)
+        self.assertIn("비교할 이전 월 보고서가 없습니다.", html)
+        self.assertNotIn("생성 0 · 제거 0 · 변경 0", html)
 
     def test_infrastructure_inventory_renders_only_allowed_categories(self):
         report = self._sample_report()
@@ -754,6 +907,7 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
         monitoring = html.split("<h2>주요 인프라 모니터링</h2>", 1)[1]
+        self.assertIn("범례나 선을 누르면 해당 자원만 보이고", monitoring)
         lb_chart = monitoring.split(
             "<h3>Load Balancer · 수신 트래픽</h3>",
             1,

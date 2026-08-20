@@ -17,6 +17,7 @@ from app.report_options import (
 class ReportResult:
     """Delivery-neutral result produced by the NCP report pipeline."""
 
+    SCHEMA_VERSION: ClassVar[str] = "1.5"
     DISPLAY_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = frozenset(
         RESOURCE_CATEGORY_OPTIONS
     )
@@ -350,7 +351,7 @@ class ReportResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "schema_version": "1.5",
+            "schema_version": self.SCHEMA_VERSION,
             "report_id": self.report_id,
             "generated_at": self.generated_at,
             "customer": self.public_customer,

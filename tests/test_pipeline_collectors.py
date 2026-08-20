@@ -593,6 +593,29 @@ class PipelineCollectorTests(unittest.TestCase):
             "Day1",
         )
 
+    def test_metric_interval_override_is_used_for_all_queries(self):
+        api = MetricAPI()
+        collector = InsightMetricCollector(
+            FakeFactory(cloud_insight=api)
+        )
+        collector._select_metric_interval = Mock(
+            side_effect=AssertionError("interval selector should not run")
+        )
+
+        reports = collector.collect(
+            [{"server_id": "1", "server_name": "one"}],
+            start_time=1,
+            end_time=2,
+            interval="Day1",
+        )
+
+        collector._select_metric_interval.assert_not_called()
+        self.assertEqual(
+            {payload["interval"] for payload in api.metric_payloads},
+            {"Day1"},
+        )
+        self.assertEqual(reports[0]["metric_interval"], "Day1")
+
     def test_metric_query_windows_follow_interval_recommendations(self):
         day = 24 * 60 * 60 * 1000
 

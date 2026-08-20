@@ -17,6 +17,7 @@ tests/
 .tmp/
 tmp/
 /*.pdf
+/*.docx
 database/.generated/
 deploy/private/
 *.ps1

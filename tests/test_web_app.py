@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from app.renderers import HtmlReportRenderer
 from app.report_branding import validate_customer_logo
 from webapp.app import CSRF_COOKIE, SESSION_COOKIE, create_app
 from webapp.route_access import (
@@ -505,9 +506,15 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
-        self.assertIn("서버 메트릭".encode("utf-8"), response.data)
+        self.assertIn("서버 이용 현황".encode("utf-8"), response.data)
         self.assertIn(b"web-1", response.data)
-        self.assertIn("frame-ancestors 'self'", response.headers["Content-Security-Policy"])
+        policy = response.headers["Content-Security-Policy"]
+        self.assertIn("frame-ancestors 'self'", policy)
+        self.assertIn(
+            f"script-src {HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE}",
+            policy,
+        )
+        self.assertIn("img-src data: blob:", policy)
 
     def test_customer_viewer_can_enqueue_own_account_report(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")

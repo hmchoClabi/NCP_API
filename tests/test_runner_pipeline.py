@@ -469,6 +469,31 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertEqual(metrics, [{"server_id": "one"}])
         self.assertEqual(errors[0]["stage"], "query")
 
+    def test_runner_forces_day1_metrics_for_full_month(self):
+        runner = self._runner_without_factory_init()
+        server_data = [{"server_id": "one"}]
+
+        with patch("app.runner.InsightMetricCollector") as collector_class:
+            collector = collector_class.return_value
+            collector.collect.return_value = []
+            collector.last_errors = []
+
+            runner.collect_insight_metrics(
+                server_data=server_data,
+                period={
+                    "start_time": 1,
+                    "end_time": 2,
+                    "is_full_month": True,
+                },
+            )
+
+        collector.collect.assert_called_once_with(
+            server_data,
+            start_time=1,
+            end_time=2,
+            interval="Day1",
+        )
+
     def test_load_balancer_monitoring_keeps_target_group_resources(self):
         runner = self._runner_without_factory_init()
 

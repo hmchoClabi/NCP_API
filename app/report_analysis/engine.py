@@ -13,11 +13,12 @@ from .metrics import analyze_metrics
 from .models import sort_findings
 from .provenance import CALCULATED, calculated_source_state
 from .quality import analyze_data_quality, dataset_status
+from .resources import analyze_resource_changes
 from .security import analyze_security
 from .support import field, mapping, normalize_period_type
 
 
-ANALYSIS_VERSION = "1.2"
+ANALYSIS_VERSION = "1.3"
 
 _STATUS_LABELS = {
     # 모든 NCP 상품의 정상 여부가 아니라 실제 수집·검사한 범위의 판정이다.
@@ -63,6 +64,7 @@ def analyze_report(
         baseline=baseline,
         policy=effective_policy,
     )
+    resource_changes = analyze_resource_changes(report, baseline=baseline)
     findings = sort_findings([
         *quality_findings,
         *metric_findings,
@@ -105,6 +107,7 @@ def analyze_report(
         "security": security,
         "governance": governance,
         "costs": costs,
+        "resource_changes": resource_changes,
     }
 
 

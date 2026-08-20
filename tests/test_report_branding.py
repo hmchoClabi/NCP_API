@@ -130,6 +130,7 @@ class CustomerLogoSnapshotTests(unittest.TestCase):
         html = HtmlReportRenderer().render(report)
 
         self.assertNotIn("<script>", html)
+        self.assertIn("Customer &lt;script&gt;", html)
         self.assertIn(">CS</span>", html)
         self.assertNotIn("logo_data_uri", report.to_dict()["customer"])
 

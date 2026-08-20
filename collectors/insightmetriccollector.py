@@ -66,6 +66,7 @@ class InsightMetricCollector:
         servers: List[Dict[str, Any]],
         start_time: int,
         end_time: int,
+        interval: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         logger.info("인사이트 metric 데이터 수집을 시작합니다.")
         self.last_errors = []
@@ -80,7 +81,7 @@ class InsightMetricCollector:
                 logger.warning("서버 목록이 없어 인사이트 metric 수집을 건너뜁니다.")
                 return []
 
-            interval = self._select_metric_interval(
+            interval = interval or self._select_metric_interval(
                 start_time=start_time,
                 end_time=end_time,
             )

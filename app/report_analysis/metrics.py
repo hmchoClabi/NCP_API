@@ -116,6 +116,8 @@ def analyze_metrics(
         if (
             kind in thresholds
             and interval
+            # A daily aggregate does not prove continuous threshold duration.
+            and interval < interval_seconds("Day1")
             and item.get("alert_eligible", False)
         ):
             rule = thresholds[kind]

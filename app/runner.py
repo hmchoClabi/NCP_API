@@ -2506,10 +2506,16 @@ class ReportRunner:
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         insight_collector = InsightMetricCollector(api_factory=self.api_factory)
 
+        collect_kwargs = {
+            "start_time": period["start_time"],
+            "end_time": period["end_time"],
+        }
+        if period.get("is_full_month"):
+            collect_kwargs["interval"] = "Day1"
+
         insight_result = insight_collector.collect(
             server_data,
-            start_time=period["start_time"],
-            end_time=period["end_time"],
+            **collect_kwargs,
         )
 
         if isinstance(insight_result, dict):

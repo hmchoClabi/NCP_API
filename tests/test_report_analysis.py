@@ -1,5 +1,6 @@
 import json
 import unittest
+from copy import deepcopy
 from types import SimpleNamespace
 
 from app.report_analysis import analyze_report
@@ -39,6 +40,60 @@ class ReportAnalysisTests(unittest.TestCase):
         report.update(overrides)
         return report
 
+    def _monthly_inventory_report(
+        self,
+        start,
+        end,
+        infrastructure,
+        *,
+        categories,
+        **overrides,
+    ):
+        report = self._report(
+            schema_version="1.5",
+            period={
+                "period_type": "month",
+                "start_dt": f"{start} 00:00:00",
+                "end_dt": f"{end} 23:59:59",
+            },
+            report_options={
+                "schema_version": "1.4",
+                "sections": ["infrastructure_inventory"],
+                "resource_categories": list(categories),
+                "monitoring_categories": [],
+            },
+            infrastructure=infrastructure,
+            collection_metadata={
+                "infrastructure": {
+                    "time_basis": "REPORT_PERIOD",
+                    "inventory_completeness": (
+                        "COMPLETE_FOR_SELECTED_SCOPE"
+                    ),
+                    "collection_issue_count": 0,
+                    "collected_categories": list(categories),
+                }
+            },
+        )
+        report.update(overrides)
+        return report
+
+    @staticmethod
+    def _resource(
+        category,
+        resource_id,
+        *,
+        platform="VPC",
+        name=None,
+        details=None,
+    ):
+        return {
+            "category": category,
+            "resource_id": resource_id,
+            "resource_name": name or resource_id,
+            "platform": platform,
+            "details": details or {},
+        }
+
     def test_missing_data_is_unknown_and_never_normal_or_zero(self):
         analysis = analyze_report(self._report())
 
@@ -54,7 +109,7 @@ class ReportAnalysisTests(unittest.TestCase):
 
         analysis = analyze_report(report)
 
-        self.assertEqual(analysis["version"], "1.2")
+        self.assertEqual(analysis["version"], "1.3")
         self.assertEqual(analysis["period_type"], "DAILY")
 
     def test_runner_period_type_aliases_are_normalized(self):
@@ -228,6 +283,29 @@ class ReportAnalysisTests(unittest.TestCase):
                         ],
                         expected_severity,
                     )
+
+    def test_daily_average_bucket_does_not_claim_sustained_alert(self):
+        report = self._report(server_metrics=[{
+            "server_id": "server-1",
+            "server_name": "web-1",
+            "metric_interval": "Day1",
+            "raw_metrics": {
+                "used_rto": {
+                    "avg": [{"raw": {"dps": [[0, 99]]}}]
+                }
+            },
+        }])
+
+        analysis = analyze_report(report)
+
+        self.assertEqual(
+            analysis["metrics"]["summaries"][0]["average"],
+            99,
+        )
+        self.assertFalse(any(
+            finding["rule_id"] == "METRIC_CPU_SUSTAINED"
+            for finding in analysis["findings"]
+        ))
 
     def test_zero_duration_policy_cannot_alert_below_90_percent(self):
         report = self._report(server_metrics=[{
@@ -1161,6 +1239,521 @@ class ReportAnalysisTests(unittest.TestCase):
             self._dataset(analysis, "service_availability")["source_state"],
             "UNAVAILABLE",
         )
+
+    def test_resource_changes_compare_adjacent_complete_months(self):
+        categories = ("SERVER", "BLOCK_STORAGE", "NAS")
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [
+                self._resource(
+                    "SERVER",
+                    "server-1",
+                    name="web-1",
+                    details={"cpu_count": 2, "memory_gb": 8},
+                ),
+                self._resource(
+                    "BLOCK_STORAGE",
+                    "storage-old",
+                    details={"size_gb": 100},
+                ),
+            ],
+            categories=categories,
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [
+                self._resource(
+                    "SERVER",
+                    "server-1",
+                    name="web-1",
+                    details={"cpu_count": 4, "memory_gb": 8.0},
+                ),
+                self._resource(
+                    "NAS",
+                    "nas-new",
+                    details={"size_gb": 500},
+                ),
+            ],
+            categories=categories,
+        )
+
+        analysis = analyze_report(current, baseline=baseline)
+        changes = analysis["resource_changes"]
+
+        self.assertEqual(changes["status"], "AVAILABLE")
+        self.assertEqual(changes["created_count"], 1)
+        self.assertEqual(changes["removed_count"], 1)
+        self.assertEqual(changes["spec_changed_count"], 1)
+        self.assertEqual(
+            [
+                (item["change_type"], item["resource_id"])
+                for item in changes["items"]
+            ],
+            [
+                ("CREATED", "nas-new"),
+                ("REMOVED", "storage-old"),
+                ("SPEC_CHANGED", "server-1"),
+            ],
+        )
+        self.assertEqual(
+            changes["items"][2]["changed_fields"],
+            [{
+                "field": "cpu_count",
+                "label": "vCPU",
+                "before": 2,
+                "after": 4,
+            }],
+        )
+        self.assertFalse(any(
+            finding.get("category") == "RESOURCE_CHANGE"
+            for finding in analysis["findings"]
+        ))
+
+    def test_resource_change_identity_and_values_are_stable(self):
+        categories = ("SERVER", "LOAD_BALANCER")
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [
+                self._resource(
+                    "SERVER",
+                    "shared-id",
+                    platform="VPC",
+                    details={"cpu_count": 2},
+                ),
+                self._resource(
+                    "SERVER",
+                    "shared-id",
+                    platform="CLASSIC",
+                    details={"cpu_count": 4},
+                ),
+                self._resource(
+                    "LOAD_BALANCER",
+                    "lb-1",
+                    details={"network_type": "PUBLIC"},
+                ),
+            ],
+            categories=categories,
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [
+                self._resource(
+                    "SERVER",
+                    "shared-id",
+                    platform="VPC",
+                    details={"cpu_count": 3},
+                ),
+                self._resource(
+                    "SERVER",
+                    "shared-id",
+                    platform="CLASSIC",
+                    details={"cpu_count": "4"},
+                ),
+                self._resource(
+                    "LOAD_BALANCER",
+                    "lb-1",
+                    details={"network_type": "public"},
+                ),
+            ],
+            categories=categories,
+        )
+
+        changes = analyze_report(current, baseline=baseline)[
+            "resource_changes"
+        ]
+
+        self.assertEqual(changes["spec_changed_count"], 1)
+        self.assertEqual(len(changes["items"]), 1)
+        self.assertEqual(changes["items"][0]["platform"], "VPC")
+
+    def test_resource_changes_require_exact_kst_month_boundaries(self):
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        invalid_periods = (
+            {
+                **current["period"],
+                "start_dt": "2026-08-01 12:00:00",
+            },
+            {
+                **current["period"],
+                "end_dt": "2026-08-31 12:00:00",
+            },
+            {
+                **current["period"],
+                "is_full_month": False,
+            },
+        )
+
+        for period in invalid_periods:
+            with self.subTest(period=period):
+                candidate = deepcopy(current)
+                candidate["period"] = period
+                changes = analyze_report(candidate, baseline=baseline)[
+                    "resource_changes"
+                ]
+
+                self.assertEqual(changes["status"], "NOT_APPLICABLE")
+                self.assertEqual(
+                    changes["reason_code"],
+                    "MONTHLY_REPORT_REQUIRED",
+                )
+
+        utc_period = deepcopy(current)
+        utc_period["period"].update({
+            "start_dt": "2026-07-31T15:00:00Z",
+            "end_dt": "2026-08-31T14:59:59Z",
+            "is_full_month": True,
+        })
+        changes = analyze_report(utc_period, baseline=baseline)[
+            "resource_changes"
+        ]
+        self.assertEqual(changes["status"], "AVAILABLE")
+
+    def test_resource_changes_fail_closed_for_incompatible_snapshots(self):
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        good_baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        nonadjacent = self._monthly_inventory_report(
+            "2026-06-01",
+            "2026-06-30",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        nonmonthly = self._report(schema_version="1.5")
+        schema_mismatch = deepcopy(good_baseline)
+        schema_mismatch["schema_version"] = "1.4"
+        scope_mismatch = deepcopy(good_baseline)
+        scope_mismatch["report_options"]["resource_categories"] = [
+            "SERVER",
+            "NAS",
+        ]
+        partial = deepcopy(good_baseline)
+        partial["collection_metadata"]["infrastructure"].update({
+            "inventory_completeness": "PARTIAL",
+            "collection_issue_count": 1,
+        })
+
+        cases = (
+            (None, "UNAVAILABLE", "BASELINE_UNAVAILABLE"),
+            (nonmonthly, "UNAVAILABLE", "BASELINE_NOT_MONTHLY"),
+            (nonadjacent, "UNAVAILABLE", "BASELINE_NOT_ADJACENT"),
+            (schema_mismatch, "UNAVAILABLE", "SCHEMA_MISMATCH"),
+            (scope_mismatch, "UNAVAILABLE", "RESOURCE_SCOPE_MISMATCH"),
+            (partial, "PARTIAL", "SNAPSHOT_INCOMPLETE"),
+        )
+        for baseline, status, reason_code in cases:
+            with self.subTest(reason_code=reason_code):
+                changes = analyze_report(current, baseline=baseline)[
+                    "resource_changes"
+                ]
+                self.assertEqual(changes["status"], status)
+                self.assertEqual(changes["reason_code"], reason_code)
+                self.assertIsNone(changes["created_count"])
+                self.assertIsNone(changes["removed_count"])
+                self.assertIsNone(changes["spec_changed_count"])
+                self.assertEqual(changes["items"], [])
+
+    def test_resource_changes_reject_malformed_inventory_and_details(self):
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [self._resource(
+                "SERVER",
+                "server-1",
+                details={"cpu_count": 2},
+            )],
+            categories=("SERVER",),
+        )
+        malformed_details = self._resource("SERVER", "server-1")
+        malformed_details["details"] = "corrupt"
+        missing_platform = self._resource("SERVER", "server-1")
+        missing_platform["platform"] = ""
+        malformed_inventory = (
+            "corrupt",
+            ["corrupt"],
+            [{
+                "resource_id": "server-1",
+                "platform": "VPC",
+                "details": {},
+            }],
+            [malformed_details],
+            [missing_platform],
+        )
+
+        for inventory in malformed_inventory:
+            with self.subTest(inventory=inventory):
+                current = self._monthly_inventory_report(
+                    "2026-08-01",
+                    "2026-08-31",
+                    inventory,
+                    categories=("SERVER",),
+                )
+                changes = analyze_report(current, baseline=baseline)[
+                    "resource_changes"
+                ]
+
+                self.assertEqual(changes["status"], "PARTIAL")
+                self.assertEqual(
+                    changes["reason_code"],
+                    "MALFORMED_SNAPSHOT",
+                )
+                self.assertIsNone(changes["created_count"])
+                self.assertIsNone(changes["removed_count"])
+                self.assertIsNone(changes["spec_changed_count"])
+                self.assertEqual(changes["items"], [])
+
+    def test_resource_changes_require_actual_collection_scope_coverage(self):
+        categories = ("SERVER", "NAS")
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [
+                self._resource("SERVER", "server-1"),
+                self._resource("NAS", "nas-1"),
+            ],
+            categories=categories,
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [self._resource("SERVER", "server-1")],
+            categories=categories,
+        )
+        current["collection_metadata"]["infrastructure"].update({
+            "inventory_completeness": "COMPLETE_FOR_SNAPSHOT_SCOPE",
+            "collected_categories": ["SERVER"],
+        })
+        requested_scope_only = deepcopy(current)
+        metadata = requested_scope_only["collection_metadata"][
+            "infrastructure"
+        ]
+        metadata.pop("collected_categories")
+        metadata["resource_categories"] = list(categories)
+
+        for candidate in (current, requested_scope_only):
+            with self.subTest(metadata=candidate["collection_metadata"]):
+                changes = analyze_report(candidate, baseline=baseline)[
+                    "resource_changes"
+                ]
+
+                self.assertEqual(changes["status"], "PARTIAL")
+                self.assertEqual(
+                    changes["reason_code"],
+                    "SNAPSHOT_INCOMPLETE",
+                )
+                self.assertIsNone(changes["removed_count"])
+                self.assertEqual(changes["items"], [])
+
+    def test_resource_changes_require_explicit_valid_raw_options(self):
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [self._resource("SERVER", "server-1")],
+            categories=("SERVER",),
+        )
+        invalid_options = (
+            None,
+            "corrupt",
+            {
+                "sections": ["infrastructure_inventory"],
+                "resource_categories": ["SERVER"],
+                "monitoring_categories": [],
+            },
+            {
+                **current["report_options"],
+                "schema_version": "0",
+            },
+            {
+                **current["report_options"],
+                "resource_categories": ["SERVER", "UNKNOWN_CATEGORY"],
+            },
+        )
+
+        for options in invalid_options:
+            with self.subTest(options=options):
+                candidate = deepcopy(current)
+                if options is None:
+                    candidate.pop("report_options")
+                else:
+                    candidate["report_options"] = options
+                changes = analyze_report(candidate, baseline=baseline)[
+                    "resource_changes"
+                ]
+
+                self.assertEqual(changes["status"], "UNAVAILABLE")
+                self.assertEqual(
+                    changes["reason_code"],
+                    "OPTIONS_UNAVAILABLE",
+                )
+                self.assertIsNone(changes["created_count"])
+                self.assertEqual(changes["items"], [])
+
+    def test_resource_change_contract_separates_lifecycle_and_spec_scope(self):
+        categories = ("SERVER", "OBJECT_STORAGE", "GLOBAL_DNS")
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [
+                self._resource(
+                    "OBJECT_STORAGE",
+                    "bucket-same",
+                    details={"versioning": False},
+                ),
+                self._resource("OBJECT_STORAGE", "bucket-old"),
+                self._resource(
+                    "GLOBAL_DNS",
+                    "domain-1",
+                    platform="GLOBAL",
+                    details={"dnssec_enabled": False},
+                ),
+                self._resource(
+                    "GLOBAL_DNS",
+                    "domain-2",
+                    platform="GLOBAL",
+                    details={"dnssec_enabled": False},
+                ),
+            ],
+            categories=categories,
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [
+                self._resource(
+                    "OBJECT_STORAGE",
+                    "bucket-same",
+                    details={"versioning": True},
+                ),
+                self._resource("OBJECT_STORAGE", "bucket-new"),
+                self._resource(
+                    "GLOBAL_DNS",
+                    "domain-1",
+                    platform="GLOBAL",
+                    details={"dnssec_enabled": True},
+                ),
+                self._resource(
+                    "GLOBAL_DNS",
+                    "domain-2",
+                    platform="GLOBAL",
+                    details={"dnssec_enabled": "N"},
+                ),
+            ],
+            categories=categories,
+        )
+
+        changes = analyze_report(current, baseline=baseline)[
+            "resource_changes"
+        ]
+
+        self.assertEqual(changes["status"], "AVAILABLE")
+        self.assertEqual(changes["created_count"], 1)
+        self.assertEqual(changes["removed_count"], 1)
+        self.assertEqual(changes["spec_changed_count"], 1)
+        self.assertEqual(
+            changes["lifecycle_compared_categories"],
+            ["GLOBAL_DNS", "OBJECT_STORAGE", "SERVER"],
+        )
+        self.assertEqual(
+            changes["spec_compared_categories"],
+            ["GLOBAL_DNS", "SERVER"],
+        )
+        self.assertEqual(
+            changes["lifecycle_only_categories"],
+            ["OBJECT_STORAGE"],
+        )
+        self.assertEqual(
+            [
+                (item["change_type"], item["resource_id"])
+                for item in changes["items"]
+            ],
+            [
+                ("CREATED", "bucket-new"),
+                ("REMOVED", "bucket-old"),
+                ("SPEC_CHANGED", "domain-1"),
+            ],
+        )
+
+    def test_resource_changes_exclude_network_configuration_and_duplicates(self):
+        categories = ("SERVER", "ROUTE_TABLE")
+        baseline = self._monthly_inventory_report(
+            "2026-07-01",
+            "2026-07-31",
+            [self._resource(
+                "ROUTE_TABLE",
+                "route-1",
+                details={"route_count": 1},
+            )],
+            categories=categories,
+        )
+        current = self._monthly_inventory_report(
+            "2026-08-01",
+            "2026-08-31",
+            [self._resource(
+                "ROUTE_TABLE",
+                "route-2",
+                details={"route_count": 10},
+            )],
+            categories=categories,
+        )
+
+        changes = analyze_report(current, baseline=baseline)[
+            "resource_changes"
+        ]
+
+        self.assertEqual(changes["status"], "AVAILABLE")
+        self.assertEqual(changes["created_count"], 0)
+        self.assertEqual(changes["removed_count"], 0)
+        self.assertEqual(changes["spec_changed_count"], 0)
+
+        duplicate_baseline = deepcopy(baseline)
+        duplicate_baseline["infrastructure"] = [
+            self._resource("SERVER", "server-1"),
+            self._resource("SERVER", "server-1"),
+        ]
+        changes = analyze_report(current, baseline=duplicate_baseline)[
+            "resource_changes"
+        ]
+        self.assertEqual(changes["status"], "PARTIAL")
+        self.assertEqual(
+            changes["reason_code"],
+            "RESOURCE_IDENTITY_INCOMPLETE",
+        )
+
+    def test_resource_changes_are_not_applicable_to_daily_reports(self):
+        changes = analyze_report(self._report())["resource_changes"]
+
+        self.assertEqual(changes["status"], "NOT_APPLICABLE")
+        self.assertEqual(changes["reason_code"], "MONTHLY_REPORT_REQUIRED")
+        self.assertIsNone(changes["created_count"])
 
     def test_inferred_source_requires_explicit_historical_confidence(self):
         self.assertEqual(
