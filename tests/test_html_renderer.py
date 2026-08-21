@@ -174,6 +174,23 @@ class HtmlReportRendererTests(unittest.TestCase):
             html,
         )
         self.assertIn(".event-details:not([open]) > dl", html)
+        self.assertIn(
+            ".table-record.has-detail .table-data-row td",
+            html,
+        )
+        self.assertIn("width: min(960px, 80vw)", html)
+        self.assertIn(
+            "grid-template-columns: minmax(120px, 200px) minmax(0, 1fr)",
+            html,
+        )
+        self.assertIn(
+            ".event-details dl div { grid-template-columns: 1fr; gap: 2px; }",
+            html,
+        )
+        self.assertIn(".table-detail-row { break-inside: auto; }", html)
+        self.assertIn(".event-details { width: auto; max-width: none; }", html)
+        self.assertIn(".table-wrap-with-details { overflow: visible; }", html)
+        self.assertIn(".table-with-details { table-layout: fixed; }", html)
         self.assertIn("12,345 <small>원</small>", html)
         self.assertIn("Cloud Activity Tracer", html)
         self.assertIn("All Server 사용률 추이", html)
@@ -2201,6 +2218,59 @@ assert.deepStrictEqual(
             [row["event_id"] for row in activity_rows],
             ["early", "late"],
         )
+
+    def test_event_details_use_full_width_rows_and_keep_values_safe(self):
+        renderer = HtmlReportRenderer()
+        insight_html = renderer._event_table([{
+            "event_id": "event-1",
+            "start_time": 1781505000000,
+            "description": "<insight-detail>",
+        }])
+        activity_html = renderer._activity_table([{
+            "event_time": 1781505000000,
+            "product_data": {
+                "description": "<activity-detail>",
+                "accessToken": "must-not-render",
+            },
+        }])
+        diagnostic_html = renderer._diagnostic_table([{
+            "severity_label": "경고",
+            "message": "diagnostic-message",
+        }])
+        generic_html = renderer._table(
+            [{"badge": "<strong>safe-renderer-html</strong>"}],
+            (("badge", "표시", "html"),),
+        )
+
+        self.assertIn(
+            '<div class="table-wrap table-wrap-with-details">',
+            insight_html,
+        )
+        self.assertIn('<table class="table-with-details">', insight_html)
+        self.assertIn(
+            '<tr class="table-detail-row"><td colspan="7"><details ',
+            insight_html,
+        )
+        self.assertIn(
+            '<tr class="table-detail-row"><td colspan="8"><details ',
+            activity_html,
+        )
+        self.assertLess(
+            insight_html.index('class="table-data-row"'),
+            insight_html.index('class="table-detail-row"'),
+        )
+        insight_data_row = insight_html.split(
+            '<tr class="table-data-row">', 1
+        )[1].split("</tr>", 1)[0]
+        self.assertNotIn("<details", insight_data_row)
+        self.assertNotIn("<th scope=\"col\">상세</th>", insight_html)
+        self.assertIn("&lt;insight-detail&gt;", insight_html)
+        self.assertIn("&lt;activity-detail&gt;", activity_html)
+        self.assertNotIn("must-not-render", activity_html)
+        self.assertNotIn("table-with-details", diagnostic_html)
+        self.assertNotIn("table-detail-row", diagnostic_html)
+        self.assertIn("<strong>safe-renderer-html</strong>", generic_html)
+        self.assertNotIn("table-with-details", generic_html)
 
     def test_render_escapes_collected_values_and_omits_raw_metrics(self):
         html = HtmlReportRenderer().render(self._sample_report())

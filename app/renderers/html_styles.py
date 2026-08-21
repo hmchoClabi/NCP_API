@@ -372,8 +372,14 @@ td {
   border-bottom: 1px solid #edf2f7;
   vertical-align: top;
 }
-tbody tr:nth-child(even) { background: #fbfcfd; }
-tbody tr:hover { background: #f0fdf4; }
+table:not(.table-with-details) tbody tr:nth-child(even),
+.table-with-details > .table-record:nth-of-type(even) > tr {
+  background: #fbfcfd;
+}
+table:not(.table-with-details) tbody tr:hover,
+.table-with-details > .table-record:hover > tr { background: #f0fdf4; }
+.table-record.has-detail .table-data-row td { padding-bottom: 6px; border-bottom: 0; }
+.table-detail-row td { padding: 0 12px 11px; }
 .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .change-badge {
   display: inline-block;
@@ -471,7 +477,11 @@ tbody tr:hover { background: #f0fdf4; }
   border-radius: 50%;
 }
 .chart-empty { min-height: 180px; align-content: center; }
-.event-details { min-width: 160px; }
+.event-details {
+  width: min(960px, 80vw);
+  max-width: 100%;
+  min-width: 0;
+}
 .event-details summary {
   color: var(--brand-dark);
   cursor: pointer;
@@ -481,7 +491,7 @@ tbody tr:hover { background: #f0fdf4; }
 .event-details dl { margin: 10px 0 0; }
 .event-details dl div {
   display: grid;
-  grid-template-columns: minmax(90px, .8fr) minmax(140px, 1.4fr);
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
   gap: 8px;
   padding: 5px 0;
   border-bottom: 1px solid #edf2f7;
@@ -517,6 +527,7 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .report-identity { align-items: flex-start; flex-direction: column; }
   .customer-logo-plate { width: min(100%, 220px); height: 100px; }
   .summary-fact { width: 100%; min-width: 0; }
+  .event-details dl div { grid-template-columns: 1fr; gap: 2px; }
   .technical-appendix > summary,
   .report-disclosure > summary { align-items: flex-start; flex-direction: row; }
 }
@@ -541,8 +552,14 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .report-disclosure:not([open]) > .report-disclosure-body { display: block !important; }
   .report-disclosure-body { padding: 0 18px 18px; }
   .event-details > summary { display: none; }
+  .event-details { width: auto; max-width: none; }
   .event-details:not([open]) > dl,
   .event-details:not([open]) > .detail-more { display: block !important; }
+  .table-wrap-with-details { overflow: visible; }
+  .table-with-details { table-layout: fixed; }
+  .table-with-details th { white-space: normal; overflow-wrap: anywhere; }
+  .table-with-details td { overflow-wrap: anywhere; }
+  .table-detail-row { break-inside: auto; }
   th { position: static; }
   table { font-size: 8.5pt; }
   tr { break-inside: avoid; }

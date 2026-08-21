@@ -3421,7 +3421,7 @@ class HtmlReportRenderer:
                 ("type", "유형"),
                 ("condition", "발생 조건/감지값"),
                 ("message", "설명"),
-                ("details", "상세", "html"),
+                ("details", "상세", "details"),
             ),
         )
 
@@ -3652,7 +3652,7 @@ class HtmlReportRenderer:
                 ("action_name", "작업"),
                 ("result", "결과"),
                 ("source_ip", "접속 IP"),
-                ("details", "상세", "html"),
+                ("details", "상세", "details"),
             ),
         )
 
@@ -3787,15 +3787,23 @@ class HtmlReportRenderer:
         if not rows:
             return '<p class="empty-state">표시할 데이터가 없습니다.</p>'
 
+        detail_columns = [
+            column
+            for column in columns
+            if len(column) > 2 and column[2] == "details"
+        ]
+        visible_columns = [
+            column for column in columns if column not in detail_columns
+        ]
         header = "".join(
             f"<th scope=\"col\">{self._text(column[1])}</th>"
-            for column in columns
+            for column in visible_columns
         )
         body_rows = []
 
         for row in rows:
             cells = []
-            for column in columns:
+            for column in visible_columns:
                 key = column[0]
                 format_name = column[2] if len(column) > 2 else "text"
                 value = self._format_value(row.get(key), format_name)
@@ -3806,8 +3814,45 @@ class HtmlReportRenderer:
                     else ""
                 )
                 cells.append(f"<td{numeric_class}>{value}</td>")
-            body_rows.append("<tr>" + "".join(cells) + "</tr>")
+            row_start = (
+                '<tr class="table-data-row">' if detail_columns else "<tr>"
+            )
+            data_row = row_start + "".join(cells) + "</tr>"
+            if not detail_columns:
+                body_rows.append(data_row)
+                continue
 
+            detail_values = [
+                self._format_value(row.get(column[0]), "details")
+                for column in detail_columns
+                if isinstance(row.get(column[0]), str)
+                and str(row.get(column[0])).strip() not in {"", "-"}
+            ]
+            detail_row = (
+                '<tr class="table-detail-row"><td '
+                f'colspan="{len(visible_columns)}">'
+                + "".join(detail_values)
+                + "</td></tr>"
+                if detail_values
+                else ""
+            )
+            record_class = (
+                "table-record has-detail" if detail_row else "table-record"
+            )
+            body_rows.append(
+                f'<tbody class="{record_class}">{data_row}{detail_row}</tbody>'
+            )
+
+        if detail_columns:
+            return (
+                '<div class="table-wrap table-wrap-with-details">'
+                '<table class="table-with-details">'
+                "<thead><tr>"
+                + header
+                + "</tr></thead>"
+                + "".join(body_rows)
+                + "</table></div>"
+            )
         return (
             '<div class="table-wrap"><table><thead><tr>'
             + header
@@ -3829,7 +3874,7 @@ class HtmlReportRenderer:
             if value is None or value == "":
                 return "-"
             return self._text(f"{self._number(value, decimals=2)}%")
-        if format_name == "html":
+        if format_name in {"html", "details"}:
             return value if isinstance(value, str) else self._text(value)
         return self._text(value)
 
