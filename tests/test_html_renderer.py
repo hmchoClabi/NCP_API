@@ -232,8 +232,12 @@ class HtmlReportRendererTests(unittest.TestCase):
             HtmlReportRenderer.CHART_COLORS[:3],
             ("#15803d", "#2563eb", "#c2410c"),
         )
-        self.assertIn("파일시스템 평균</th>", html)
-        self.assertIn("45.00%</td>", html)
+        self.assertIn("OS 드라이브별 사용률</th>", html)
+        self.assertIn("DATA 드라이브별 사용률</th>", html)
+        self.assertIn("/ · 평균 30.00% / 최대 40.00%", html)
+        self.assertIn("/data · 평균 60.00% / 최대 70.00%", html)
+        self.assertNotIn("파일시스템 평균</th>", html)
+        self.assertNotIn("45.00%</td>", html)
         self.assertNotIn("CPU 최소</th>", html)
         cpu_chart = html.split(
             "<h3>CPU Utilization Average</h3>", 1
@@ -330,7 +334,30 @@ class HtmlReportRendererTests(unittest.TestCase):
                 self._sample_report().display_server_metrics
             ),
             "평균 90% 이상 0대 · 기간 평균 최고 web-01 "
-            "메모리 50.00%",
+            "파일시스템 /data 60.00%",
+        )
+        self.assertEqual(
+            renderer._server_metric_summary([{
+                "server_name": "windows-01",
+                "cpu_avg": 10,
+                "mem_avg": 20,
+                "os_fs_details": [
+                    {"mount": "C:", "avg": 5},
+                ],
+                "data_fs_details": [
+                    {"mount": "D:", "avg": 95},
+                ],
+            }]),
+            "평균 90% 이상 1대 · 기간 평균 최고 windows-01 "
+            "파일시스템 D: 95.00%",
+        )
+        self.assertEqual(
+            renderer._filesystem_text([{
+                "mount": "X:",
+                "avg": None,
+                "max": float("nan"),
+            }]),
+            "X: · 평균 - / 최대 -",
         )
         many_servers = self._sample_report()
         metric = many_servers.server_metrics[0]
@@ -342,7 +369,8 @@ class HtmlReportRendererTests(unittest.TestCase):
             "서버 이용 현황", 1
         )[1].split("</summary>", 1)[0]
         self.assertIn(
-            "평균 90% 이상 0대 · 기간 평균 최고 web-01 메모리 50.00%",
+            "평균 90% 이상 0대 · 기간 평균 최고 web-01 "
+            "파일시스템 /data 60.00%",
             utilization,
         )
         organization = renderer._organization_cost_sections([{

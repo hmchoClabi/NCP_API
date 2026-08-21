@@ -1592,7 +1592,8 @@ class HtmlReportRenderer:
                 monitoring_parts.extend((
                     self._section(
                         "서버 이용 현황",
-                        "보고 기간의 서버별 CPU, 메모리, 파일시스템 평균 사용률입니다.",
+                        "보고 기간의 서버별 CPU·메모리 평균과 마운트/드라이브별 "
+                        "파일시스템 평균·최대 사용률입니다.",
                         self._metric_table(report.display_server_metrics),
                         len(report.display_server_metrics),
                         collapsed=len(report.display_server_metrics) > 20,
@@ -2053,11 +2054,9 @@ class HtmlReportRenderer:
         self,
         rows: Sequence[Mapping[str, Any]],
     ) -> str:
-        rows = self._metric_table_rows(rows)
         metric_fields = (
             ("cpu_avg", "CPU"),
             ("mem_avg", "메모리"),
-            ("disk_avg", "파일시스템"),
         )
         candidates = []
         threshold_count = 0
@@ -2069,6 +2068,16 @@ class HtmlReportRenderer:
                     continue
                 candidates.append((value, row, label))
                 server_values.append(value)
+            for detail_key in ("os_fs_details", "data_fs_details"):
+                for detail in self._records(row.get(detail_key)):
+                    value = self._finite_number(detail.get("avg"))
+                    if value is None:
+                        continue
+                    mount = self._first_present(detail.get("mount")) or "-"
+                    candidates.append(
+                        (value, row, f"파일시스템 {mount}")
+                    )
+                    server_values.append(value)
             if any(
                 value >= UTILIZATION_ALERT_MIN_PERCENT
                 for value in server_values
@@ -2775,36 +2784,19 @@ class HtmlReportRenderer:
     def _is_percent_unit(unit: str) -> bool:
         return unit.strip().casefold() in {"%", "percent", "percentage"}
 
-    def _metric_table_rows(
-        self,
-        rows: Sequence[Mapping[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        prepared = []
-        for row in rows:
-            filesystem_averages = []
-            for key in ("os_fs_details", "data_fs_details"):
-                for detail in self._records(row.get(key)):
-                    try:
-                        value = float(detail.get("avg"))
-                    except (TypeError, ValueError):
-                        continue
-                    if math.isfinite(value):
-                        filesystem_averages.append(value)
-            prepared.append(
-                {
-                    **row,
-                    "disk_avg": (
-                        sum(filesystem_averages) / len(filesystem_averages)
-                        if filesystem_averages
-                        else None
-                    ),
-                }
-            )
-
-        return prepared
-
     def _metric_table(self, rows: List[Dict[str, Any]]) -> str:
-        prepared = self._metric_table_rows(rows)
+        prepared = [
+            {
+                **row,
+                "os_fs": self._filesystem_text(
+                    row.get("os_fs_details")
+                ),
+                "data_fs": self._filesystem_text(
+                    row.get("data_fs_details")
+                ),
+            }
+            for row in rows
+        ]
 
         return self._table(
             prepared,
@@ -2812,7 +2804,8 @@ class HtmlReportRenderer:
                 ("server_name", "서버"),
                 ("cpu_avg", "CPU 평균", "percent"),
                 ("mem_avg", "메모리 평균", "percent"),
-                ("disk_avg", "파일시스템 평균", "percent"),
+                ("os_fs", "OS 드라이브별 사용률"),
+                ("data_fs", "DATA 드라이브별 사용률"),
             ),
         )
 
@@ -3849,9 +3842,19 @@ class HtmlReportRenderer:
             if not isinstance(entry, dict):
                 continue
             mount = entry.get("mount") or "-"
-            average = self._number(entry.get("avg"), decimals=2)
-            maximum = self._number(entry.get("max"), decimals=2)
-            items.append(f"{mount}: 평균 {average}% / 최대 {maximum}%")
+            average = self._finite_number(entry.get("avg"))
+            maximum = self._finite_number(entry.get("max"))
+            average_text = (
+                f"{self._number(average, decimals=2)}%"
+                if average is not None else "-"
+            )
+            maximum_text = (
+                f"{self._number(maximum, decimals=2)}%"
+                if maximum is not None else "-"
+            )
+            items.append(
+                f"{mount} · 평균 {average_text} / 최대 {maximum_text}"
+            )
         return ", ".join(items) or "-"
 
     def _first(self, row: Dict[str, Any], *keys: str) -> Any:
