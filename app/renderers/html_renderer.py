@@ -58,25 +58,126 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     const buttons = Array.from(
       chart.querySelectorAll("[data-chart-toggle]")
     );
-    const isolate = button.getAttribute("aria-pressed") !== "true";
+    const selectedButtons = new Set(
+      buttons.filter((item) => item.getAttribute("aria-pressed") === "true")
+    );
+    if (selectedButtons.has(button)) {
+      selectedButtons.delete(button);
+    } else {
+      selectedButtons.add(button);
+    }
     buttons.forEach((item) => {
       const series = document.getElementById(item.dataset.chartToggle || "");
       if (!series || !chart.contains(series)) return;
-      const selected = isolate && item === button;
-      const visible = !isolate || selected;
+      const selected = selectedButtons.has(item);
+      const visible = selectedButtons.size === 0 || selected;
       item.setAttribute("aria-pressed", String(selected));
       item.classList.toggle("is-muted", !visible);
-      series.toggleAttribute("hidden", !visible);
+      series.classList.toggle("chart-series-hidden", !visible);
     });
+  };
+
+  const appendExportLegend = (chart, copy, viewBox) => {
+    const selected = Array.from(
+      chart.querySelectorAll("[data-chart-toggle]")
+    ).filter(
+      (button) => button.getAttribute("aria-pressed") === "true"
+    );
+    if (!selected.length) return;
+    // ponytail: Four labels keep the overlay clear;
+    // add export-only space if more are needed.
+    const items = selected.slice(0, 4).map((button) => {
+      const series = document.getElementById(button.dataset.chartToggle || "");
+      const label = button.querySelector("span");
+      const labelText = String(
+        (label && label.textContent) || button.textContent || "Series"
+      ).trim();
+      const line = series && series.querySelector(".chart-line");
+      return {
+        label: labelText.length > 30
+          ? `${labelText.slice(0, 14)}…${labelText.slice(-14)}`
+          : labelText,
+        color: (line && line.getAttribute("stroke")) || "#475569",
+      };
+    });
+
+    const namespace = "http://www.w3.org/2000/svg";
+    const group = document.createElementNS(namespace, "g");
+    group.setAttribute("data-chart-export-legend", "");
+    const add = (name, attributes, text = "") => {
+      const node = document.createElementNS(namespace, name);
+      Object.entries(attributes).forEach(
+        ([key, value]) => node.setAttribute(key, value)
+      );
+      node.textContent = text;
+      group.appendChild(node);
+    };
+    const chartWidth = viewBox && viewBox.width ? viewBox.width : 1000;
+    const extraCount = selected.length - items.length;
+    const rows = items.length + (extraCount ? 1 : 0);
+    const legendWidth = 250;
+    const startX = Math.max(60, chartWidth - legendWidth - 20);
+    add("rect", {
+      x: startX,
+      y: 10,
+      width: legendWidth,
+      height: 12 + rows * 18,
+      rx: 5,
+      fill: "#ffffff",
+      "fill-opacity": "0.94",
+      stroke: "#cbd5e1",
+    });
+    items.forEach((item, index) => {
+      const x = startX + 10;
+      const y = 27 + index * 18;
+      add("rect", {
+        x,
+        y: y - 10,
+        width: 9,
+        height: 9,
+        rx: 2,
+        fill: item.color,
+      });
+      add("text", {
+        x: x + 15,
+        y,
+        fill: "#334155",
+        "font-family": "Arial, sans-serif",
+        "font-size": "12",
+      }, item.label);
+    });
+    if (extraCount) {
+      add("text", {
+        x: startX + 10,
+        y: 27 + items.length * 18,
+        fill: "#64748b",
+        "font-family": "Arial, sans-serif",
+        "font-size": "11",
+      }, `외 ${extraCount}개 선택`);
+    }
+    copy.appendChild(group);
   };
 
   const downloadPng = (button) => {
     const chart = button.closest(".chart");
     const svg = chart && chart.querySelector("svg");
     if (!svg) return;
+    const size = chart.querySelector("[data-chart-export-width]");
+    const requestedWidth = Number(size && size.value);
+    const exportWidth = [1000, 2000, 3000].includes(requestedWidth)
+      ? requestedWidth
+      : 2000;
+    const viewBox = svg.viewBox && svg.viewBox.baseVal;
+    const aspectRatio = viewBox && viewBox.width
+      ? viewBox.height / viewBox.width
+      : 0.3;
+    const exportHeight = Math.round(exportWidth * aspectRatio);
     button.disabled = true;
     const copy = svg.cloneNode(true);
     copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    copy.setAttribute("width", exportWidth);
+    copy.setAttribute("height", exportHeight);
+    appendExportLegend(chart, copy, viewBox);
     const source = new XMLSerializer().serializeToString(copy);
     const sourceUrl = URL.createObjectURL(new Blob(
       [source], {type: "image/svg+xml;charset=utf-8"}
@@ -84,8 +185,8 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = 2000;
-      canvas.height = 600;
+      canvas.width = exportWidth;
+      canvas.height = exportHeight;
       const context = canvas.getContext("2d");
       context.fillStyle = "#ffffff";
       context.fillRect(0, 0, canvas.width, canvas.height);
@@ -1495,6 +1596,9 @@ class HtmlReportRenderer:
                         self._metric_table(report.display_server_metrics),
                         len(report.display_server_metrics),
                         collapsed=len(report.display_server_metrics) > 20,
+                        collapsed_summary=self._server_metric_summary(
+                            report.display_server_metrics
+                        ),
                     ),
                     self._metric_chart_section(
                         report.server_metrics,
@@ -1518,6 +1622,39 @@ class HtmlReportRenderer:
         billing_html = ""
         if display.billing_enabled:
             billing = display.billing
+            service_summary = self._numeric_rows_summary(
+                billing.service_summary,
+                "amount",
+                unit="원",
+                decimals=0,
+                empty="금액 수치 없음",
+            )
+            network_summary = self._numeric_rows_summary(
+                billing.network_summary,
+                "usage_gb",
+                unit="GB",
+                decimals=3,
+                empty="네트워크 사용량 수치 없음",
+            )
+            usage_totals: Dict[str, float] = defaultdict(float)
+            for row in billing.usage_summary:
+                value = self._finite_number(row.get("usage_quantity"))
+                if value is not None:
+                    unit = (
+                        str(row.get("unit_code") or "").strip()
+                        or "단위 미표시"
+                    )
+                    usage_totals[unit] += value
+            usage_parts = [
+                f"{unit} {self._number(total, 3)}"
+                for unit, total in sorted(usage_totals.items())[:3]
+            ]
+            usage_summary = (
+                "단위별 합계 " + " · ".join(usage_parts)
+                if usage_parts else "사용량 수치 없음"
+            )
+            if len(usage_totals) > 3:
+                usage_summary += f" · 기타 {len(usage_totals) - 3:,}개 단위"
             billing_html = "".join((
                 self._section(
                     "과금 데이터 기준",
@@ -1538,6 +1675,7 @@ class HtmlReportRenderer:
                     ),
                     len(billing.service_summary),
                     collapsed=True,
+                    collapsed_summary=service_summary,
                 ),
                 self._section(
                     billing.network_section_title,
@@ -1554,6 +1692,7 @@ class HtmlReportRenderer:
                     ),
                     len(billing.network_summary),
                     collapsed=True,
+                    collapsed_summary=network_summary,
                 ),
                 self._section(
                     billing.usage_section_title,
@@ -1570,6 +1709,7 @@ class HtmlReportRenderer:
                     ),
                     len(billing.usage_summary),
                     collapsed=True,
+                    collapsed_summary=usage_summary,
                 ),
             ))
 
@@ -1594,6 +1734,19 @@ class HtmlReportRenderer:
                 self._event_table(report.insight_events),
                 len(report.insight_events),
                 collapsed=True,
+                collapsed_summary=self._counted_values_summary(
+                    report.insight_events,
+                    ("severity", "level", "event_level", "status"),
+                    {
+                        "CRITICAL": "위험",
+                        "FATAL": "위험",
+                        "WARNING": "경고",
+                        "ERROR": "오류",
+                        "INFO": "정보",
+                    },
+                    empty="심각도 정보 없음",
+                    priority_labels=("위험", "오류", "경고", "정보"),
+                ),
             )
             if display.report_options.section_enabled("insight_events")
             else ""
@@ -1605,6 +1758,22 @@ class HtmlReportRenderer:
                 self._activity_table(display.activity_events),
                 len(display.activity_events),
                 collapsed=True,
+                collapsed_summary=self._counted_values_summary(
+                    display.activity_events,
+                    "result",
+                    {
+                        "SUCCESS": "성공",
+                        "SUCCEEDED": "성공",
+                        "FAIL": "실패",
+                        "FAILED": "실패",
+                        "FAILURE": "실패",
+                        "ERROR": "오류",
+                        "DENIED": "거부",
+                        "REJECTED": "거부",
+                    },
+                    empty="결과 정보 없음",
+                    priority_labels=("실패", "오류", "거부", "성공"),
+                ),
             )
             if display.report_options.section_enabled("activity_history")
             else ""
@@ -1627,6 +1796,13 @@ class HtmlReportRenderer:
                 len(diagnostics),
                 warning=bool(diagnostics),
                 collapsed=True,
+                collapsed_summary=self._counted_values_summary(
+                    diagnostics,
+                    "severity",
+                    {"ERROR": "오류", "WARNING": "경고"},
+                    empty="경고·오류 없음",
+                    priority_labels=("오류", "경고"),
+                ),
             )
         return {
             "insight_events": insight_events_html,
@@ -1767,11 +1943,18 @@ class HtmlReportRenderer:
         count: int | None,
         warning: bool = False,
         collapsed: bool = False,
+        collapsed_summary: str = "",
     ) -> str:
         status_class = " warning" if warning else ""
         count_html = (
             f'<span class="count">{count:,}건</span>'
             if count is not None
+            else ""
+        )
+        summary_html = (
+            '<small class="section-description section-summary">'
+            f'<strong>핵심</strong> · {self._text(collapsed_summary)}</small>'
+            if collapsed_summary
             else ""
         )
         if collapsed:
@@ -1780,6 +1963,7 @@ class HtmlReportRenderer:
       <summary class="section-heading">
         <span class="section-heading-copy">
           <span class="section-title" role="heading" aria-level="2">{self._text(title)}</span>
+          {summary_html}
           <small class="section-description">{self._text(description)}</small>
         </span>
         {count_html}
@@ -1797,6 +1981,119 @@ class HtmlReportRenderer:
       </div>
       {content}
     </section>"""
+
+    def _counted_values_summary(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        key: str | Sequence[str],
+        labels: Mapping[str, str],
+        *,
+        empty: str = "상태 정보 없음",
+        priority_labels: Sequence[str] = (),
+    ) -> str:
+        counts: Dict[str, int] = defaultdict(int)
+        keys = (key,) if isinstance(key, str) else key
+        for row in rows:
+            raw_value = self._first_present(
+                *(row.get(candidate) for candidate in keys)
+            ).strip()
+            if not raw_value:
+                continue
+            normalized = raw_value.upper()
+            counts[labels.get(normalized, raw_value)] += 1
+        if not counts:
+            return empty
+        priority = {
+            label: index for index, label in enumerate(priority_labels)
+        }
+        ranked = sorted(
+            counts,
+            key=lambda value: (
+                priority.get(value, len(priority)),
+                -counts[value],
+                value,
+            ),
+        )
+        parts = [
+            f"{value} {counts[value]:,}건"
+            for value in ranked[:3]
+        ]
+        if len(ranked) > 3:
+            parts.append(f"기타 {sum(counts[value] for value in ranked[3:]):,}건")
+        return " · ".join(parts)
+
+    def _numeric_rows_summary(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        key: str,
+        *,
+        unit: str,
+        decimals: int,
+        empty: str,
+    ) -> str:
+        values = []
+        for row in rows:
+            value = self._finite_number(row.get(key))
+            if value is not None:
+                values.append((value, row))
+        if not values:
+            return empty
+        top_value, top_row = max(values, key=lambda item: item[0])
+        top_label = self._first_present(
+            top_row.get("item_name"),
+            top_row.get("name"),
+            top_row.get("service_name"),
+        ) or "항목"
+        return (
+            f"합계 {self._number(sum(value for value, _ in values), decimals)}{unit}"
+            f" · 최대 {top_label} {self._number(top_value, decimals)}{unit}"
+        )
+
+    def _server_metric_summary(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> str:
+        rows = self._metric_table_rows(rows)
+        metric_fields = (
+            ("cpu_avg", "CPU"),
+            ("mem_avg", "메모리"),
+            ("disk_avg", "파일시스템"),
+        )
+        candidates = []
+        threshold_count = 0
+        for row in rows:
+            server_values = []
+            for key, label in metric_fields:
+                value = self._finite_number(row.get(key))
+                if value is None:
+                    continue
+                candidates.append((value, row, label))
+                server_values.append(value)
+            if any(
+                value >= UTILIZATION_ALERT_MIN_PERCENT
+                for value in server_values
+            ):
+                threshold_count += 1
+        if not candidates:
+            return "사용률 데이터 없음"
+        value, row, label = max(candidates, key=lambda item: item[0])
+        server_name = self._first_present(
+            row.get("server_name"), row.get("server_id")
+        ) or "서버"
+        return (
+            "평균 "
+            f"{self._number(UTILIZATION_ALERT_MIN_PERCENT, 0)}% 이상 "
+            f"{threshold_count:,}대 · 기간 평균 최고 "
+            f"{server_name} {label} {self._number(value, 2)}%"
+        )
+
+    @staticmethod
+    def _finite_number(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
 
     def _infrastructure_section(
         self,
@@ -1910,6 +2207,12 @@ class HtmlReportRenderer:
             content,
             len(prepared),
             collapsed=True,
+            collapsed_summary=self._counted_values_summary(
+                prepared,
+                "category",
+                RESOURCE_CATEGORY_LABELS,
+                empty="자원 유형 정보 없음",
+            ),
         )
 
     def _server_section(
@@ -1988,6 +2291,23 @@ class HtmlReportRenderer:
             self._table(prepared, tuple(columns)),
             len(prepared),
             collapsed=True,
+            collapsed_summary=self._counted_values_summary(
+                prepared,
+                "status",
+                {
+                    "RUN": "운영",
+                    "RUNNING": "운영",
+                    "STOP": "정지",
+                    "STOPPED": "정지",
+                    "INIT": "초기화",
+                    "CREATING": "생성 중",
+                    "TERMINATED": "반납",
+                },
+                empty="서버 상태 정보 없음",
+                priority_labels=(
+                    "정지", "반납", "생성 중", "초기화", "운영"
+                ),
+            ),
         )
 
     def _resource_membership_label(
@@ -2073,6 +2393,8 @@ class HtmlReportRenderer:
         route_rows = []
         acg_rule_rows = []
         network_acl_rule_rows = []
+        acg_rule_count = 0
+        network_acl_rule_count = 0
         for resource in configurations:
             category = str(resource.get("category") or "").upper()
             details = self._mapping(resource.get("details"))
@@ -2110,6 +2432,7 @@ class HtmlReportRenderer:
                     })
             elif category == "ACCESS_CONTROL_GROUP":
                 rules = self._records(details.get("rules"))
+                acg_rule_count += len(rules)
                 if not rules:
                     acg_rule_rows.append({
                         "group": resource.get("resource_name"),
@@ -2133,6 +2456,7 @@ class HtmlReportRenderer:
                     })
             elif category == "NETWORK_ACL":
                 rules = self._records(details.get("rules"))
+                network_acl_rule_count += len(rules)
                 if not rules:
                     network_acl_rule_rows.append({
                         "network_acl": resource.get("resource_name"),
@@ -2232,6 +2556,18 @@ class HtmlReportRenderer:
             len(configurations),
             warning=not in_period,
             collapsed=True,
+            collapsed_summary=(
+                f"{period_basis} · "
+                + self._counted_values_summary(
+                    configurations,
+                    "category",
+                    RESOURCE_CATEGORY_LABELS,
+                    empty="구성 객체 없음",
+                )
+                + f" · 실제 규칙 Route {len(route_rows):,}건"
+                + f" · ACG {acg_rule_count:,}건"
+                + f" · NACL {network_acl_rule_count:,}건"
+            ),
         )
 
     def _infrastructure_details_text(self, value: Any) -> str:
@@ -2390,7 +2726,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 누르면 해당 자원만 보이고, 다시 누르면 전체를 표시합니다.</p>
+          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 눌러 비교할 자원을 여러 개 선택할 수 있으며, 선택이 없으면 전체를 표시합니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
@@ -2439,7 +2775,10 @@ class HtmlReportRenderer:
     def _is_percent_unit(unit: str) -> bool:
         return unit.strip().casefold() in {"%", "percent", "percentage"}
 
-    def _metric_table(self, rows: List[Dict[str, Any]]) -> str:
+    def _metric_table_rows(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
         prepared = []
         for row in rows:
             filesystem_averages = []
@@ -2461,6 +2800,11 @@ class HtmlReportRenderer:
                     ),
                 }
             )
+
+        return prepared
+
+    def _metric_table(self, rows: List[Dict[str, Any]]) -> str:
+        prepared = self._metric_table_rows(rows)
 
         return self._table(
             prepared,
@@ -2542,7 +2886,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>All Server 사용률 추이</h2>
-          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 누르면 해당 서버만 보이고, 다시 누르면 전체를 표시합니다.</p>
+          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 눌러 비교할 서버를 여러 대 선택할 수 있으며, 선택이 없으면 전체를 표시합니다.</p>
         </div>
         <span class="count">{len(charts):,}개 그룹</span>
       </div>
@@ -2870,15 +3214,20 @@ class HtmlReportRenderer:
             f'aria-label="{self._text(title)} '
             f'{self._text(aggregation_label)} 변화 그래프">'
             '<div class="chart-toolbar">'
+            '<label>PNG 크기 <select data-chart-export-width>'
+            '<option value="1000">1000 × 300</option>'
+            '<option value="2000" selected>2000 × 600</option>'
+            '<option value="3000">3000 × 900</option>'
+            '</select></label>'
             '<button type="button" data-chart-download>그래프 PNG 저장</button>'
             '</div>'
             f'<svg viewBox="0 0 {width} {height}" '
             'preserveAspectRatio="xMidYMid meet" role="img" '
             f'aria-label="{self._text(title)}">'
             '<style>.chart-grid-line{stroke:#e2e8f0;stroke-width:1}'
-            '.chart-axis-label{fill:#64748b;font:11px Arial,sans-serif}'
+            '.chart-axis-label{fill:#64748b;font:13px Arial,sans-serif}'
             '.chart-line{fill:none;stroke-width:2.4;stroke-linejoin:round;'
-            'stroke-linecap:round}[hidden]{display:none}</style>'
+            'stroke-linecap:round}.chart-series-hidden{display:none}</style>'
             + "".join(grid_parts)
             + "".join(line_parts)
             + "</svg><div class=\"chart-legend\">"
@@ -3632,6 +3981,8 @@ class HtmlReportRenderer:
         if not accounts:
             return ""
         articles = []
+        cost_totals: Dict[str, float] = defaultdict(float)
+        available_cost_types = set()
         for account in accounts:
             facts = {
                 str(item.get("cost_type")): item
@@ -3640,6 +3991,14 @@ class HtmlReportRenderer:
             confirmed = facts.get("CONFIRMED", {})
             current_provisional = facts.get("CURRENT_PROVISIONAL", {})
             projection = facts.get("MONTH_END_PROJECTION", {})
+            for cost_type, fact in (
+                ("CONFIRMED", confirmed),
+                ("CURRENT_PROVISIONAL", current_provisional),
+            ):
+                amount = self._finite_number(fact.get("total_amount"))
+                if amount is not None:
+                    cost_totals[cost_type] += amount
+                    available_cost_types.add(cost_type)
             confirmed_services = self._records(account.get("service_summary"))
             expected_services = self._records(
                 account.get("current_service_summary")
@@ -3679,12 +4038,23 @@ class HtmlReportRenderer:
                 ))
                 + "</article>"
             )
+        cost_summary = []
+        if "CONFIRMED" in available_cost_types:
+            cost_summary.append(
+                f"확정 합계 {self._number(cost_totals['CONFIRMED'], 0)}원"
+            )
+        if "CURRENT_PROVISIONAL" in available_cost_types:
+            cost_summary.append(
+                "현재월 예상 합계(VAT 전) "
+                f"{self._number(cost_totals['CURRENT_PROVISIONAL'], 0)}원"
+            )
         return self._section(
             "Organization 계정별 비용",
             "Organization 마스터 계정으로 확인된 경우에만 하위 계정별 비용을 표시합니다.",
             '<div class="billing-facts">' + "".join(articles) + "</div>",
             len(accounts),
             collapsed=True,
+            collapsed_summary=" · ".join(cost_summary) or "비용 수치 없음",
         )
 
     def _records(self, value: Any) -> List[Dict[str, Any]]:

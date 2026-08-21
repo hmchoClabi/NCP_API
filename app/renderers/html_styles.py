@@ -278,6 +278,7 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 2.9rem); line-height: 1.15; letter-s
   color: var(--muted);
   font-size: .88rem;
 }
+.section-summary { color: var(--brand-dark); font-weight: 650; }
 .report-disclosure > summary .count { margin-left: auto; }
 .technical-appendix > summary::after,
 .report-disclosure > summary::after {
@@ -389,7 +390,7 @@ tbody tr:hover { background: #f0fdf4; }
 .resource-change-name { color: #0f172a; font-weight: 850; }
 .chart-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 .chart-card {
@@ -401,8 +402,22 @@ tbody tr:hover { background: #f0fdf4; }
 }
 .chart-heading h3 { margin: 0; font-size: 1rem; }
 .chart-heading p { margin: 3px 0 12px; color: var(--muted); font-size: .82rem; }
-.chart-toolbar { display: flex; justify-content: flex-end; margin: -4px 0 6px; }
-.chart-toolbar button {
+.chart-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: -4px 0 6px;
+}
+.chart-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: .75rem;
+}
+.chart-toolbar button, .chart-toolbar select {
   padding: 6px 10px;
   color: #1d4ed8;
   background: #eff6ff;
@@ -413,11 +428,11 @@ tbody tr:hover { background: #f0fdf4; }
   font-size: .75rem;
   font-weight: 750;
 }
-.chart-toolbar button:hover { background: #dbeafe; }
+.chart-toolbar button:hover, .chart-toolbar select:hover { background: #dbeafe; }
 .chart-toolbar button:disabled { cursor: wait; opacity: .55; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-grid-line { stroke: #e2e8f0; stroke-width: 1; }
-.chart-axis-label { fill: #64748b; font-size: 11px; }
+.chart-axis-label { fill: #64748b; font-size: 13px; }
 .chart-line {
   fill: none;
   stroke-width: 2.4;
@@ -444,9 +459,11 @@ tbody tr:hover { background: #f0fdf4; }
   font-size: .76rem;
 }
 .chart-legend-item:hover { background: #f1f5f9; }
+.chart-legend-item[aria-pressed="true"] { color: #1d4ed8; background: #eff6ff; }
 .chart-legend-item.is-muted { opacity: .42; text-decoration: line-through; }
 .chart-legend-item:focus-visible,
-.chart-toolbar button:focus-visible { outline: 3px solid rgba(37, 99, 235, .35); }
+.chart-toolbar button:focus-visible,
+.chart-toolbar select:focus-visible { outline: 3px solid rgba(37, 99, 235, .35); }
 [data-chart-series] { cursor: pointer; }
 .chart-legend-item i {
   width: 9px;
@@ -513,7 +530,7 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
   .chart-toolbar, .chart-legend { display: none; }
-  [data-chart-series][hidden] { display: inline !important; }
+  .chart-series-hidden { display: inline !important; }
   .report-section { padding: 18px; }
   .technical-appendix { border: 0; }
   .technical-appendix > summary { display: none; }

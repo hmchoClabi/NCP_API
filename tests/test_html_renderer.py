@@ -1,5 +1,8 @@
 import base64
 import hashlib
+import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -186,14 +189,23 @@ class HtmlReportRendererTests(unittest.TestCase):
             html.count('<button type="button" data-chart-download>'),
             3,
         )
+        self.assertEqual(html.count("<select data-chart-export-width>"), 3)
+        self.assertIn('<option value="1000">1000 × 300</option>', html)
+        self.assertIn('<option value="2000" selected>2000 × 600</option>', html)
+        self.assertIn('<option value="3000">3000 × 900</option>', html)
         self.assertIn("PNG 저장", html)
-        self.assertIn('series.toggleAttribute("hidden", !visible)', html)
+        self.assertIn('group.setAttribute("data-chart-export-legend", "")', html)
+        self.assertIn("const items = selected.slice(0, 4)", html)
         self.assertIn(
-            'const selected = isolate && item === button;',
+            'series.classList.toggle("chart-series-hidden", !visible)',
             html,
         )
         self.assertIn(
-            'item.setAttribute("aria-pressed", String(selected));',
+            "const selectedButtons = new Set(",
+            html,
+        )
+        self.assertIn(
+            "const visible = selectedButtons.size === 0 || selected;",
             html,
         )
         self.assertIn(
@@ -201,8 +213,18 @@ class HtmlReportRendererTests(unittest.TestCase):
             'aria-controls="server-chart-1-series-1" aria-pressed="false"',
             html,
         )
-        self.assertIn("해당 서버만 보이고", html)
-        self.assertIn("다시 누르면 전체를 표시", html)
+        self.assertIn("비교할 서버를 여러 대 선택", html)
+        self.assertIn("선택이 없으면 전체를 표시", html)
+        self.assertIn(
+            "grid-template-columns: repeat(2, minmax(0, 1fr))",
+            html,
+        )
+        self.assertIn(".chart-axis-label { fill: #64748b; font-size: 13px; }", html)
+        self.assertIn("font:13px Arial,sans-serif", html)
+        self.assertIn(
+            ".chart-series-hidden { display: inline !important; }",
+            html,
+        )
         self.assertNotIn('data-chart-series tabindex=', html)
         self.assertNotIn('series.setAttribute("aria-pressed"', html)
         self.assertNotIn('document.addEventListener("keydown"', html)
@@ -240,6 +262,315 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertEqual(
             HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE,
             f"'sha256-{script_hash}'",
+        )
+
+    def test_collapsed_sections_expose_escaped_decision_summaries(self):
+        renderer = HtmlReportRenderer()
+        html = renderer.render(self._sample_report())
+
+        self.assertIn(
+            "<strong>핵심</strong> · 합계 12,345원 · "
+            "최대 Server 12,345원",
+            html,
+        )
+        self.assertIn("<strong>핵심</strong> · 경고 1건", html)
+        self.assertIn("<strong>핵심</strong> · 성공 1건", html)
+        self.assertIn(
+            ".section-summary { color: var(--brand-dark); font-weight: 650; }",
+            html,
+        )
+        collapsed_headers = [
+            fragment.split("</summary>", 1)[0]
+            for fragment in html.split(
+                '<details class="report-section report-disclosure'
+            )[1:]
+        ]
+        self.assertTrue(collapsed_headers)
+        self.assertTrue(all(
+            'class="section-description section-summary"' in header
+            for header in collapsed_headers
+        ))
+        self.assertEqual(
+            renderer._counted_values_summary(
+                [
+                    {"severity": "CRITICAL"},
+                    {"severity": "FATAL"},
+                    {"severity": "WARNING"},
+                    {"severity": "ERROR"},
+                    *([{"severity": "INFO"}] * 5),
+                ],
+                "severity",
+                {
+                    "CRITICAL": "위험",
+                    "FATAL": "위험",
+                    "WARNING": "경고",
+                    "ERROR": "오류",
+                    "INFO": "정보",
+                },
+                priority_labels=("위험", "오류", "경고", "정보"),
+            ),
+            "위험 2건 · 오류 1건 · 경고 1건 · 기타 5건",
+        )
+        self.assertEqual(
+            renderer._numeric_rows_summary(
+                [{
+                    "service_name": "Network",
+                    "name": "Internet Outbound",
+                    "usage_gb": 2,
+                }],
+                "usage_gb",
+                unit="GB",
+                decimals=3,
+                empty="없음",
+            ),
+            "합계 2.000GB · 최대 Internet Outbound 2.000GB",
+        )
+        self.assertEqual(
+            renderer._server_metric_summary(
+                self._sample_report().display_server_metrics
+            ),
+            "평균 90% 이상 0대 · 기간 평균 최고 web-01 "
+            "메모리 50.00%",
+        )
+        many_servers = self._sample_report()
+        metric = many_servers.server_metrics[0]
+        many_servers.server_metrics = [
+            {**metric, "server_name": f"web-{index:02d}", "raw_metrics": {}}
+            for index in range(1, 22)
+        ]
+        utilization = renderer.render(many_servers).split(
+            "서버 이용 현황", 1
+        )[1].split("</summary>", 1)[0]
+        self.assertIn(
+            "평균 90% 이상 0대 · 기간 평균 최고 web-01 메모리 50.00%",
+            utilization,
+        )
+        organization = renderer._organization_cost_sections([{
+            "display_name": "Member",
+            "member_no": "member-1",
+            "cost_facts": [{
+                "cost_type": "CURRENT_PROVISIONAL",
+                "total_amount": 1000,
+            }],
+        }])
+        self.assertIn(
+            "현재월 예상 합계(VAT 전) 1,000원",
+            organization.split("</summary>", 1)[0],
+        )
+        section = renderer._section(
+            "제목",
+            "설명",
+            "본문",
+            1,
+            collapsed=True,
+            collapsed_summary="<script>alert(1)</script>",
+        )
+        self.assertIn(
+            "&lt;script&gt;alert(1)&lt;/script&gt;",
+            section,
+        )
+        self.assertNotIn("<script>alert(1)</script>", section)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_chart_script_multi_selects_series_and_uses_export_size(self):
+        html = HtmlReportRenderer().render(self._sample_report())
+        script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        harness = f"""
+const assert = require("assert");
+const handlers = {{}};
+class ClassList {{
+  constructor() {{ this.values = new Set(); }}
+  toggle(name, enabled) {{
+    if (enabled) this.values.add(name); else this.values.delete(name);
+  }}
+}}
+let chart;
+class ChartNode {{
+  constructor(kind, id = "") {{
+    this.kind = kind;
+    this.id = id;
+    this.dataset = {{}};
+    this.attributes = new Map();
+    this.classList = new ClassList();
+    this.disabled = false;
+    this.label = "";
+    this.color = "";
+  }}
+  getAttribute(name) {{ return this.attributes.get(name) ?? null; }}
+  setAttribute(name, value) {{ this.attributes.set(name, String(value)); }}
+  querySelector(selector) {{
+    if (selector === "span" && this.kind === "button") {{
+      return {{textContent: this.label}};
+    }}
+    if (selector === ".chart-line" && this.kind === "series") {{
+      return {{getAttribute: (name) => name === "stroke" ? this.color : null}};
+    }}
+    return null;
+  }}
+  closest(selector) {{
+    if (selector === ".chart") return chart;
+    if (selector === "[data-chart-toggle]" && this.kind === "button") return this;
+    if (selector === "[data-chart-series]" && this.kind === "series") return this;
+    if (selector === "[data-chart-download]" && this.kind === "download") return this;
+    return null;
+  }}
+}}
+const colors = ["#15803d", "#2563eb", "#c2410c", "#8b5cf6", "#0891b2"];
+const series = [1, 2, 3, 4, 5].map((number, index) => {{
+  const item = new ChartNode("series", `chart-series-${{number}}`);
+  item.color = colors[index];
+  return item;
+}});
+const buttons = series.map((item, index) => {{
+  const button = new ChartNode("button");
+  button.dataset.chartToggle = item.id;
+  button.setAttribute("aria-pressed", "false");
+  button.label = `server-${{index + 1}}`;
+  return button;
+}});
+const exportSize = {{value: "3000"}};
+const exportedSvgAttributes = new Map();
+let copiedSvg;
+class SvgElement {{
+  constructor(name) {{
+    this.name = name;
+    this.attributes = new Map();
+    this.children = [];
+    this.textContent = "";
+  }}
+  setAttribute(name, value) {{
+    this.attributes.set(name, String(value));
+    if (this.name === "svg") exportedSvgAttributes.set(name, String(value));
+  }}
+  appendChild(child) {{ this.children.push(child); return child; }}
+}}
+const svg = {{
+  viewBox: {{baseVal: {{width: 1000, height: 300}}}},
+  cloneNode() {{
+    copiedSvg = new SvgElement("svg");
+    return copiedSvg;
+  }},
+}};
+const canvas = {{
+  width: 0,
+  height: 0,
+  getContext() {{
+    return {{fillStyle: "", fillRect() {{}}, drawImage() {{}}}};
+  }},
+  toDataURL() {{ return "data:image/png;base64,test"; }},
+}};
+let downloaded = false;
+const link = {{href: "", download: "", click() {{ downloaded = true; }}}};
+const download = new ChartNode("download");
+chart = {{
+  id: "chart",
+  getAttribute(name) {{ return name === "aria-label" ? "CPU graph" : null; }},
+  querySelectorAll(selector) {{
+    return selector === "[data-chart-toggle]" ? buttons : [];
+  }},
+  querySelector(selector) {{
+    if (selector === "svg") return svg;
+    if (selector === "[data-chart-export-width]") return exportSize;
+    return null;
+  }},
+  contains(item) {{ return series.includes(item); }},
+}};
+global.document = {{
+  getElementById(id) {{ return series.find((item) => item.id === id) || null; }},
+  addEventListener(name, handler) {{ handlers[name] = handler; }},
+  createElement(name) {{ return name === "canvas" ? canvas : link; }},
+  createElementNS(namespace, name) {{ return new SvgElement(name); }},
+}};
+global.XMLSerializer = class {{ serializeToString() {{ return "<svg/>"; }} }};
+global.URL = {{createObjectURL() {{ return "blob:test"; }}, revokeObjectURL() {{}}}};
+global.Blob = class {{}};
+global.Image = class {{ set src(value) {{ this.onload(); }} }};
+eval({json.dumps(script)});
+const click = (target) => handlers.click({{target}});
+const hidden = () => series.map(
+  (item) => item.classList.values.has("chart-series-hidden")
+);
+click(buttons[0]);
+assert.deepStrictEqual(
+  hidden(),
+  [false, true, true, true, true]
+);
+click(buttons[1]);
+assert.deepStrictEqual(
+  hidden(),
+  [false, false, true, true, true]
+);
+click(series[0]);
+assert.deepStrictEqual(
+  hidden(),
+  [true, false, true, true, true]
+);
+click(series[1]);
+assert.deepStrictEqual(
+  hidden(),
+  [false, false, false, false, false]
+);
+assert.deepStrictEqual(
+  buttons.map((item) => item.getAttribute("aria-pressed")),
+  ["false", "false", "false", "false", "false"]
+);
+click(download);
+assert(!copiedSvg.children.some(
+  (item) => item.attributes.get("data-chart-export-legend") === ""
+));
+downloaded = false;
+click(buttons[0]);
+click(buttons[1]);
+click(download);
+assert.strictEqual(canvas.width, 3000);
+assert.strictEqual(canvas.height, 900);
+assert.strictEqual(exportedSvgAttributes.get("width"), "3000");
+assert.strictEqual(exportedSvgAttributes.get("height"), "900");
+assert.strictEqual(downloaded, true);
+const legend = copiedSvg.children.find(
+  (item) => item.attributes.get("data-chart-export-legend") === ""
+);
+assert(legend);
+const legendTexts = legend.children
+  .filter((item) => item.name === "text")
+  .map((item) => item.textContent);
+assert.deepStrictEqual(legendTexts, ["server-1", "server-2"]);
+const legendColors = legend.children
+  .filter((item) => item.name === "rect")
+  .map((item) => item.attributes.get("fill"));
+assert(legendColors.includes("#15803d"));
+assert(legendColors.includes("#2563eb"));
+assert(!legendColors.includes("#c2410c"));
+exportSize.value = "999999";
+click(buttons[2]);
+click(buttons[3]);
+click(buttons[4]);
+click(download);
+assert.strictEqual(canvas.width, 2000);
+assert.strictEqual(canvas.height, 600);
+assert.strictEqual(exportedSvgAttributes.get("width"), "2000");
+assert.strictEqual(exportedSvgAttributes.get("height"), "600");
+const cappedLegend = copiedSvg.children.find(
+  (item) => item.attributes.get("data-chart-export-legend") === ""
+);
+assert.deepStrictEqual(
+  cappedLegend.children
+    .filter((item) => item.name === "text")
+    .map((item) => item.textContent),
+  ["server-1", "server-2", "server-3", "server-4", "외 1개 선택"]
+);
+"""
+
+        completed = subprocess.run(
+            [shutil.which("node"), "-e", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
         )
 
     def test_operational_report_leads_with_actions_and_folds_details(self):
@@ -809,6 +1140,10 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("empty-nacl", section)
         self.assertIn("ACG 수집 완료, 명시 규칙 0건", section)
         self.assertIn("NACL 수집 완료, 명시 규칙 0건", section)
+        self.assertIn(
+            "실제 규칙 Route 1건 · ACG 1건 · NACL 1건",
+            section,
+        )
 
     def test_infrastructure_charts_preserve_metric_units(self):
         report = self._sample_report()
@@ -907,7 +1242,7 @@ class HtmlReportRendererTests(unittest.TestCase):
 
         html = HtmlReportRenderer().render(report)
         monitoring = html.split("<h2>주요 인프라 모니터링</h2>", 1)[1]
-        self.assertIn("범례나 선을 누르면 해당 자원만 보이고", monitoring)
+        self.assertIn("비교할 자원을 여러 개 선택", monitoring)
         lb_chart = monitoring.split(
             "<h3>Load Balancer · 수신 트래픽</h3>",
             1,
@@ -1945,6 +2280,10 @@ class HtmlReportRendererTests(unittest.TestCase):
         )[0]
 
         self.assertEqual(html.count(">수집 진단</span>"), 1)
+        self.assertIn(
+            "<strong>핵심</strong> · 오류 1건 · 경고 1건",
+            diagnostics,
+        )
         self.assertNotIn("<h2>수집 경고</h2>", html)
         self.assertNotIn("<h2>수집 오류</h2>", html)
         for heading in (
