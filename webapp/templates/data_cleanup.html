@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% macro file_size(value) -%}
+  {% set size = value|int %}
+  {% if size >= 1073741824 %}{{ '%.2f'|format(size / 1073741824) }} GiB
+  {% elif size >= 1048576 %}{{ '%.1f'|format(size / 1048576) }} MiB
+  {% elif size >= 1024 %}{{ '%.1f'|format(size / 1024) }} KiB
+  {% else %}{{ size }} B{% endif %}
+{%- endmacro %}
+{% set protection_labels = {
+  'ACTIVE': '실행 중',
+  'LATEST': '계정·보고서 유형별 최신 정상본',
+  'RETENTION': '보존 기한 내'
+} %}
+{% block title %}데이터 정리{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <span class="eyebrow">DATA CLEANUP</span>
+    <h1>데이터 정리</h1>
+    <p>삭제 대상과 예상 용량을 확인한 뒤 보고서를 명시적으로 선택하세요.</p>
+  </div>
+  <span class="count-pill">{{ reports|length }}건 표시 · 목록 상한 500건</span>
+</header>
+
+<section class="stat-grid" aria-label="정리 미리보기 요약">
+  <article class="stat-card blue"><span>표시 보고서</span><strong>{{ reports|length }}</strong><small>현재 접근 범위</small></article>
+  <article class="stat-card"><span>정리 가능</span><strong>{{ summary.eligible_reports }}</strong><small>명시적 선택 가능</small></article>
+  <article class="stat-card violet"><span>보호됨</span><strong>{{ summary.protected_reports }}</strong><small>유형별 최신본·실행 중·보존 기한</small></article>
+  <article class="stat-card alert"><span>예상 정리 용량</span><strong>{{ file_size(summary.artifact_bytes) }}</strong><small>등록 산출물 {{ summary.artifact_count }}개 기준</small></article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h2>보고서별 미리보기</h2>
+      <p>정리하면 보고서와 연결된 수집 데이터가 함께 삭제되며 복구할 수 없습니다.</p>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('run_data_cleanup') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if reports %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">선택</th><th scope="col">고객·계정</th><th scope="col">보고서</th><th scope="col">생성 시각</th><th scope="col">산출물</th><th scope="col">정리 상태</th></tr></thead>
+        <tbody>
+        {% for report in reports %}
+          <tr>
+            <td><input type="checkbox" name="report_id" value="{{ report.id }}" aria-label="{{ report.customer_name }} {{ report.account_name or '기본 계정' }} {{ report.created_at|kst }} 보고서 선택"{% if not report.eligible %} disabled{% endif %}></td>
+            <td><strong>{{ report.customer_name }}</strong><small><span class="tag {{ report.environment }}">{{ '공공' if report.environment == 'gov' else '민간' }}</span> · {{ report.account_name or '기본 계정' }}</small></td>
+            <td><strong>{{ report.report_type }} · {{ report.status }}</strong><small>{{ report.period_start|kst('%Y-%m-%d %H:%M') }} ~ {{ report.period_end|inclusive_end|kst('%Y-%m-%d %H:%M') }}</small></td>
+            <td>{{ report.created_at|kst }}</td>
+            <td><strong>{{ file_size(report.artifact_bytes) }}</strong><small>{{ report.artifact_count }}개</small></td>
+            <td>
+              {% if report.eligible %}
+              <span class="status ok">정리 가능</span>
+              {% else %}
+              <span class="status warn">보호됨</span>
+              <small>{{ protection_labels.get(report.protection_reason, report.protection_reason) }}{% if report.protection_reason == 'RETENTION' and report.retention_until %} · {{ report.retention_until }}까지{% endif %}</small>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty compact"><p>현재 접근 범위에 보고서가 없습니다.</p></div>
+    {% endif %}
+
+    <div class="lifecycle-action permanent-action">
+      <div>
+        <strong>선택 보고서 영구 삭제</strong>
+        <p>실행 직전에 권한·최신 정상본·보존 기한을 다시 검증합니다. 공유 또는 내용이 변경된 파일은 삭제하지 않고 안전한 재시도 큐에 남깁니다.</p>
+        <small class="muted">예상 용량은 DB에 등록된 산출물 기준이며, 공유 참조와 구버전 파일에 따라 실제 확보 용량은 달라질 수 있습니다. 한 번에 최대 {{ max_selection }}건입니다.</small>
+      </div>
+      <div class="danger-form">
+        <label>확인 문구
+          <input name="confirm_phrase" required autocomplete="off" placeholder="{{ confirm_phrase }}">
+        </label>
+        <button class="danger-button" type="submit"{% if not summary.eligible_reports %} disabled{% endif %}>선택 항목 정리</button>
+      </div>
+    </div>
+  </form>
+</section>
+{% endblock %}

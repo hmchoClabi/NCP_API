@@ -26,6 +26,8 @@ class FakePortalRepository:
         self.anonymized_tenants = []
         self.permanently_deleted_tenants = []
         self.deleted_reports = []
+        self.delete_report_protections = []
+        self.cleanup_candidate_scopes = []
         self.created_msp_users = []
         self.updated_msp_users = []
         self.msp_status_error = None
@@ -230,14 +232,53 @@ class FakePortalRepository:
         )
         return "Customer", 1
 
-    def delete_report(self, report_id, actor_id):
+    def delete_report(self, report_id, actor_id, *, protect_latest=False):
         self.deleted_reports.append((report_id, actor_id))
+        self.delete_report_protections.append(protect_latest)
         return {
             "tenant_id": "tenant-1",
             "customer_name": "Customer",
             "removed_artifact_files": 1,
             "failed_artifact_files": 0,
         }
+
+    def report_cleanup_candidates(self, allowed_environments=None):
+        self.cleanup_candidate_scopes.append(allowed_environments)
+        return [{
+            "id": "report-old",
+            "tenant_id": "tenant-1",
+            "customer_name": "Customer",
+            "environment": "public",
+            "account_name": "Primary",
+            "report_type": "DAILY",
+            "status": "SUCCESS",
+            "period_start": datetime(2026, 7, 1, tzinfo=timezone.utc),
+            "period_end": datetime(2026, 7, 2, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+            "artifact_count": 2,
+            "artifact_bytes": 1_572_864,
+            "retention_until": None,
+            "protection_reason": None,
+            "eligible": True,
+        }, {
+            "id": "report-1",
+            "tenant_id": "tenant-1",
+            "customer_name": "Customer",
+            "environment": "public",
+            "account_name": "Primary",
+            "report_type": "DAILY",
+            "status": "SUCCESS",
+            "period_start": datetime(2026, 8, 1, tzinfo=timezone.utc),
+            "period_end": datetime(2026, 8, 2, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
+            "artifact_count": 1,
+            "artifact_bytes": 524_288,
+            "retention_until": None,
+            "protection_reason": "LATEST",
+            "eligible": False,
+        }]
 
     def schedule_environment(self, schedule_id):
         return "public" if schedule_id == "schedule-1" else None
@@ -422,6 +463,8 @@ class WebAppTests(unittest.TestCase):
                 "msp_dashboard": ("/msp", ("GET",)),
                 "msp_customers": ("/msp/customers/<environment>", ("GET",)),
                 "msp_schedules": ("/msp/schedules", ("GET",)),
+                "msp_data_cleanup": ("/msp/data-cleanup", ("GET",)),
+                "run_data_cleanup": ("/msp/data-cleanup", ("POST",)),
                 "msp_users": ("/msp/users", ("GET",)),
                 "create_portal_user": ("/msp/users", ("POST",)),
                 "create_msp_user": ("/msp/users/platform", ("POST",)),
@@ -566,8 +609,10 @@ class WebAppTests(unittest.TestCase):
     def test_customer_viewer_cannot_open_user_management(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         response = self.client.get("/msp/users")
+        cleanup_response = self.client.get("/msp/data-cleanup")
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(cleanup_response.status_code, 403)
         self.assertEqual(self.repository.created_portal_users, [])
 
     def test_customer_viewer_cannot_create_msp_user_or_bulk_schedule(self):
@@ -1080,6 +1125,74 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn(b'<option value="MSP_ADMIN">', response.data)
         self.assertNotIn(b'name="environment_scope" required', response.data)
         self.assertIn(b"customer@example.com", response.data)
+
+    def test_msp_admin_cleanup_preview_marks_current_report_as_protected(self):
+        response = self.client.get("/msp/data-cleanup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("데이터 정리".encode("utf-8"), response.data)
+        self.assertIn(
+            "계정·보고서 유형별 최신 정상본".encode("utf-8"),
+            response.data,
+        )
+        self.assertIn(b'value="report-old"', response.data)
+        self.assertIn(b'value="report-1"', response.data)
+        self.assertRegex(
+            response.data.decode("utf-8"),
+            r'value="report-1"[^>]+disabled',
+        )
+        self.assertIn(b"1.5 MiB", response.data)
+
+    def test_msp_admin_cleanup_requires_phrase_and_eligible_selection(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        wrong_phrase = self.client.post(
+            "/msp/data-cleanup",
+            data={
+                "csrf_token": "csrf-token",
+                "report_id": "report-old",
+                "confirm_phrase": "삭제",
+            },
+        )
+        protected = self.client.post(
+            "/msp/data-cleanup",
+            data={
+                "csrf_token": "csrf-token",
+                "report_id": "report-1",
+                "confirm_phrase": "선택 보고서 삭제",
+            },
+        )
+
+        self.assertEqual(wrong_phrase.status_code, 302)
+        self.assertEqual(protected.status_code, 302)
+        self.assertEqual(self.repository.deleted_reports, [])
+
+    def test_msp_admin_can_cleanup_an_explicitly_selected_report(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/data-cleanup",
+            data={
+                "csrf_token": "csrf-token",
+                "report_id": "report-old",
+                "confirm_phrase": "선택 보고서 삭제",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.deleted_reports,
+            [("report-old", "user-1")],
+        )
+        self.assertEqual(self.repository.delete_report_protections, [True])
+
+    def test_scoped_admin_cleanup_preview_uses_its_environment_scope(self):
+        self.use_scoped_msp("MSP_ADMIN", "public")
+
+        response = self.client.get("/msp/data-cleanup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.repository.cleanup_candidate_scopes[-1], {"public"})
 
     def test_msp_admin_can_register_portal_user(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

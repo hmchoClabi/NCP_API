@@ -131,35 +131,51 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
     }, findings
 
 
-def summarize_activity_events(value: Any) -> dict[str, int]:
-    """담당자가 확인할 Activity 작업을 보수적으로 집계한다."""
+def group_activity_events(value: Any) -> dict[str, list[dict[str, Any]]]:
+    """요약 카드와 건수가 같은 판정 기준을 쓰도록 이벤트를 분류한다."""
     events = flatten_records(value)
-    summary = {
-        "total_count": len(events),
-        "success_count": 0,
-        "failure_count": 0,
-        "unknown_result_count": 0,
-        "created_success_count": 0,
-        "deleted_success_count": 0,
-        "login_failure_count": 0,
+    groups: dict[str, list[dict[str, Any]]] = {
+        "success": [],
+        "failure": [],
+        "unknown_result": [],
+        "created_success": [],
+        "deleted_success": [],
+        "login_failure": [],
     }
     for event in events:
         result_kind = _result_kind(event.get("result"))
         action = event.get("action_name")
         if result_kind == "SUCCESS":
-            summary["success_count"] += 1
+            groups["success"].append(event)
             lifecycle = _lifecycle_kind(action)
             if lifecycle == "CREATE":
-                summary["created_success_count"] += 1
+                groups["created_success"].append(event)
             elif lifecycle == "DELETE":
-                summary["deleted_success_count"] += 1
+                groups["deleted_success"].append(event)
         elif result_kind == "FAILURE":
-            summary["failure_count"] += 1
+            groups["failure"].append(event)
             if _is_login_action(action):
-                summary["login_failure_count"] += 1
+                groups["login_failure"].append(event)
         else:
-            summary["unknown_result_count"] += 1
-    return summary
+            groups["unknown_result"].append(event)
+    return groups
+
+
+def summarize_activity_events(value: Any) -> dict[str, int]:
+    """담당자가 확인할 Activity 작업을 보수적으로 집계한다."""
+    groups = group_activity_events(value)
+    return {
+        "total_count": sum(
+            len(groups[key])
+            for key in ("success", "failure", "unknown_result")
+        ),
+        "success_count": len(groups["success"]),
+        "failure_count": len(groups["failure"]),
+        "unknown_result_count": len(groups["unknown_result"]),
+        "created_success_count": len(groups["created_success"]),
+        "deleted_success_count": len(groups["deleted_success"]),
+        "login_failure_count": len(groups["login_failure"]),
+    }
 
 
 def _counter_rows(counter: Counter[str]) -> list[dict[str, Any]]:
@@ -227,4 +243,8 @@ def _is_login_action(value: Any) -> bool:
     return normalized in {"login", "signin", "로그인"}
 
 
-__all__ = ["analyze_changes", "summarize_activity_events"]
+__all__ = [
+    "analyze_changes",
+    "group_activity_events",
+    "summarize_activity_events",
+]

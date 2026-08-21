@@ -228,6 +228,89 @@ class TenantDeletionArtifactCleanupTests(unittest.TestCase):
 
 
 class ReportDeletionArtifactCleanupTests(unittest.TestCase):
+    def test_cleanup_preview_marks_latest_and_scopes_environments(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchall.return_value = [
+            {"id": "old", "protection_reason": None},
+            {"id": "latest", "protection_reason": "LATEST"},
+        ]
+
+        reports = repository.report_cleanup_candidates({"gov", "public"})
+
+        self.assertEqual(
+            [(item["id"], item["eligible"]) for item in reports],
+            [("old", True), ("latest", False)],
+        )
+        sql, parameters = cursor.execute.call_args.args
+        self.assertIn("DISTINCT ON", sql)
+        self.assertIn("retention_until >= CURRENT_DATE", sql)
+        self.assertIn("OR COALESCE", sql)
+        self.assertEqual(parameters, (["gov", "public"],))
+
+    def test_delete_report_rechecks_latest_and_retention_protection(self):
+        for protection in ("is_latest", "retention_protected"):
+            with self.subTest(protection=protection):
+                repository = PortalRepository(MagicMock())
+                connection = MagicMock()
+                cursor = MagicMock()
+                repository._connect = MagicMock(return_value=connection)
+                connection.__enter__.return_value = connection
+                connection.cursor.return_value = cursor
+                cursor.__enter__.return_value = cursor
+                cursor.fetchone.return_value = {
+                    "id": "report-1",
+                    "tenant_id": "tenant-1",
+                    "environment": "public",
+                    "status": "SUCCESS",
+                    "report_type": "DAILY",
+                    "customer_name": "Customer",
+                    "is_latest": protection == "is_latest",
+                    "retention_protected": protection == "retention_protected",
+                }
+                repository._queue_artifact_cleanup = MagicMock()
+
+                with self.assertRaisesRegex(ValueError, "정리할 수 없습니다"):
+                    repository.delete_report(
+                        "report-1",
+                        "admin-1",
+                        protect_latest=True,
+                    )
+
+                repository._queue_artifact_cleanup.assert_not_called()
+
+    def test_regular_delete_keeps_existing_latest_report_contract(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = {
+            "id": "report-1",
+            "tenant_id": "tenant-1",
+            "environment": "public",
+            "status": "SUCCESS",
+            "report_type": "DAILY",
+            "customer_name": "Customer",
+            "is_latest": True,
+            "retention_protected": False,
+        }
+        cursor.fetchall.side_effect = [[], [], []]
+        repository._queue_artifact_cleanup = MagicMock(
+            return_value=(None, 0, 0)
+        )
+
+        deleted = repository.delete_report("report-1", "admin-1")
+
+        self.assertEqual(deleted["tenant_id"], "tenant-1")
+
     def test_commit_failure_does_not_start_report_file_cleanup(self):
         repository = PortalRepository(MagicMock())
         connection = MagicMock()

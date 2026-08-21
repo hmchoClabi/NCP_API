@@ -503,6 +503,13 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("sensitive-admin", attention)
         self.assertNotIn("203.0.113.10", attention)
         self.assertNotIn("must-not-summarize", attention)
+        self.assertIn("Create Server", attention)
+        self.assertIn("Delete Server", attention)
+        self.assertIn("Login", attention)
+        self.assertIn(
+            "계정·접속 IP·원시 응답은 이 요약에 표시하지 않습니다",
+            attention,
+        )
 
         report.activity_events = {}
         report.analysis = {"changes": {"status": "FAILED"}}
@@ -904,6 +911,136 @@ handlers.dragend({target: a});
             completed.stdout + completed.stderr,
         )
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_resource_summary_cards_filter_rows_and_restore_all(self):
+        report = self._sample_report()
+        report.report_options = {
+            "sections": ["infrastructure_inventory"],
+            "resource_categories": ["BLOCK_STORAGE", "SUBNET"],
+            "monitoring_categories": [],
+        }
+        report.infrastructure = [
+            {
+                "category": category,
+                "category_label": label,
+                "resource_id": f"resource-{index}",
+                "resource_name": f"resource-{index}",
+                "details": {},
+            }
+            for index, (category, label) in enumerate(
+                (
+                    ("BLOCK_STORAGE", "Block Storage"),
+                    ("BLOCK_STORAGE", "Block Storage"),
+                    ("SUBNET", "Subnet"),
+                ),
+                start=1,
+            )
+        ]
+        html = HtmlReportRenderer().render(report)
+        script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        harness = r"""
+const assert = require("assert");
+const handlers = {};
+
+class ClassList {
+  constructor(...names) { this.values = new Set(names); }
+  toggle(name, enabled) {
+    if (enabled) this.values.add(name); else this.values.delete(name);
+  }
+  contains(name) { return this.values.has(name); }
+}
+
+let section;
+class TestNode {
+  constructor(kind, value = "", label = "") {
+    this.kind = kind;
+    this.dataset = {};
+    this.attributes = new Map();
+    this.classList = new ClassList();
+    this.label = label;
+    this.textContent = "";
+    if (kind === "button") this.dataset.resourceFilter = value;
+    if (kind === "row") this.dataset.resourceCategory = value;
+  }
+  closest(selector) {
+    if (selector === "[data-resource-filter]" && this.kind === "button") {
+      return this;
+    }
+    if (selector === ".report-section" && this.kind === "button") {
+      return section;
+    }
+    return null;
+  }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  querySelector(selector) {
+    return selector === "span" ? {textContent: this.label} : null;
+  }
+}
+
+const all = new TestNode("button", "", "전체");
+const block = new TestNode("button", "BLOCK_STORAGE", "Block Storage");
+const subnet = new TestNode("button", "SUBNET", "Subnet");
+all.setAttribute("aria-pressed", "true");
+block.setAttribute("aria-pressed", "false");
+subnet.setAttribute("aria-pressed", "false");
+all.classList.toggle("is-active", true);
+const buttons = [all, block, subnet];
+const rows = [
+  new TestNode("row", "BLOCK_STORAGE"),
+  new TestNode("row", "BLOCK_STORAGE"),
+  new TestNode("row", "SUBNET"),
+];
+const status = new TestNode("status");
+section = {
+  querySelectorAll(selector) {
+    if (selector === "[data-resource-filter]") return buttons;
+    if (selector === "[data-resource-category]") return rows;
+    return [];
+  },
+  querySelector(selector) {
+    return selector === "[data-resource-filter-status]" ? status : null;
+  },
+};
+global.document = {
+  addEventListener(name, handler) { handlers[name] = handler; },
+};
+eval(__REPORT_SCRIPT__);
+
+const click = (target) => handlers.click({target});
+const filtered = () => rows.map(
+  (row) => row.classList.contains("resource-filtered-row")
+);
+click(block);
+assert.deepStrictEqual(filtered(), [false, false, true]);
+assert.strictEqual(block.getAttribute("aria-pressed"), "true");
+assert.strictEqual(all.getAttribute("aria-pressed"), "false");
+assert.strictEqual(status.textContent, "Block Storage 2건 표시 중 · 다시 누르면 전체 표시");
+
+click(block);
+assert.deepStrictEqual(filtered(), [false, false, false]);
+assert.strictEqual(all.getAttribute("aria-pressed"), "true");
+assert.strictEqual(status.textContent, "전체 3건 표시 중");
+
+click(subnet);
+assert.deepStrictEqual(filtered(), [true, true, false]);
+click(all);
+assert.deepStrictEqual(filtered(), [false, false, false]);
+assert.strictEqual(all.classList.contains("is-active"), true);
+""".replace("__REPORT_SCRIPT__", json.dumps(script))
+
+        completed = subprocess.run(
+            [shutil.which("node"), "-e", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
     def test_operational_report_leads_with_actions_and_folds_details(self):
         report = self._sample_report()
         report.analysis = {
@@ -1137,6 +1274,19 @@ handlers.dragend({target: a});
         self.assertNotIn("excluded-sub-account", html)
         self.assertIn("규모 / 과금 관련 지표", resource_inventory)
         self.assertIn("주소 / 연결", resource_inventory)
+        self.assertIn(
+            'data-resource-filter="" aria-pressed="true"',
+            resource_inventory,
+        )
+        self.assertIn(
+            'data-resource-filter="BLOCK_STORAGE" aria-pressed="false"',
+            resource_inventory,
+        )
+        self.assertIn(
+            'data-resource-category="BLOCK_STORAGE"',
+            resource_inventory,
+        )
+        self.assertIn("전체 6건 표시 중", resource_inventory)
 
         details = HtmlReportRenderer()._infrastructure_details_text({
             "kubernetes_version": "1.32",
@@ -2008,6 +2158,81 @@ handlers.dragend({target: a});
         self.assertIn("즉시 확인</span><strong>1건", html)
         self.assertIn("CPU 임계치 확인 필요", html)
         self.assertNotIn("수집 상태 확인 필요", html)
+        self.assertIn('<details class="operational-status caution">', html)
+        self.assertIn("즉시 확인 카드에서 대상·근거·조치를 확인", html)
+        self.assertIn("API 호출 실패", html)
+        self.assertIn("homepage", html)
+        self.assertIn('href="#billing-cost-basis"', html)
+
+    def test_operational_summary_explains_normal_and_collection_scope(self):
+        report = self._sample_report()
+        dataset_labels = (
+            ("infrastructure", "인프라 자원"),
+            ("monitoring", "모니터링 지표"),
+            ("insight_events", "Cloud Insight 이벤트"),
+            ("activity_events", "변경 이력"),
+            ("billing", "비용"),
+            ("service_availability", "서비스 가용성"),
+            ("security_events", "보안 이벤트"),
+        )
+        report.analysis = {
+            "source_state": "CALCULATED",
+            "period_type": "DAILY",
+            "data_quality": {
+                "overall_status": "COMPLETE",
+                "source_state": "CALCULATED",
+                "datasets": [
+                    {
+                        "key": key,
+                        "label": label,
+                        "status": "AVAILABLE",
+                        "status_label": "수집 완료",
+                        "source_state": "OBSERVED",
+                        "record_count": index,
+                        "error_count": 0,
+                        "warning_count": 0,
+                        "reason": "수집기가 완료 상태를 기록했습니다.",
+                    }
+                    for index, (key, label) in enumerate(dataset_labels, 1)
+                ],
+            },
+            "findings": [],
+            "metrics": {"summaries": []},
+            "events": {},
+            "changes": {"status": "COLLECTED_EMPTY"},
+            "availability": {
+                "status": "AVAILABLE",
+                "source_state": "CALCULATED",
+                "overall_availability_percent": 100,
+                "items": [{
+                    "name": "homepage",
+                    "source_state": "OBSERVED",
+                    "availability_percent": 100,
+                    "total_count": 12,
+                    "success_count": 12,
+                    "error_count": 0,
+                }],
+            },
+            "security": {},
+            "costs": {"facts": []},
+        }
+
+        html = HtmlReportRenderer().render(report)
+        summary = html.split('<section class="daily-summary">', 1)[1].split(
+            "</section>", 1
+        )[0]
+
+        self.assertIn("정상 · 7/7", summary)
+        self.assertIn("요청 데이터셋 7개 중 7개가 수집 완료", summary)
+        for _, label in dataset_labels:
+            self.assertIn(label, summary)
+        self.assertIn("활성 운영 경고가 없습니다", summary)
+        self.assertIn("homepage", summary)
+        self.assertIn("근거 보기", summary)
+        self.assertIn(
+            "details.operational-status:not([open]) > .status-card-detail",
+            html,
+        )
 
     def test_operational_metric_table_only_shows_sustained_90_percent_alerts(self):
         report = self._sample_report()
@@ -2704,6 +2929,40 @@ handlers.dragend({target: a});
         self.assertNotIn("<h2>비용 전기 비교</h2>", html)
         self.assertNotIn('aria-label="운영 판단 요약"', html)
 
+    def test_organization_only_summary_does_not_link_to_hidden_billing(self):
+        report = self._sample_report()
+        report.report_options = {
+            "schema_version": REPORT_OPTIONS_SCHEMA_VERSION,
+            "sections": ["executive_summary", "organization_billing"],
+            "resource_categories": [],
+            "monitoring_categories": [],
+        }
+        report.billing["account_costs"] = [{
+            "display_name": "Member account",
+            "member_no": "member-1",
+        }]
+        report.analysis = {
+            "period_type": "MONTHLY",
+            "data_quality": {"overall_status": "COMPLETE", "datasets": []},
+            "findings": [],
+            "metrics": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {"facts": [{
+                "name": "period_estimate",
+                "period_start": "2026-06-01",
+                "period_end": "2026-06-30",
+                "total_amount": 12345,
+            }]},
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("보고 기간 추정 금액", html)
+        self.assertNotIn('href="#billing-cost-basis"', html)
+        self.assertNotIn('id="billing-cost-basis"', html)
+
     def test_collection_diagnostics_merge_warnings_and_errors_with_targets(self):
         report = self._sample_report()
         report.report_options = {
@@ -2799,6 +3058,157 @@ handlers.dragend({target: a});
         self.assertIn("NCP 응답 쓰기 권한 감지", cell)
         self.assertIn("Change/setSecondaryIP", cell)
         self.assertIn("부여 권고 안 함", cell)
+
+    def test_billing_fact_cards_disclose_reconciled_service_costs(self):
+        report = self._sample_report()
+        report.period["is_closed_month"] = False
+        report.billing = {
+            "invoice_summary": {
+                "cost_type": "CONFIRMED",
+                "status": "AVAILABLE",
+                "total_amount": 110,
+                "subtotal_amount": 100,
+                "vat_amount": 10,
+                "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+                "includes_discount": True,
+                "includes_vat": True,
+            },
+            "period_estimate": {
+                "cost_type": "PERIOD_ESTIMATE",
+                "status": "AVAILABLE",
+                "total_amount": 30,
+                "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            },
+            "month_to_date_estimate": {
+                "cost_type": "MONTH_TO_DATE_ESTIMATE",
+                "status": "AVAILABLE",
+                "total_amount": 50,
+                "amount_basis": "PRE_DISCOUNT_LIST_PRICE",
+            },
+            "month_end_projection": {
+                "cost_type": "MONTH_END_PROJECTION",
+                "status": "AVAILABLE",
+                "total_amount": 100,
+                "amount_basis": "DAILY_RUN_RATE_PROJECTION",
+            },
+            "service_summary": [{
+                "service_name": "<script>alert(1)</script>",
+                "amount": 100,
+            }],
+            "expected_by_service": [
+                {"service_name": "Server", "expected_amount": 20},
+                {"service_name": "Object Storage", "expected_amount": 10},
+            ],
+            "month_to_date_by_service": [
+                {"service_name": "Server", "expected_amount": 35},
+                {"service_name": "Object Storage", "expected_amount": 15},
+            ],
+            "projected_cost_summary": [],
+            "usage_summary": [],
+            "network_usage_summary": [],
+        }
+
+        renderer = HtmlReportRenderer()
+        display = renderer._prepare_billing_display(
+            report.period,
+            report.billing,
+        )
+        html = renderer.render(report)
+
+        self.assertEqual(html.count('<details class="billing-fact"'), 4)
+        self.assertIn('id="billing-cost-basis"', html)
+        self.assertIn(
+            'aria-controls="billing-cost-confirmed-detail"',
+            html,
+        )
+        self.assertIn("할인 내역 합계 (참고)", html)
+        self.assertIn(">VAT</td>", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn(
+            ".billing-fact:not([open]) > .billing-fact-body",
+            html,
+        )
+        for fact in display.cost_facts:
+            self.assertAlmostEqual(
+                sum(
+                    row["amount"]
+                    for row in fact["_service_breakdown"]
+                ),
+                fact["total_amount"],
+            )
+        month_end = next(
+            fact for fact in display.cost_facts
+            if fact["cost_type"] == "MONTH_END_PROJECTION"
+        )
+        self.assertEqual(
+            [row["amount"] for row in month_end["_service_breakdown"]],
+            [70.0, 30.0],
+        )
+
+        accrued_rows = renderer._billing_fact_breakdown(
+            {
+                "target_service_summary": [{
+                    "service_name": "Server",
+                    "use_amount": 100000,
+                }],
+                "month_to_date_cost_summary": [{
+                    "service_name": "Server",
+                    "expected_amount": 38400,
+                    "calculation_status": "OK",
+                }],
+                "projected_cost_summary": [{
+                    "service_name": "Server",
+                    "expected_amount": 74400,
+                    "calculation_status": "OK",
+                }],
+            },
+            {
+                "cost_type": "MONTH_END_PROJECTION",
+                "total_amount": 136000,
+                "amount_basis": "NCP_ACCRUED_PLUS_USAGE_FORECAST",
+            },
+        )
+        self.assertEqual(accrued_rows, [{
+            "service_name": "Server",
+            "amount": 136000.0,
+        }])
+        self.assertEqual(
+            renderer._billing_fact_breakdown(
+                {},
+                {
+                    "cost_type": "CONFIRMED",
+                    "total_amount": 110,
+                    "subtotal_amount": 100,
+                    "vat_amount": 10,
+                },
+            ),
+            [],
+        )
+        fallback_rows = renderer._billing_fact_breakdown(
+            {
+                "month_to_date_estimate": {
+                    "amount_basis": "NCP_CURRENT_USE_AMOUNT_FALLBACK",
+                },
+                "target_service_summary": [
+                    {"service_name": "Server", "use_amount": 80},
+                    {"service_name": "Storage", "use_amount": 20},
+                ],
+                "month_to_date_by_service": [
+                    {"service_name": "Server", "expected_amount": 1},
+                    {"service_name": "Storage", "expected_amount": 99},
+                ],
+            },
+            {
+                "cost_type": "MONTH_END_PROJECTION",
+                "total_amount": 200,
+                "amount_basis": "DAILY_RUN_RATE_PROJECTION",
+            },
+        )
+        self.assertEqual(
+            [row["amount"] for row in fallback_rows],
+            [160.0, 40.0],
+        )
 
     def test_write_creates_utf8_html_file(self):
         report = self._sample_report()

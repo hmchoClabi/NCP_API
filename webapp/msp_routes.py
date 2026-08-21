@@ -29,6 +29,8 @@ from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
 
 CUSTOMER_DETAIL_RECENT_LIMIT = 10
+DATA_CLEANUP_CONFIRM_PHRASE = "선택 보고서 삭제"
+DATA_CLEANUP_MAX_SELECTION = 20
 
 
 def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
@@ -50,6 +52,106 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             "msp_dashboard.html",
             **repository.dashboard(_msp_environment_scopes(g.user)),
         )
+
+    @app.get("/msp/data-cleanup")
+    @_msp_admin_required
+    def msp_data_cleanup():
+        reports = repository.report_cleanup_candidates(
+            _msp_admin_environment_scopes(g.user)
+        )
+        eligible = [report for report in reports if report["eligible"]]
+        return render_template(
+            "data_cleanup.html",
+            reports=reports,
+            summary={
+                "eligible_reports": len(eligible),
+                "protected_reports": len(reports) - len(eligible),
+                "artifact_count": sum(
+                    int(report.get("artifact_count") or 0)
+                    for report in eligible
+                ),
+                "artifact_bytes": sum(
+                    int(report.get("artifact_bytes") or 0)
+                    for report in eligible
+                ),
+            },
+            confirm_phrase=DATA_CLEANUP_CONFIRM_PHRASE,
+            max_selection=DATA_CLEANUP_MAX_SELECTION,
+        )
+
+    @app.post("/msp/data-cleanup")
+    @_msp_admin_required
+    def run_data_cleanup():
+        try:
+            if request.form.get("confirm_phrase", "").strip() != (
+                DATA_CLEANUP_CONFIRM_PHRASE
+            ):
+                raise ValueError(
+                    f"확인 문구 '{DATA_CLEANUP_CONFIRM_PHRASE}'를 정확히 입력하세요."
+                )
+            report_ids = list(dict.fromkeys(
+                report_id.strip()
+                for report_id in request.form.getlist("report_id")
+                if report_id.strip()
+            ))
+            if not report_ids:
+                raise ValueError("정리할 보고서를 하나 이상 선택하세요.")
+            if len(report_ids) > DATA_CLEANUP_MAX_SELECTION:
+                raise ValueError(
+                    f"한 번에 최대 {DATA_CLEANUP_MAX_SELECTION}건까지 정리할 수 있습니다."
+                )
+
+            candidates = repository.report_cleanup_candidates(
+                _msp_admin_environment_scopes(g.user)
+            )
+            eligible_ids = {
+                str(report["id"])
+                for report in candidates
+                if report["eligible"]
+            }
+            if not set(report_ids).issubset(eligible_ids):
+                raise ValueError(
+                    "선택 항목에 접근할 수 없거나 보호된 보고서가 있습니다. "
+                    "대상을 다시 확인하세요."
+                )
+
+            deleted_count = 0
+            removed_files = 0
+            pending_files = 0
+            skipped_reasons: list[str] = []
+            for report_id in report_ids:
+                try:
+                    deleted = repository.delete_report(
+                        report_id,
+                        str(g.user["id"]),
+                        protect_latest=True,
+                    )
+                except ValueError as exc:
+                    skipped_reasons.append(str(exc))
+                    continue
+                deleted_count += 1
+                removed_files += int(deleted["removed_artifact_files"])
+                pending_files += int(deleted["failed_artifact_files"])
+
+            message = (
+                f"보고서 {deleted_count}건을 정리하고 산출물 파일 "
+                f"{removed_files}개를 삭제했습니다."
+            )
+            if pending_files:
+                message += f" 파일 {pending_files}개는 안전한 재시도 큐에 남았습니다."
+            if skipped_reasons:
+                reasons = "; ".join(dict.fromkeys(skipped_reasons))
+                message += (
+                    f" {len(skipped_reasons)}건은 실행 시점 재검증에서 "
+                    f"건너뛰었습니다: {reasons}"
+                )
+            flash(
+                message,
+                "warning" if pending_files or skipped_reasons else "success",
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_data_cleanup"))
 
     @app.get("/msp/customers/<environment>")
     @_msp_required

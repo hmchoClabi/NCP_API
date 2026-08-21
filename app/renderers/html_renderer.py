@@ -25,7 +25,10 @@ from app.renderers.infrastructure_presenter import (
     server_spec_summary,
 )
 from app.report_branding import normalize_customer_logo_data_uri
-from app.report_analysis.changes import summarize_activity_events
+from app.report_analysis.changes import (
+    group_activity_events,
+    summarize_activity_events,
+)
 from app.report_analysis.provenance import (
     CALCULATED,
     OBSERVED,
@@ -222,6 +225,40 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     );
   };
 
+  const filterResourceRows = (button) => {
+    const section = button.closest(".report-section");
+    if (!section) return;
+    const buttons = Array.from(
+      section.querySelectorAll("[data-resource-filter]")
+    );
+    const rows = Array.from(
+      section.querySelectorAll("[data-resource-category]")
+    );
+    const requested = button.dataset.resourceFilter || "";
+    const active = requested
+      && button.getAttribute("aria-pressed") === "true"
+      ? ""
+      : requested;
+    buttons.forEach((item) => {
+      const selected = (item.dataset.resourceFilter || "") === active;
+      item.setAttribute("aria-pressed", String(selected));
+      item.classList.toggle("is-active", selected);
+    });
+    let visibleCount = 0;
+    rows.forEach((row) => {
+      const visible = !active || row.dataset.resourceCategory === active;
+      row.classList.toggle("resource-filtered-row", !visible);
+      if (visible) visibleCount += 1;
+    });
+    const status = section.querySelector("[data-resource-filter-status]");
+    if (!status) return;
+    const label = button.querySelector("span");
+    status.textContent = active
+      ? `${String((label && label.textContent) || active).trim()} `
+        + `${visibleCount}건 표시 중 · 다시 누르면 전체 표시`
+      : `전체 ${visibleCount}건 표시 중`;
+  };
+
   let draggedChartCard = null;
 
   document.addEventListener("dragstart", (event) => {
@@ -294,7 +331,12 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
       return;
     }
     const download = event.target.closest("[data-chart-download]");
-    if (download) downloadPng(download);
+    if (download) {
+      downloadPng(download);
+      return;
+    }
+    const resourceFilter = event.target.closest("[data-resource-filter]");
+    if (resourceFilter) filterResourceRows(resourceFilter);
   });
 
 })();"""
@@ -504,7 +546,14 @@ class HtmlReportRenderer:
             billing.get("month_end_projection")
         )
         cost_facts = [
-            fact for fact in (
+            {
+                **fact,
+                "_service_breakdown": self._billing_fact_breakdown(
+                    billing,
+                    fact,
+                ),
+            }
+            for fact in (
                 invoice_summary,
                 period_estimate,
                 month_to_date_estimate,
@@ -781,6 +830,195 @@ class HtmlReportRenderer:
             f"{fact.get('coverage_end') or '-'}"
         )
 
+    def _billing_fact_breakdown(
+        self,
+        billing: Mapping[str, Any],
+        fact: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """카드 금액과 같은 기준의 기존 서비스 집계를 연결한다."""
+        total = self._finite_number(fact.get("total_amount"))
+        if total is None:
+            return []
+
+        cost_type = str(fact.get("cost_type") or "").upper()
+        amount_basis = str(fact.get("amount_basis") or "").upper()
+        included_statuses = {"OK", "INFERRED"}
+
+        def service_amounts(
+            source_key: str,
+            amount_key: str,
+            *,
+            checked: bool = False,
+        ) -> Dict[str, Dict[str, Any]]:
+            result: Dict[str, Dict[str, Any]] = {}
+            for row in self._records(billing.get(source_key)):
+                if checked and row.get("calculation_status") not in included_statuses:
+                    continue
+                amount = self._finite_number(row.get(amount_key))
+                if amount is None:
+                    continue
+                name = str(row.get("service_name") or "서비스 미분류").strip()
+                name = name or "서비스 미분류"
+                key = "".join(
+                    character.casefold()
+                    for character in name
+                    if character.isalnum()
+                ) or "서비스미분류"
+                item = result.setdefault(
+                    key,
+                    {"service_name": name, "amount": 0.0},
+                )
+                item["amount"] += amount
+            return result
+
+        scale_to_total = False
+        if cost_type == "CONFIRMED":
+            amounts = service_amounts("service_summary", "amount")
+        elif amount_basis == "NCP_ACCRUED_PLUS_USAGE_FORECAST":
+            amounts = service_amounts("target_service_summary", "use_amount")
+            current = service_amounts(
+                "month_to_date_cost_summary",
+                "expected_amount",
+                checked=True,
+            )
+            projected = service_amounts(
+                "projected_cost_summary",
+                "expected_amount",
+                checked=True,
+            )
+            accrued_total = sum(item["amount"] for item in amounts.values())
+            projected_total = sum(
+                item["amount"] for item in projected.values()
+            )
+            current_total = sum(item["amount"] for item in current.values())
+            if not accrued_total:
+                amounts = {
+                    key: dict(item) for key, item in projected.items()
+                }
+            elif projected_total > current_total:
+                for key in current.keys() | projected.keys():
+                    current_amount = current.get(key, {}).get("amount", 0.0)
+                    projected_item = projected.get(key, {})
+                    projected_amount = projected_item.get("amount", 0.0)
+                    item = amounts.setdefault(
+                        key,
+                        {
+                            "service_name": (
+                                projected_item.get("service_name")
+                                or current.get(key, {}).get("service_name")
+                                or "서비스 미분류"
+                            ),
+                            "amount": 0.0,
+                        },
+                    )
+                    item["amount"] += projected_amount - current_amount
+        elif amount_basis == "NCP_CONTRACT_DEMAND_USE_AMOUNT":
+            amounts = service_amounts("contract_cost_summary", "use_amount")
+        elif amount_basis in {
+            "NCP_PRODUCT_DEMAND_USE_AMOUNT",
+            "NCP_CURRENT_USE_AMOUNT_FALLBACK",
+            "NCP_ACCRUED_LOWER_BOUND",
+        }:
+            amounts = service_amounts("target_service_summary", "use_amount")
+        elif cost_type == "PERIOD_ESTIMATE":
+            amounts = service_amounts("expected_by_service", "expected_amount")
+        elif cost_type == "MONTH_TO_DATE_ESTIMATE":
+            amounts = service_amounts(
+                "month_to_date_by_service",
+                "expected_amount",
+            )
+        elif cost_type == "MONTH_END_PROJECTION":
+            amounts = service_amounts(
+                "projected_cost_summary",
+                "expected_amount",
+                checked=True,
+            )
+            if not amounts:
+                month_to_date_basis = str(
+                    self._mapping(billing.get("month_to_date_estimate")).get(
+                        "amount_basis"
+                    ) or ""
+                ).upper()
+                if month_to_date_basis == "NCP_CONTRACT_DEMAND_USE_AMOUNT":
+                    amounts = service_amounts(
+                        "contract_cost_summary",
+                        "use_amount",
+                    )
+                elif month_to_date_basis in {
+                    "NCP_PRODUCT_DEMAND_USE_AMOUNT",
+                    "NCP_CURRENT_USE_AMOUNT_FALLBACK",
+                }:
+                    amounts = service_amounts(
+                        "target_service_summary",
+                        "use_amount",
+                    )
+                else:
+                    amounts = service_amounts(
+                        "month_to_date_by_service",
+                        "expected_amount",
+                    )
+                scale_to_total = True
+        else:
+            amounts = {}
+
+        if not amounts:
+            return []
+        source_total = sum(item["amount"] for item in amounts.values())
+        if scale_to_total:
+            if not source_total:
+                return []
+            factor = total / source_total
+            for item in amounts.values():
+                item["amount"] *= factor
+
+        rows = sorted(
+            (
+                {
+                    "service_name": item["service_name"],
+                    "amount": round(item["amount"], 2),
+                }
+                for item in amounts.values()
+            ),
+            key=lambda item: (
+                -abs(item["amount"]),
+                str(item["service_name"]).casefold(),
+            ),
+        )
+        if not rows:
+            return []
+
+        if cost_type == "CONFIRMED":
+            subtotal = self._finite_number(fact.get("subtotal_amount"))
+            vat = self._finite_number(fact.get("vat_amount"))
+            service_total = sum(row["amount"] for row in rows)
+            if subtotal is not None:
+                subtotal_adjustment = round(subtotal - service_total, 2)
+                if abs(subtotal_adjustment) >= 0.01:
+                    rows.append({
+                        "service_name": "공급가액 조정",
+                        "amount": subtotal_adjustment,
+                        "is_adjustment": True,
+                    })
+            if vat is not None and abs(vat) >= 0.01:
+                rows.append({
+                    "service_name": "VAT",
+                    "amount": round(vat, 2),
+                    "is_adjustment": True,
+                })
+
+        difference = round(total - sum(row["amount"] for row in rows), 2)
+        if abs(difference) >= 0.01:
+            rows.append({
+                "service_name": (
+                    "최종 청구 조정"
+                    if cost_type == "CONFIRMED"
+                    else "누적·예측 금액 보정"
+                ),
+                "amount": difference,
+                "is_adjustment": True,
+            })
+        return rows
+
     def _report_period_cost_fact(
         self,
         period: Mapping[str, Any],
@@ -855,6 +1093,7 @@ class HtmlReportRenderer:
                         display.billing_enabled
                         or display.organization_billing_enabled
                     ),
+                    billing_detail_enabled=display.billing_enabled,
                 )
             diagnostic_count = (
                 len(report.collection_errors)
@@ -948,6 +1187,7 @@ class HtmlReportRenderer:
         report: ReportResult,
         *,
         cost_enabled: bool,
+        billing_detail_enabled: bool,
     ) -> str:
         analysis = self._mapping(report.analysis)
         if not analysis:
@@ -1007,24 +1247,42 @@ class HtmlReportRenderer:
         )
         resource_changes = self._mapping(analysis.get("resource_changes"))
         immediate_status = self._analysis_finding_status(active_findings)
+        assessment_detail = self._operational_assessment_detail(
+            status,
+            active_findings,
+            datasets,
+        )
+        immediate_detail = (
+            '<div class="finding-list">'
+            + "".join(self._finding_card(item) for item in active_findings)
+            + '</div>'
+            if active_findings
+            else (
+                '<p class="status-evidence-copy">현재 수집·검사 범위에서 '
+                '활성 운영 경고가 없습니다.</p>'
+            )
+        )
         status_cards = "".join((
             self._analysis_status_card(
                 "클라우드 운영 판정",
                 status_label,
                 status.casefold(),
                 analysis.get("source_state", CALCULATED),
+                details_html=assessment_detail,
             ),
             self._analysis_status_card(
                 "즉시 확인",
                 f"{len(active_findings)}건",
                 immediate_status,
                 CALCULATED,
+                details_html=immediate_detail,
             ),
             self._analysis_status_card(
                 "데이터 수집",
                 collection_label,
                 str(quality.get("overall_status") or "unknown").casefold(),
                 quality.get("source_state", CALCULATED),
+                details_html=self._collection_status_detail(datasets),
             ),
         ))
         if (
@@ -1067,6 +1325,10 @@ class HtmlReportRenderer:
                     else "조회 불가"
                 ),
                 availability.get("source_state", UNAVAILABLE),
+                details_html=self._availability_status_detail(
+                    availability,
+                    datasets,
+                ),
             )
         ]
         if cost_enabled:
@@ -1079,6 +1341,10 @@ class HtmlReportRenderer:
                         else "조회 불가"
                     ),
                     current_cost.get("source_state", UNAVAILABLE),
+                    details_html=self._cost_status_detail(
+                        current_cost,
+                        show_billing_link=billing_detail_enabled,
+                    ),
                 )
             )
 
@@ -1164,13 +1430,173 @@ class HtmlReportRenderer:
         label: str,
         value: Any,
         source_state: Any,
+        *,
+        details_html: str = "",
     ) -> str:
-        return (
-            '<div class="summary-fact">'
+        content = (
             f'<span>{self._text(label)}</span>'
             f'<strong>{self._text(value)}</strong>'
             f'<small>{self._text(self._source_state_text(source_state))}</small>'
+        )
+        if details_html:
+            return (
+                '<details class="summary-fact summary-fact-disclosure">'
+                f'<summary>{content}<span class="status-card-action">근거 보기</span></summary>'
+                f'<div class="status-card-detail">{details_html}</div>'
+                '</details>'
+            )
+        return (
+            '<div class="summary-fact">'
+            f'{content}'
             '</div>'
+        )
+
+    def _operational_assessment_detail(
+        self,
+        status: str,
+        findings: Sequence[Mapping[str, Any]],
+        datasets: Sequence[Mapping[str, Any]],
+    ) -> str:
+        requested = [
+            item for item in datasets
+            if item.get("status") != "NOT_REQUESTED"
+        ]
+        completed = [
+            item for item in requested
+            if item.get("status") in {"AVAILABLE", "COLLECTED_EMPTY"}
+        ]
+        if status == "NORMAL" and requested:
+            reason = (
+                f"요청 데이터셋 {len(requested):,}개 중 {len(completed):,}개가 "
+                "수집 완료되었고, 현재 규칙에 해당하는 활성 운영 경고가 없습니다."
+            )
+        elif status == "NORMAL":
+            reason = (
+                "저장된 분석 결과가 전체 수집 상태를 정상으로 기록했고, "
+                "현재 규칙에 해당하는 활성 운영 경고가 없습니다."
+            )
+        elif status in {"RISK", "CAUTION"}:
+            reason = (
+                f"활성 운영 경고 {len(findings):,}건의 최고 위험도를 기준으로 "
+                "판정했습니다. 즉시 확인 카드에서 대상·근거·조치를 확인하십시오."
+            )
+        elif requested:
+            reason = (
+                f"요청 데이터셋 {len(requested):,}개 중 {len(completed):,}개만 "
+                "완료되어 정상 여부를 확정하지 않았습니다."
+            )
+        else:
+            reason = (
+                "데이터셋별 수집 상태가 기록되지 않아 정상 여부를 확정하지 않았습니다."
+            )
+        return (
+            '<p class="status-evidence-copy">'
+            f'{self._text(reason)} '
+            "이 판정은 보고서에 수집되고 규칙으로 검사된 범위에 한정됩니다."
+            '</p>'
+        )
+
+    def _collection_status_detail(
+        self,
+        datasets: Sequence[Mapping[str, Any]],
+    ) -> str:
+        if not datasets:
+            return (
+                '<p class="status-evidence-copy">데이터셋별 수집 상태가 기록되지 않아 '
+                '완료·누락 항목을 구분할 수 없습니다.</p>'
+            )
+        items = []
+        for item in datasets:
+            counts = []
+            if item.get("record_count") is not None:
+                counts.append(
+                    f"레코드 {self._number(item.get('record_count'), 0)}건"
+                )
+            if item.get("error_count"):
+                counts.append(
+                    f"오류 {self._number(item.get('error_count'), 0)}건"
+                )
+            if item.get("warning_count"):
+                counts.append(
+                    f"경고 {self._number(item.get('warning_count'), 0)}건"
+                )
+            metadata = " · ".join(counts) or "건수 정보 없음"
+            items.append(
+                '<li><div><strong>'
+                f"{self._text(item.get('label') or item.get('key') or '데이터셋')}"
+                '</strong><span>'
+                f"{self._text(item.get('status_label') or item.get('status') or '판정 불가')}"
+                '</span></div><small>'
+                f"{self._text(metadata)} · {self._text(item.get('reason') or '판정 근거 없음')}"
+                '</small></li>'
+            )
+        return '<ul class="status-evidence-list">' + "".join(items) + '</ul>'
+
+    def _availability_status_detail(
+        self,
+        availability: Mapping[str, Any],
+        datasets: Sequence[Mapping[str, Any]],
+    ) -> str:
+        rows = [
+            {
+                **item,
+                "source_state_text": self._source_state_text(
+                    item.get("source_state")
+                ),
+            }
+            for item in self._records(availability.get("items"))
+        ]
+        if rows:
+            return self._table(
+                rows,
+                (
+                    ("name", "시나리오"),
+                    ("source_state_text", "출처 상태"),
+                    ("availability_percent", "가용률(%)", "number2"),
+                    ("total_count", "전체 실행", "number0"),
+                    ("success_count", "성공", "number0"),
+                    ("error_count", "오류", "number0"),
+                ),
+            )
+        dataset = next(
+            (
+                item for item in datasets
+                if item.get("key") == "service_availability"
+                or item.get("label") == "서비스 가용성"
+            ),
+            {},
+        )
+        return (
+            '<p class="status-evidence-copy">'
+            f"{self._text(dataset.get('status_label') or availability.get('status') or '조회 불가')}"
+            f" · {self._text(dataset.get('reason') or '수집된 WMS 시나리오가 없습니다.')}"
+            '</p>'
+        )
+
+    def _cost_status_detail(
+        self,
+        fact: Mapping[str, Any],
+        *,
+        show_billing_link: bool,
+    ) -> str:
+        period_start = fact.get("period_start") or fact.get("coverage_start")
+        period_end = fact.get("period_end") or fact.get("coverage_end")
+        billing_link = (
+            '<p class="status-evidence-copy">'
+            '<a href="#billing-cost-basis">과금 데이터 기준과 서비스별 비용 상세로 이동</a>'
+            '</p>'
+            if show_billing_link else ""
+        )
+        return (
+            '<dl class="status-evidence-dl">'
+            '<div><dt>선택 기준</dt><dd>'
+            f"{self._text(self._operational_cost_label(fact))}</dd></div>"
+            '<div><dt>대상 기간</dt><dd>'
+            f"{self._text(period_start or '-')} ~ {self._text(period_end or '-')}</dd></div>"
+            '<div><dt>금액 기준</dt><dd>'
+            f"{self._text(fact.get('amount_basis') or '-')}</dd></div>"
+            '</dl>'
+            f'{billing_link}'
         )
 
     def _render_operational_detail_sections(
@@ -1485,15 +1911,27 @@ class HtmlReportRenderer:
         value: Any,
         status: str,
         source_state: Any = UNAVAILABLE,
+        *,
+        details_html: str = "",
     ) -> str:
         safe_status = status if status in {
             "normal", "caution", "risk", "unknown", "complete", "partial",
             "failed", "generation-success",
         } else "unknown"
-        return (
-            f'<article class="operational-status {safe_status}">'
+        content = (
             f'<span>{self._text(label)}</span><strong>{self._text(value)}</strong>'
             f'<small class="source-state">{self._text(self._source_state_text(source_state))}</small>'
+        )
+        if details_html:
+            return (
+                f'<details class="operational-status {safe_status}">'
+                f'<summary>{content}<span class="status-card-action">상세 보기</span></summary>'
+                f'<div class="status-card-detail">{details_html}</div>'
+                '</details>'
+            )
+        return (
+            f'<article class="operational-status {safe_status}">'
+            f'{content}'
             "</article>"
         )
 
@@ -1907,7 +2345,10 @@ class HtmlReportRenderer:
         report_title = display.report_title
         interaction_script = (
             f"<script>{REPORT_INTERACTION_SCRIPT}</script>"
-            if "data-chart-" in sections
+            if (
+                "data-chart-" in sections
+                or "data-resource-filter" in sections
+            )
             else ""
         )
         logo = (
@@ -2233,12 +2674,22 @@ class HtmlReportRenderer:
             for category, label in self.INFRASTRUCTURE_CATEGORIES
             if counts.get(category)
         ]
-        summary_cards = "".join(
+        table_id = "other-resource-table"
+        summary_cards = f"""
+      <button type="button" class="infra-summary-card is-active"
+        data-resource-filter="" aria-pressed="true"
+        aria-controls="{table_id}" aria-label="전체 {len(prepared):,}건 표시">
+        <span>전체</span>
+        <strong>{len(prepared):,}</strong>
+      </button>""" + "".join(
             f"""
-      <article class="infra-summary-card">
+      <button type="button" class="infra-summary-card"
+        data-resource-filter="{self._text(category)}" aria-pressed="false"
+        aria-controls="{table_id}"
+        aria-label="{self._text(label)} {counts.get(category, 0):,}건만 표시">
         <span>{self._text(label)}</span>
         <strong>{counts.get(category, 0):,}</strong>
-      </article>"""
+      </button>"""
             for category, label in summary_categories
         )
         columns = [
@@ -2265,12 +2716,18 @@ class HtmlReportRenderer:
             columns.append(
                 ("historical_source_state_text", "출처 상태")
             )
-        table = self._table(prepared, tuple(columns))
+        table = self._table(
+            prepared,
+            tuple(columns),
+            resource_category_key="category",
+        )
         summary = (
             f'<div class="infra-summary-grid">{summary_cards}</div>'
+            '<p class="resource-filter-status" data-resource-filter-status '
+            f'role="status" aria-live="polite">전체 {len(prepared):,}건 표시 중</p>'
             if summary_cards else ""
         )
-        content = summary + table
+        content = summary + f'<div id="{table_id}">{table}</div>'
         return self._section(
             "기타 자원 현황",
             (
@@ -3782,6 +4239,7 @@ class HtmlReportRenderer:
         rows: List[Dict[str, Any]],
     ) -> Tuple[str, str]:
         summary = summarize_activity_events(rows)
+        groups = group_activity_events(rows)
         changes = self._mapping(
             self._mapping(report.analysis).get("changes")
         )
@@ -3818,6 +4276,11 @@ class HtmlReportRenderer:
                         if collection_status == "FAILED"
                         else UNAVAILABLE
                     ),
+                    details_html=(
+                        '<p class="status-evidence-copy">'
+                        f'{self._text(label)}. Activity Tracer 수집 상태와 '
+                        '수집 진단을 확인한 뒤 다시 수집하십시오.</p>'
+                    ),
                 )
                 + "</div></section>",
                 label,
@@ -3830,12 +4293,40 @@ class HtmlReportRenderer:
                 f'{summary[key]:,}건',
                 active_status if summary[key] else "normal",
                 source_state,
+                details_html=self._activity_summary_detail(
+                    groups[group_key],
+                    criteria,
+                ),
             )
-            for label, key, active_status in (
-                ("로그인 실패", "login_failure_count", "risk"),
-                ("전체 실패·거부 작업", "failure_count", "risk"),
-                ("생성·추가 성공", "created_success_count", "normal"),
-                ("삭제·분리 성공", "deleted_success_count", "caution"),
+            for label, key, group_key, active_status, criteria in (
+                (
+                    "로그인 실패",
+                    "login_failure_count",
+                    "login_failure",
+                    "risk",
+                    "로그인·SignIn 작업 중 결과가 실패·오류·거부인 이벤트입니다.",
+                ),
+                (
+                    "전체 실패·거부 작업",
+                    "failure_count",
+                    "failure",
+                    "risk",
+                    "결과가 실패·오류·거부로 명시된 전체 이벤트입니다.",
+                ),
+                (
+                    "생성·추가 성공",
+                    "created_success_count",
+                    "created_success",
+                    "normal",
+                    "Create·Add·Attach·Register·Associate·Assign 계열 작업 중 성공 이벤트입니다.",
+                ),
+                (
+                    "삭제·분리 성공",
+                    "deleted_success_count",
+                    "deleted_success",
+                    "caution",
+                    "Delete·Remove·Detach·Terminate·Deregister·Disassociate·Unassign 계열 작업 중 성공 이벤트입니다.",
+                ),
             )
         ]
         if summary["unknown_result_count"]:
@@ -3844,6 +4335,10 @@ class HtmlReportRenderer:
                 f'{summary["unknown_result_count"]:,}건',
                 "caution",
                 source_state,
+                details_html=self._activity_summary_detail(
+                    groups["unknown_result"],
+                    "결과 값이 성공 또는 실패·오류·거부로 식별되지 않은 이벤트입니다.",
+                ),
             ))
 
         status_prefix = {
@@ -3885,6 +4380,45 @@ class HtmlReportRenderer:
             '</section>'
         )
         return content, collapsed_summary
+
+    def _activity_summary_detail(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        criteria: str,
+    ) -> str:
+        safe_rows = [
+            {
+                "event_time": row.get("event_time_kst") or row.get("event_time"),
+                "product": (
+                    row.get("product_display_name")
+                    or row.get("product_name")
+                    or "-"
+                ),
+                "target": row.get("resource_name") or row.get("resource_id") or "-",
+                "action": row.get("action_name") or "-",
+                "result": row.get("result") or "-",
+            }
+            for row in rows
+        ]
+        evidence = (
+            self._table(
+                safe_rows,
+                (
+                    ("event_time", "발생 시각 (KST)"),
+                    ("product", "서비스"),
+                    ("target", "대상"),
+                    ("action", "작업"),
+                    ("result", "결과"),
+                ),
+            )
+            if safe_rows
+            else '<p class="empty-state">해당 이벤트가 없습니다.</p>'
+        )
+        return (
+            f'<p class="status-evidence-copy">{self._text(criteria)} '
+            '계정·접속 IP·원시 응답은 이 요약에 표시하지 않습니다.</p>'
+            f'{evidence}'
+        )
 
     def _activity_actor(self, row: Dict[str, Any]) -> str:
         product_data = row.get("product_data")
@@ -4013,6 +4547,8 @@ class HtmlReportRenderer:
         self,
         rows: List[Dict[str, Any]],
         columns: Sequence[Tuple[str, str] | Tuple[str, str, str]],
+        *,
+        resource_category_key: str = "",
     ) -> str:
         if not rows:
             return '<p class="empty-state">표시할 데이터가 없습니다.</p>'
@@ -4044,8 +4580,17 @@ class HtmlReportRenderer:
                     else ""
                 )
                 cells.append(f"<td{numeric_class}>{value}</td>")
+            category_attribute = (
+                ' data-resource-category="'
+                + self._text(row.get(resource_category_key))
+                + '"'
+                if resource_category_key
+                else ""
+            )
             row_start = (
-                '<tr class="table-data-row">' if detail_columns else "<tr>"
+                f'<tr class="table-data-row"{category_attribute}>'
+                if detail_columns
+                else f"<tr{category_attribute}>"
             )
             data_row = row_start + "".join(cells) + "</tr>"
             if not detail_columns:
@@ -4221,6 +4766,9 @@ class HtmlReportRenderer:
                     f"{self._number(fact.get('subtotal_amount'), 0)}원 / "
                     f"{self._number(fact.get('vat_amount'), 0)}원"
                     "</strong></li>"
+                    "<li><span>할인 내역 합계 (참고)</span><strong>"
+                    f"{self._number(fact.get('discount_amount'), 0)}원"
+                    "</strong></li>"
                 )
             estimate_quality = ""
             if fact.get("cost_type") != "CONFIRMED":
@@ -4235,10 +4783,50 @@ class HtmlReportRenderer:
                 f"할인 {'포함' if fact.get('includes_discount') else '미포함'}, "
                 f"VAT {'포함' if fact.get('includes_vat') else '미포함'}"
             )
+            breakdown_rows = self._records(
+                fact.get("_service_breakdown")
+            )
+            service_count = sum(
+                not row.get("is_adjustment") for row in breakdown_rows
+            )
+            breakdown_html = (
+                self._table(
+                    breakdown_rows,
+                    (
+                        ("service_name", "서비스·조정 항목"),
+                        ("amount", "금액(원)", "number0"),
+                    ),
+                )
+                if breakdown_rows
+                else (
+                    '<p class="empty-state">이 기준에 연결된 서비스별 '
+                    "금액 데이터가 없습니다.</p>"
+                )
+            )
+            cost_type = str(fact.get("cost_type") or "")
+            card_id = {
+                "CONFIRMED": "billing-cost-confirmed",
+                "PERIOD_ESTIMATE": "billing-cost-period-estimate",
+                "MONTH_TO_DATE_ESTIMATE": "billing-cost-month-to-date",
+                "MONTH_END_PROJECTION": "billing-cost-month-end",
+            }.get(cost_type, "")
+            id_attribute = f' id="{card_id}"' if card_id else ""
+            body_id_attribute = (
+                f' id="{card_id}-detail"' if card_id else ""
+            )
+            controls_attribute = (
+                f' aria-controls="{card_id}-detail"' if card_id else ""
+            )
             cards.append(
-                '<article class="billing-fact">'
-                f"<h3>{self._text(labels.get(str(fact.get('cost_type')), fact.get('cost_type')))}</h3>"
+                f'<details class="billing-fact"{id_attribute}>'
+                f"<summary{controls_attribute}>"
+                '<span class="billing-fact-title" role="heading" aria-level="3">'
+                f"{self._text(labels.get(cost_type, cost_type))}</span>"
                 f'<strong class="billing-amount">{self._text(amount)}</strong>'
+                '<small class="billing-fact-hint">'
+                f"서비스 {service_count:,}개 구성 및 산정 근거 보기</small>"
+                "</summary>"
+                f'<div class="billing-fact-body"{body_id_attribute}>'
                 "<ul>"
                 f"<li><span>대상 기간</span><strong>{self._text(period_text)}</strong></li>"
                 f"<li><span>실제 수집 범위</span><strong>{self._text(coverage_text)}</strong></li>"
@@ -4249,9 +4837,18 @@ class HtmlReportRenderer:
                 f"<li><span>출처 상태</span><strong>{self._text(self._source_state_text(source_state))}</strong></li>"
                 f"{estimate_quality}"
                 f"{invoice_breakdown}"
-                "</ul></article>"
+                "</ul>"
+                '<h4>서비스별 금액 구성</h4>'
+                f"{breakdown_html}"
+                '<p class="billing-fact-total"><span>카드 합계</span>'
+                f"<strong>{self._text(amount)}</strong></p>"
+                "</div></details>"
             )
-        return '<div class="billing-facts">' + "".join(cards) + "</div>"
+        return (
+            '<div class="billing-facts" id="billing-cost-basis">'
+            + "".join(cards)
+            + "</div>"
+        )
 
     def _organization_cost_sections(
         self, accounts: List[Dict[str, Any]]

@@ -1389,6 +1389,83 @@ class PortalRepository:
             report["snapshot"] = payload
             return report
 
+    def report_cleanup_candidates(
+        self,
+        allowed_environments: Optional[set[str]] = None,
+    ) -> list[dict[str, Any]]:
+        """Return a dry-run view of reports that may be explicitly deleted."""
+        if allowed_environments is not None and not allowed_environments:
+            return []
+        environment_filter = ""
+        parameters: tuple[Any, ...] = ()
+        if allowed_environments is not None:
+            environment_filter = "WHERE report.environment = ANY(%s)"
+            parameters = (sorted(allowed_environments),)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                WITH latest_reports AS (
+                    SELECT DISTINCT ON (
+                        tenant_id, cloud_account_id, report_type
+                    ) id
+                    FROM control.report_runs
+                    WHERE status IN ('SUCCESS', 'PARTIAL_SUCCESS')
+                    ORDER BY tenant_id, cloud_account_id, report_type,
+                             completed_at DESC NULLS LAST,
+                             created_at DESC, id DESC
+                ),
+                artifacts AS (
+                    SELECT report_run_id,
+                           count(*)::integer AS artifact_count,
+                           COALESCE(sum(byte_size), 0)::bigint AS artifact_bytes,
+                           max(retention_until) AS retention_until
+                    FROM control.report_artifacts
+                    GROUP BY report_run_id
+                )
+                SELECT report.id, report.tenant_id, tenant.customer_name,
+                       tenant.environment,
+                       account.display_name AS account_name,
+                       report.report_type, report.status,
+                       report.period_start, report.period_end,
+                       report.created_at, report.completed_at,
+                       COALESCE(artifacts.artifact_count, 0) AS artifact_count,
+                       COALESCE(artifacts.artifact_bytes, 0) AS artifact_bytes,
+                       artifacts.retention_until,
+                       CASE
+                           WHEN report.status IN ('QUEUED', 'RUNNING', 'RETRYING')
+                               THEN 'ACTIVE'
+                           WHEN latest.id IS NOT NULL THEN 'LATEST'
+                           WHEN artifacts.retention_until >= CURRENT_DATE
+                               THEN 'RETENTION'
+                           ELSE NULL
+                       END AS protection_reason
+                FROM control.report_runs report
+                JOIN control.tenants tenant ON tenant.id = report.tenant_id
+                LEFT JOIN control.cloud_accounts account
+                    ON account.id = report.cloud_account_id
+                LEFT JOIN latest_reports latest ON latest.id = report.id
+                LEFT JOIN artifacts ON artifacts.report_run_id = report.id
+                {environment_filter}
+                ORDER BY (
+                             report.status IN (
+                                 'QUEUED', 'RUNNING', 'RETRYING'
+                             )
+                             OR latest.id IS NOT NULL
+                             OR COALESCE(
+                                 artifacts.retention_until >= CURRENT_DATE,
+                                 false
+                             )
+                         ),
+                         report.created_at, report.id
+                LIMIT 500
+                """,
+                parameters,
+            )
+            reports = cursor.fetchall()
+        for report in reports:
+            report["eligible"] = report.get("protection_reason") is None
+        return reports
+
     @staticmethod
     def _other_artifact_storage_uris(
         cursor: Any,
@@ -1638,7 +1715,13 @@ class PortalRepository:
             )
             return 0, queued_count
 
-    def delete_report(self, report_id: str, actor_id: str) -> dict[str, Any]:
+    def delete_report(
+        self,
+        report_id: str,
+        actor_id: str,
+        *,
+        protect_latest: bool = False,
+    ) -> dict[str, Any]:
         storage_uris: list[str] = []
         cleanup_operation_id: Optional[str] = None
         cleanup_queued_count = 0
@@ -1649,7 +1732,25 @@ class PortalRepository:
                 """
                 SELECT report.id, report.tenant_id, report.environment,
                        report.status, report.report_type,
-                       tenant.customer_name
+                       tenant.customer_name,
+                       report.id = (
+                           SELECT latest.id
+                           FROM control.report_runs latest
+                           WHERE latest.tenant_id = report.tenant_id
+                             AND latest.cloud_account_id IS NOT DISTINCT FROM
+                                 report.cloud_account_id
+                             AND latest.report_type = report.report_type
+                             AND latest.status IN ('SUCCESS', 'PARTIAL_SUCCESS')
+                           ORDER BY latest.completed_at DESC NULLS LAST,
+                                    latest.created_at DESC, latest.id DESC
+                           LIMIT 1
+                       ) AS is_latest,
+                       EXISTS (
+                           SELECT 1
+                           FROM control.report_artifacts artifact
+                           WHERE artifact.report_run_id = report.id
+                             AND artifact.retention_until >= CURRENT_DATE
+                       ) AS retention_protected
                 FROM control.report_runs report
                 JOIN control.tenants tenant ON tenant.id = report.tenant_id
                 WHERE report.id = %s
@@ -1662,6 +1763,10 @@ class PortalRepository:
                 raise ValueError("보고서를 찾을 수 없습니다.")
             if report["status"] in _ACTIVE_REPORT_STATUSES:
                 raise ValueError("실행 중인 보고서는 삭제할 수 없습니다.")
+            if protect_latest and bool(report.get("is_latest")):
+                raise ValueError("계정별 최신 정상 보고서는 정리할 수 없습니다.")
+            if bool(report.get("retention_protected")):
+                raise ValueError("보존 기한이 지나지 않은 보고서는 정리할 수 없습니다.")
 
             schema = (
                 "public_data" if report["environment"] == "public"
