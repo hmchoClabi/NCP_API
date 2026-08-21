@@ -199,14 +199,31 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn(">06-30</text>", html)
         self.assertIn("Memory Utilization Average", html)
         self.assertIn("CPU Utilization Average", html)
-        self.assertIn("File System Utilization Average", html)
-        self.assertEqual(html.count("<polyline"), 3)
+        self.assertIn("OS Disk File System Utilization Average", html)
+        self.assertIn("Data Disk File System Utilization Average", html)
+        self.assertIn("web-01 · /", html)
+        self.assertIn("web-01 · /data", html)
+        self.assertEqual(html.count("<polyline"), 4)
         self.assertIn('data-chart-toggle="server-chart-1-series-1"', html)
         self.assertEqual(
             html.count('<button type="button" data-chart-download>'),
-            3,
+            4,
         )
-        self.assertEqual(html.count("<select data-chart-export-width>"), 3)
+        self.assertEqual(html.count("<select data-chart-export-width>"), 4)
+        metric_charts = html.split(
+            '<section class="report-section metric-trends">', 1
+        )[1].split("</section>", 1)[0]
+        self.assertEqual(
+            metric_charts.count(
+                '<div class="chart-heading" data-chart-drag-handle '
+                'draggable="true"'
+            ),
+            4,
+        )
+        self.assertIn(
+            'aria-label="Memory Utilization Average 그래프를 앞 순서로 이동"',
+            metric_charts,
+        )
         self.assertIn('<option value="1000">1000 × 300</option>', html)
         self.assertIn('<option value="2000" selected>2000 × 600</option>', html)
         self.assertIn('<option value="3000">3000 × 900</option>', html)
@@ -242,6 +259,10 @@ class HtmlReportRendererTests(unittest.TestCase):
             ".chart-series-hidden { display: inline !important; }",
             html,
         )
+        self.assertIn(
+            ".chart-toolbar, .chart-legend, .chart-order-controls",
+            html,
+        )
         self.assertNotIn('data-chart-series tabindex=', html)
         self.assertNotIn('series.setAttribute("aria-pressed"', html)
         self.assertNotIn('document.addEventListener("keydown"', html)
@@ -272,7 +293,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("Server: web-01", html)
         self.assertIn("출처 상태", html)
         self.assertIn("OBSERVED (관측)", html)
-        self.assertIn("상세 2개", html)
+        self.assertIn("<summary>상세 정보</summary>", html)
         self.assertIn("&lt;target details&gt;", html)
         self.assertNotIn("must-not-be-rendered", html)
 
@@ -295,7 +316,12 @@ class HtmlReportRendererTests(unittest.TestCase):
             html,
         )
         self.assertIn("<strong>핵심</strong> · 경고 1건", html)
-        self.assertIn("<strong>핵심</strong> · 성공 1건", html)
+        self.assertIn(
+            "<strong>핵심</strong> · 관측 1건 기준 · "
+            "전체 실패·거부 0건 · 생성·추가 성공 0건 · "
+            "삭제·분리 성공 0건",
+            html,
+        )
         self.assertIn(
             ".section-summary { color: var(--brand-dark); font-weight: 650; }",
             html,
@@ -415,6 +441,92 @@ class HtmlReportRendererTests(unittest.TestCase):
             section,
         )
         self.assertNotIn("<script>alert(1)</script>", section)
+
+    def test_activity_summary_prioritizes_lifecycle_and_failures(self):
+        report = self._sample_report()
+        report.activity_events = {"events": [
+            {
+                "event_id": "create",
+                "action_name": "Create Server",
+                "result": "SUCCESS",
+                "user_name": "sensitive-admin",
+                "source_ip": "203.0.113.10",
+                "product_data": {"accessToken": "must-not-summarize"},
+            },
+            {
+                "event_id": "delete",
+                "action_name": "Delete Server",
+                "result": "SUCCESS",
+            },
+            {
+                "event_id": "login",
+                "action_name": "Login",
+                "result": "FAIL",
+            },
+            {
+                "event_id": "failure",
+                "action_name": "Reboot",
+                "result": "REJECTED",
+            },
+            {
+                "event_id": "unknown",
+                "action_name": "Create Server",
+                "result": "PENDING",
+            },
+        ]}
+        report.analysis = {"changes": {"status": "PARTIAL"}}
+
+        html = HtmlReportRenderer().render(report)
+        activity = html.split(">Cloud Activity Tracer</span>", 1)[1]
+        header = activity.split("</summary>", 1)[0]
+        attention = activity.split(
+            '<section class="activity-attention-summary"', 1
+        )[1].split("</section>", 1)[0]
+
+        self.assertIn(
+            "부분 수집 · 확인된 5건 기준 · 전체 실패·거부 2건 "
+            "(로그인 1건) · 생성·추가 성공 1건 · 삭제·분리 성공 1건 · "
+            "결과 미확인 1건",
+            header,
+        )
+        for label, count in (
+            ("로그인 실패", 1),
+            ("전체 실패·거부 작업", 2),
+            ("생성·추가 성공", 1),
+            ("삭제·분리 성공", 1),
+            ("결과 미확인", 1),
+        ):
+            self.assertIn(
+                f"<span>{label}</span><strong>{count}건</strong>",
+                attention,
+            )
+        self.assertNotIn("sensitive-admin", attention)
+        self.assertNotIn("203.0.113.10", attention)
+        self.assertNotIn("must-not-summarize", attention)
+
+        report.activity_events = {}
+        report.analysis = {"changes": {"status": "FAILED"}}
+        failed_html = HtmlReportRenderer().render(report)
+        failed_header = failed_html.split(
+            ">Cloud Activity Tracer</span>", 1
+        )[1].split("</summary>", 1)[0]
+        self.assertIn("수집 실패 · 판정 불가", failed_header)
+
+        report.analysis = {"changes": {"status": "PARTIAL"}}
+        partial_html = HtmlReportRenderer().render(report)
+        self.assertIn(
+            "부분 수집 · 확인된 이력 없음 · 판정 불가",
+            partial_html.split(">Cloud Activity Tracer</span>", 1)[1]
+            .split("</summary>", 1)[0],
+        )
+
+        report.analysis = {"changes": {"status": "COLLECTED_EMPTY"}}
+        empty_html = HtmlReportRenderer().render(report)
+        self.assertIn(
+            "수집 완료 · 이력 없음 · 전체 실패·거부 0건",
+            empty_html.split(">Cloud Activity Tracer</span>", 1)[1]
+            .split("</summary>", 1)[0],
+        )
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_chart_script_multi_selects_series_and_uses_export_size(self):
@@ -605,6 +717,180 @@ assert.deepStrictEqual(
   ["server-1", "server-2", "server-3", "server-4", "외 1개 선택"]
 );
 """
+
+        completed = subprocess.run(
+            [shutil.which("node"), "-e", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_chart_cards_reorder_with_buttons_and_native_drag(self):
+        html = HtmlReportRenderer().render(self._sample_report())
+        script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        harness = r"""
+const assert = require("assert");
+const handlers = {};
+
+class ClassList {
+  constructor(...names) { this.values = new Set(names); }
+  add(name) { this.values.add(name); }
+  remove(name) { this.values.delete(name); }
+  contains(name) { return this.values.has(name); }
+}
+
+class ChartNode {
+  constructor(kind, name = "") {
+    this.kind = kind;
+    this.name = name;
+    this.dataset = {};
+    this.classList = new ClassList(
+      ...(kind === "card" ? ["chart-card"] : [])
+    );
+    this.parentElement = null;
+    this.previousElementSibling = null;
+    this.nextElementSibling = null;
+    this.card = kind === "card" ? this : null;
+    this.rect = {top: 0, left: 0, width: 180, height: 100};
+  }
+  closest(selector) {
+    if (selector === ".chart-card") return this.card;
+    if (selector === "[data-chart-drag-handle]") {
+      return this.kind === "heading" ? this : null;
+    }
+    if (selector === "[data-chart-move]") {
+      return this.kind === "move" ? this : null;
+    }
+    return null;
+  }
+  getBoundingClientRect() { return this.rect; }
+}
+
+class ChartGrid {
+  constructor(...cards) {
+    this.classList = new ClassList("chart-grid");
+    this.children = cards;
+    cards.forEach((card) => { card.parentElement = this; });
+    this.sync();
+  }
+  insertBefore(node, reference) {
+    const currentIndex = this.children.indexOf(node);
+    if (currentIndex >= 0) this.children.splice(currentIndex, 1);
+    let nextIndex = reference ? this.children.indexOf(reference) : -1;
+    if (nextIndex < 0) nextIndex = this.children.length;
+    this.children.splice(nextIndex, 0, node);
+    node.parentElement = this;
+    this.sync();
+  }
+  sync() {
+    this.children.forEach((card, index) => {
+      card.previousElementSibling = this.children[index - 1] || null;
+      card.nextElementSibling = this.children[index + 1] || null;
+      card.rect = {
+        top: Math.floor(index / 2) * 120,
+        left: (index % 2) * 200,
+        width: 180,
+        height: 100,
+      };
+    });
+  }
+}
+
+const makeCard = (name) => {
+  const card = new ChartNode("card", name);
+  card.heading = new ChartNode("heading");
+  card.heading.card = card;
+  card.previousButton = new ChartNode("move");
+  card.previousButton.card = card;
+  card.previousButton.dataset.chartMove = "previous";
+  card.nextButton = new ChartNode("move");
+  card.nextButton.card = card;
+  card.nextButton.dataset.chartMove = "next";
+  return card;
+};
+
+const a = makeCard("a");
+const b = makeCard("b");
+const c = makeCard("c");
+const outside = makeCard("outside");
+const grid = new ChartGrid(a, b, c);
+new ChartGrid(outside);
+const names = () => grid.children.map((card) => card.name);
+
+global.document = {
+  addEventListener(name, handler) { handlers[name] = handler; },
+};
+eval(__REPORT_SCRIPT__);
+
+handlers.click({target: a.nextButton});
+assert.deepStrictEqual(names(), ["b", "a", "c"]);
+handlers.click({target: a.previousButton});
+assert.deepStrictEqual(names(), ["a", "b", "c"]);
+
+const transfer = {setData() {}, effectAllowed: "", dropEffect: ""};
+handlers.dragstart({
+  target: a.heading,
+  dataTransfer: transfer,
+  preventDefault() { throw new Error("valid heading drag was blocked"); },
+});
+assert(a.classList.contains("is-dragging"));
+let dragOverPrevented = false;
+handlers.dragover({
+  target: b,
+  clientX: 350,
+  clientY: 50,
+  dataTransfer: transfer,
+  preventDefault() { dragOverPrevented = true; },
+});
+assert.strictEqual(dragOverPrevented, true);
+assert.deepStrictEqual(names(), ["b", "a", "c"]);
+let dropPrevented = false;
+handlers.drop({
+  target: c,
+  preventDefault() { dropPrevented = true; },
+});
+assert.strictEqual(dropPrevented, true);
+handlers.dragend({target: a});
+assert(!a.classList.contains("is-dragging"));
+
+handlers.dragstart({
+  target: b.heading,
+  dataTransfer: transfer,
+  preventDefault() { throw new Error("valid heading drag was blocked"); },
+});
+handlers.dragover({
+  target: c,
+  clientX: 50,
+  clientY: 190,
+  dataTransfer: transfer,
+  preventDefault() {},
+});
+assert.deepStrictEqual(names(), ["a", "c", "b"]);
+handlers.dragend({target: b});
+
+handlers.dragstart({
+  target: a.heading,
+  dataTransfer: transfer,
+  preventDefault() { throw new Error("valid heading drag was blocked"); },
+});
+let crossGridPrevented = false;
+handlers.dragover({
+  target: outside,
+  clientX: 0,
+  clientY: 0,
+  dataTransfer: transfer,
+  preventDefault() { crossGridPrevented = true; },
+});
+assert.strictEqual(crossGridPrevented, false);
+assert.deepStrictEqual(names(), ["a", "c", "b"]);
+handlers.dragend({target: a});
+""".replace("__REPORT_SCRIPT__", json.dumps(script))
 
         completed = subprocess.run(
             [shutil.which("node"), "-e", harness],
@@ -2149,6 +2435,75 @@ assert.deepStrictEqual(
 
         self.assertNotIn("보고 기간 메트릭 변화", html)
 
+    def test_metric_charts_omit_data_disk_when_no_additional_mount_exists(self):
+        report = self._sample_report()
+        metric = report.server_metrics[0]
+        metric["data_fs_details"] = []
+        metric["raw_metrics"]["fs_usert"]["avg"] = [
+            metric["raw_metrics"]["fs_usert"]["avg"][0]
+        ]
+
+        html = HtmlReportRenderer().render(report)
+        metric_charts = html.split(
+            '<section class="report-section metric-trends">', 1
+        )[1].split("</section>", 1)[0]
+
+        self.assertIn(
+            "OS Disk File System Utilization Average",
+            metric_charts,
+        )
+        self.assertNotIn(
+            "Data Disk File System Utilization Average",
+            metric_charts,
+        )
+        self.assertNotIn("server-chart-4", metric_charts)
+
+    def test_metric_series_disambiguate_duplicate_server_names(self):
+        timestamp = 1781485200000
+
+        def metric(server_id, value):
+            entry = {
+                "dimensions": {"mnt_nm": "/"},
+                "raw": {"dps": [[timestamp, value]]},
+            }
+            return {
+                "server_id": server_id,
+                "server_name": "duplicate",
+                "os_fs_details": [{"mount": "/"}],
+                "data_fs_details": [],
+                "raw_metrics": {
+                    "used_rto": {"avg": [entry]},
+                    "fs_usert": {"avg": [entry]},
+                },
+            }
+
+        renderer = HtmlReportRenderer()
+        metrics = [metric("server-1", 10), metric("server-2", 90)]
+        period = self._sample_report().period
+
+        cpu = renderer._metric_series(metrics, "used_rto", period)
+        filesystem = renderer._metric_series(
+            metrics,
+            "fs_usert",
+            period,
+            filesystem_group="os",
+        )
+
+        self.assertEqual(
+            cpu,
+            {
+                "duplicate (server-1)": [(timestamp, 10.0)],
+                "duplicate (server-2)": [(timestamp, 90.0)],
+            },
+        )
+        self.assertEqual(
+            filesystem,
+            {
+                "duplicate (server-1) · /": [(timestamp, 10.0)],
+                "duplicate (server-2) · /": [(timestamp, 90.0)],
+            },
+        )
+
     def test_chart_splits_lines_across_missing_intervals(self):
         renderer = HtmlReportRenderer()
         two_hours = 2 * 60 * 60 * 1000
@@ -2264,6 +2619,10 @@ assert.deepStrictEqual(
         )[1].split("</tr>", 1)[0]
         self.assertNotIn("<details", insight_data_row)
         self.assertNotIn("<th scope=\"col\">상세</th>", insight_html)
+        self.assertIn("<summary>상세 정보</summary>", insight_html)
+        self.assertIn("<summary>상세 정보</summary>", activity_html)
+        self.assertNotIn("<summary>상세 1개</summary>", insight_html)
+        self.assertNotIn("<summary>상세 1개</summary>", activity_html)
         self.assertIn("&lt;insight-detail&gt;", insight_html)
         self.assertIn("&lt;activity-detail&gt;", activity_html)
         self.assertNotIn("must-not-render", activity_html)

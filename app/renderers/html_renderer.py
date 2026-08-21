@@ -25,6 +25,7 @@ from app.renderers.infrastructure_presenter import (
     server_spec_summary,
 )
 from app.report_branding import normalize_customer_logo_data_uri
+from app.report_analysis.changes import summarize_activity_events
 from app.report_analysis.provenance import (
     CALCULATED,
     OBSERVED,
@@ -205,7 +206,82 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     image.src = sourceUrl;
   };
 
+  const moveChartCard = (button) => {
+    const card = button.closest(".chart-card");
+    const grid = card && card.parentElement;
+    if (!grid || !grid.classList.contains("chart-grid")) return;
+    const sibling = button.dataset.chartMove === "previous"
+      ? card.previousElementSibling
+      : card.nextElementSibling;
+    if (!sibling || !sibling.classList.contains("chart-card")) return;
+    grid.insertBefore(
+      card,
+      button.dataset.chartMove === "previous"
+        ? sibling
+        : sibling.nextElementSibling
+    );
+  };
+
+  let draggedChartCard = null;
+
+  document.addEventListener("dragstart", (event) => {
+    const handle = event.target.closest("[data-chart-drag-handle]");
+    const card = handle && handle.closest(".chart-card");
+    if (
+      !card
+      || !card.parentElement.classList.contains("chart-grid")
+    ) return;
+    draggedChartCard = card;
+    card.classList.add("is-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", "chart-card");
+    }
+  });
+
+  document.addEventListener("dragover", (event) => {
+    const target = event.target.closest(".chart-card");
+    if (
+      !draggedChartCard
+      || !target
+      || target === draggedChartCard
+      || target.parentElement !== draggedChartCard.parentElement
+    ) return;
+    event.preventDefault();
+    const bounds = target.getBoundingClientRect();
+    const draggedBounds = draggedChartCard.getBoundingClientRect();
+    const sameRow = Math.abs(draggedBounds.top - bounds.top)
+      < Math.min(draggedBounds.height, bounds.height) / 2;
+    const insertBefore = sameRow
+      ? event.clientX < bounds.left + bounds.width / 2
+      : event.clientY < bounds.top + bounds.height / 2;
+    const reference = insertBefore
+      ? target
+      : target.nextElementSibling;
+    target.parentElement.insertBefore(draggedChartCard, reference);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  });
+
+  document.addEventListener("drop", (event) => {
+    const target = event.target.closest(".chart-card");
+    if (
+      draggedChartCard
+      && target
+      && target.parentElement === draggedChartCard.parentElement
+    ) event.preventDefault();
+  });
+
+  document.addEventListener("dragend", () => {
+    if (draggedChartCard) draggedChartCard.classList.remove("is-dragging");
+    draggedChartCard = null;
+  });
+
   document.addEventListener("click", (event) => {
+    const move = event.target.closest("[data-chart-move]");
+    if (move) {
+      moveChartCard(move);
+      return;
+    }
     const toggle = event.target.closest("[data-chart-toggle]");
     if (toggle) {
       toggleSeries(toggle);
@@ -1752,29 +1828,18 @@ class HtmlReportRenderer:
             if display.report_options.section_enabled("insight_events")
             else ""
         )
+        activity_summary_html, activity_collapsed_summary = (
+            self._activity_attention_summary(report, display.activity_events)
+        )
         activity_html = (
             self._section(
                 "Cloud Activity Tracer",
                 "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
-                self._activity_table(display.activity_events),
+                activity_summary_html
+                + self._activity_table(display.activity_events),
                 len(display.activity_events),
                 collapsed=True,
-                collapsed_summary=self._counted_values_summary(
-                    display.activity_events,
-                    "result",
-                    {
-                        "SUCCESS": "성공",
-                        "SUCCEEDED": "성공",
-                        "FAIL": "실패",
-                        "FAILED": "실패",
-                        "FAILURE": "실패",
-                        "ERROR": "오류",
-                        "DENIED": "거부",
-                        "REJECTED": "거부",
-                    },
-                    empty="결과 정보 없음",
-                    priority_labels=("실패", "오류", "거부", "성공"),
-                ),
+                collapsed_summary=activity_collapsed_summary,
             )
             if display.report_options.section_enabled("activity_history")
             else ""
@@ -2701,10 +2766,7 @@ class HtmlReportRenderer:
             )
             cards.append(f"""
       <article class="chart-card">
-        <div class="chart-heading">
-          <h3>{self._text(title)}</h3>
-          <p>{self._text(description)}</p>
-        </div>
+        {self._chart_heading(title, description)}
         {self._line_chart(
             title,
             series,
@@ -2721,12 +2783,10 @@ class HtmlReportRenderer:
             present_categories - rendered_categories,
             key=lambda item: tuple(monitored_categories).index(item),
         ):
+            category_title = monitored_categories[category]
             cards.append(f"""
       <article class="chart-card">
-        <div class="chart-heading">
-          <h3>{self._text(monitored_categories[category])}</h3>
-          <p>Cloud Insight 모니터링 데이터 상태</p>
-        </div>
+        {self._chart_heading(category_title, "Cloud Insight 모니터링 데이터 상태")}
         <p class="empty-state chart-empty">표시할 시계열이 없습니다. 권한, 모니터링 활성화 여부와 데이터 보관 기간을 확인하십시오.</p>
       </article>""")
 
@@ -2735,7 +2795,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 눌러 비교할 자원을 여러 개 선택할 수 있으며, 선택이 없으면 전체를 표시합니다.</p>
+          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 눌러 비교할 자원을 여러 개 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 제목을 끌거나 앞·뒤 버튼으로 순서를 바꿀 수 있습니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
@@ -2841,12 +2901,24 @@ class HtmlReportRenderer:
                 "fixed",
             ),
             (
-                "File System Utilization Average",
-                f"서버별 전체 파일시스템 {aggregation_label} 평균 사용률",
+                "OS Disk File System Utilization Average",
+                f"서버·OS 마운트별 {aggregation_label} 평균 사용률",
                 self._metric_series(
                     server_metrics,
                     metric_name="fs_usert",
                     period=period,
+                    filesystem_group="os",
+                ),
+                "fixed",
+            ),
+            (
+                "Data Disk File System Utilization Average",
+                f"서버·추가 마운트별 데이터 디스크 {aggregation_label} 평균 사용률",
+                self._metric_series(
+                    server_metrics,
+                    metric_name="fs_usert",
+                    period=period,
+                    filesystem_group="data",
                 ),
                 "fixed",
             ),
@@ -2857,10 +2929,7 @@ class HtmlReportRenderer:
         chart_cards = "".join(
             f"""
       <article class="chart-card">
-        <div class="chart-heading">
-          <h3>{self._text(title)}</h3>
-          <p>{self._text(description)}</p>
-        </div>
+        {self._chart_heading(title, description)}
         {self._line_chart(
             title,
             series,
@@ -2879,23 +2948,48 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>All Server 사용률 추이</h2>
-          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 눌러 비교할 서버를 여러 대 선택할 수 있으며, 선택이 없으면 전체를 표시합니다.</p>
+          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 눌러 비교할 서버를 여러 대 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 제목을 끌거나 앞·뒤 버튼으로 순서를 바꿀 수 있습니다.</p>
         </div>
         <span class="count">{len(charts):,}개 그룹</span>
       </div>
       <div class="chart-grid">{chart_cards}</div>
     </section>"""
 
+    def _chart_heading(self, title: str, description: str) -> str:
+        safe_title = self._text(title)
+        return f"""
+        <div class="chart-heading" data-chart-drag-handle draggable="true"
+             title="끌어서 그래프 순서 변경">
+          <h3>{safe_title}</h3>
+          <p>{self._text(description)}</p>
+        </div>
+        <div class="chart-order-controls" role="group"
+             aria-label="그래프 순서 변경">
+          <button type="button" data-chart-move="previous"
+                  aria-label="{safe_title} 그래프를 앞 순서로 이동">앞으로</button>
+          <button type="button" data-chart-move="next"
+                  aria-label="{safe_title} 그래프를 뒤 순서로 이동">뒤로</button>
+        </div>"""
+
     def _metric_series(
         self,
         server_metrics: List[Dict[str, Any]],
         metric_name: str,
         period: Dict[str, Any],
+        filesystem_group: str | None = None,
     ) -> Dict[str, List[Tuple[int, float]]]:
         period_start, period_end = self._period_bounds(period)
         buckets: Dict[str, Dict[int, List[float]]] = defaultdict(
             lambda: defaultdict(list)
         )
+        server_name_counts: Dict[str, int] = defaultdict(int)
+        for server_metric in server_metrics:
+            if isinstance(server_metric, dict):
+                server_name_counts[str(
+                    server_metric.get("server_name")
+                    or server_metric.get("server_id")
+                    or "unknown"
+                )] += 1
 
         for server_metric in server_metrics:
             if not isinstance(server_metric, dict):
@@ -2918,6 +3012,23 @@ class HtmlReportRenderer:
                 or server_metric.get("server_id")
                 or "unknown"
             )
+            server_id = str(server_metric.get("server_id") or "").strip()
+            if (
+                server_name_counts[server_name] > 1
+                and server_id
+                and server_id != server_name
+            ):
+                server_name = f"{server_name} ({server_id})"
+            filesystem_mounts = set()
+            if filesystem_group:
+                filesystem_mounts = {
+                    str(detail.get("mount") or "").strip()
+                    for detail in self._records(
+                        server_metric.get(
+                            f"{filesystem_group}_fs_details"
+                        )
+                    )
+                }
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
@@ -2926,6 +3037,15 @@ class HtmlReportRenderer:
                 if not isinstance(dimensions, dict):
                     dimensions = {}
                 label = server_name
+                if filesystem_group:
+                    mount_name = str(
+                        dimensions.get("mnt_nm")
+                        or dimensions.get("mount")
+                        or ""
+                    ).strip()
+                    if mount_name not in filesystem_mounts:
+                        continue
+                    label = f"{server_name} · {mount_name}"
 
                 for point_time, point_value in self._metric_points(entry):
                     if (
@@ -3497,7 +3617,7 @@ class HtmlReportRenderer:
             return "-"
         return (
             '<details class="event-details"><summary>'
-            f"상세 {len(items):,}개"
+            "상세 정보"
             "</summary><dl>"
             + "".join(items)
             + "</dl></details>"
@@ -3656,6 +3776,116 @@ class HtmlReportRenderer:
             ),
         )
 
+    def _activity_attention_summary(
+        self,
+        report: ReportResult,
+        rows: List[Dict[str, Any]],
+    ) -> Tuple[str, str]:
+        summary = summarize_activity_events(rows)
+        changes = self._mapping(
+            self._mapping(report.analysis).get("changes")
+        )
+        collection_status = str(changes.get("status") or "").upper()
+        if not collection_status:
+            collection_status = (
+                "AVAILABLE" if summary["total_count"] else "UNAVAILABLE"
+            )
+
+        if not rows and collection_status != "COLLECTED_EMPTY":
+            label = {
+                "FAILED": "수집 실패 · 판정 불가",
+                "PARTIAL": "부분 수집 · 확인된 이력 없음 · 판정 불가",
+                "NOT_REQUESTED": "수집 대상 아님 · 판정 불가",
+            }.get(
+                collection_status,
+                "표시할 이력 없음 · 수집 상태 미확인",
+            )
+            return (
+                '<section class="activity-attention-summary" '
+                'aria-label="Activity Tracer 담당자 확인 요약">'
+                '<h3>담당자 확인 요약</h3>'
+                f'<p>{self._text(label)}</p>'
+                '<div class="operational-status-grid">'
+                + self._analysis_status_card(
+                    "Activity Tracer",
+                    "판정 불가",
+                    {
+                        "FAILED": "failed",
+                        "PARTIAL": "caution",
+                    }.get(collection_status, "unknown"),
+                    (
+                        dataset_source_state(collection_status)
+                        if collection_status == "FAILED"
+                        else UNAVAILABLE
+                    ),
+                )
+                + "</div></section>",
+                label,
+            )
+
+        source_state = CALCULATED
+        cards = [
+            self._analysis_status_card(
+                label,
+                f'{summary[key]:,}건',
+                active_status if summary[key] else "normal",
+                source_state,
+            )
+            for label, key, active_status in (
+                ("로그인 실패", "login_failure_count", "risk"),
+                ("전체 실패·거부 작업", "failure_count", "risk"),
+                ("생성·추가 성공", "created_success_count", "normal"),
+                ("삭제·분리 성공", "deleted_success_count", "caution"),
+            )
+        ]
+        if summary["unknown_result_count"]:
+            cards.append(self._analysis_status_card(
+                "결과 미확인",
+                f'{summary["unknown_result_count"]:,}건',
+                "caution",
+                source_state,
+            ))
+
+        status_prefix = {
+            "PARTIAL": (
+                f'부분 수집 · 확인된 {summary["total_count"]:,}건 기준'
+            ),
+            "COLLECTED_EMPTY": "수집 완료 · 이력 없음",
+            "FAILED": (
+                f'수집 실패 · 확인된 {summary["total_count"]:,}건만 표시'
+            ),
+            "UNAVAILABLE": (
+                f'수집 상태 미확인 · 표시된 {summary["total_count"]:,}건 기준'
+            ),
+        }.get(
+            collection_status,
+            f'관측 {summary["total_count"]:,}건 기준',
+        )
+        failure_text = f'전체 실패·거부 {summary["failure_count"]:,}건'
+        if summary["login_failure_count"]:
+            failure_text += f' (로그인 {summary["login_failure_count"]:,}건)'
+        collapsed_parts = [
+            status_prefix,
+            failure_text,
+            f'생성·추가 성공 {summary["created_success_count"]:,}건',
+            f'삭제·분리 성공 {summary["deleted_success_count"]:,}건',
+        ]
+        if summary["unknown_result_count"]:
+            collapsed_parts.append(
+                f'결과 미확인 {summary["unknown_result_count"]:,}건'
+            )
+        collapsed_summary = " · ".join(collapsed_parts)
+        content = (
+            '<section class="activity-attention-summary" '
+            'aria-label="Activity Tracer 담당자 확인 요약">'
+            '<h3>담당자 확인 요약</h3>'
+            '<p>성공으로 기록된 명시적 생성·추가·삭제·분리 작업과 실패 기록을 '
+            '요약합니다. 실제 자원 상태는 인벤토리와 함께 확인하십시오.</p>'
+            f'<div class="operational-status-grid">{"".join(cards)}</div>'
+            '</section>'
+        )
+        return content, collapsed_summary
+
     def _activity_actor(self, row: Dict[str, Any]) -> str:
         product_data = row.get("product_data")
         if not isinstance(product_data, dict):
@@ -3744,7 +3974,7 @@ class HtmlReportRenderer:
         )
         return (
             '<details class="event-details"><summary>'
-            f"상세 {len(items):,}개"
+            "상세 정보"
             "</summary><dl>"
             + "".join(visible_items)
             + "</dl>"

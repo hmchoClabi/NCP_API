@@ -690,6 +690,47 @@ class ReportAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(finding["category"], "EVENT")
 
+    def test_activity_attention_summary_is_conservative(self):
+        actions = (
+            ("create-en", "Create Server", "SUCCESS"),
+            ("create-ko", "서버 생성", "성공"),
+            ("attach", "Attach Block Storage", "SUCCESS"),
+            ("delete-en", "Delete NIC", "SUCCESS"),
+            ("delete-ko", "서버 삭제/반납", "완료"),
+            ("detach", "Detach Block Storage", "SUCCESS"),
+            ("login-en", "Login", "FAIL"),
+            ("login-ko", "로그인", "실패"),
+            ("failure", "Reboot", "REJECTED"),
+            ("read", "Get create options", "SUCCESS"),
+            ("read-ko", "생성 내역 조회", "성공"),
+            (
+                "termination-text",
+                "Set access control with server termination",
+                "SUCCESS",
+            ),
+            ("unknown", "Create Server", "PENDING"),
+        )
+        report = self._report(activity_events={
+            "events": [
+                {
+                    "event_id": event_id,
+                    "action_name": action,
+                    "result": result,
+                }
+                for event_id, action, result in actions
+            ]
+        })
+
+        changes = analyze_report(report)["changes"]
+
+        self.assertEqual(changes["total_count"], 13)
+        self.assertEqual(changes["success_count"], 9)
+        self.assertEqual(changes["failure_count"], 3)
+        self.assertEqual(changes["unknown_result_count"], 1)
+        self.assertEqual(changes["created_success_count"], 3)
+        self.assertEqual(changes["deleted_success_count"], 3)
+        self.assertEqual(changes["login_failure_count"], 2)
+
     def test_distinct_events_on_same_resource_have_distinct_fingerprints(self):
         report = self._report(insight_events=[
             {

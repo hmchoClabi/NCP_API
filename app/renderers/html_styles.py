@@ -169,6 +169,15 @@ h1 { margin: 0; font-size: clamp(2rem, 4vw, 2.9rem); line-height: 1.15; letter-s
 .operational-status.partial { border-left-color: #f59e0b; }
 .operational-status.risk,
 .operational-status.failed { border-left-color: var(--danger); }
+.activity-attention-summary {
+  margin: 0 0 18px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.activity-attention-summary h3 { margin: 0; font-size: 1rem; }
+.activity-attention-summary > p { margin: 5px 0 12px; color: var(--muted); font-size: .84rem; }
 .summary-facts {
   display: flex;
   flex-wrap: wrap;
@@ -400,14 +409,40 @@ table:not(.table-with-details) tbody tr:hover,
   gap: 16px;
 }
 .chart-card {
+  position: relative;
   min-width: 0;
   padding: 18px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
+.chart-card.is-dragging { opacity: .55; border-color: #60a5fa; }
+.chart-heading {
+  padding-right: 105px;
+  cursor: grab;
+}
+.chart-heading:active { cursor: grabbing; }
 .chart-heading h3 { margin: 0; font-size: 1rem; }
 .chart-heading p { margin: 3px 0 12px; color: var(--muted); font-size: .82rem; }
+.chart-order-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 4px;
+}
+.chart-order-controls button {
+  padding: 3px 7px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 750;
+}
+.chart-order-controls button:hover { color: #1d4ed8; background: #eff6ff; }
 .chart-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -468,6 +503,7 @@ table:not(.table-with-details) tbody tr:hover,
 .chart-legend-item[aria-pressed="true"] { color: #1d4ed8; background: #eff6ff; }
 .chart-legend-item.is-muted { opacity: .42; text-decoration: line-through; }
 .chart-legend-item:focus-visible,
+.chart-order-controls button:focus-visible,
 .chart-toolbar button:focus-visible,
 .chart-toolbar select:focus-visible { outline: 3px solid rgba(37, 99, 235, .35); }
 [data-chart-series] { cursor: pointer; }
@@ -540,7 +576,8 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .summary-grid, .report-section { break-inside: avoid; }
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
-  .chart-toolbar, .chart-legend { display: none; }
+  .chart-toolbar, .chart-legend, .chart-order-controls { display: none; }
+  .chart-heading { padding-right: 0; cursor: default; }
   .chart-series-hidden { display: inline !important; }
   .report-section { padding: 18px; }
   .technical-appendix { border: 0; }

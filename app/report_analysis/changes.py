@@ -10,7 +10,16 @@ from .provenance import CALCULATED, OBSERVED, UNAVAILABLE
 from .support import field, flatten_records
 
 
-_FAILURE_RESULTS = {"FAIL", "FAILED", "FAILURE", "ERROR", "DENIED"}
+_SUCCESS_RESULTS = {"SUCCESS", "SUCCEEDED", "OK", "성공", "완료"}
+_FAILURE_RESULTS = {
+    "FAIL", "FAILED", "FAILURE", "ERROR", "DENIED", "REJECTED",
+    "실패", "오류", "거부", "거절",
+}
+_CREATE_ACTIONS = {"create", "add", "attach", "register", "associate", "assign"}
+_DELETE_ACTIONS = {
+    "delete", "remove", "detach", "terminate", "deregister",
+    "disassociate", "unassign",
+}
 _READ_PREFIXES = (
     "get", "list", "search", "describe", "download", "read", "view",
 )
@@ -24,11 +33,11 @@ _CHANGE_PREFIXES = (
 
 def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
     events = flatten_records(field(report, "activity_events", []))
+    activity_summary = summarize_activity_events(events)
     by_product: Counter[str] = Counter()
     by_action: Counter[str] = Counter()
     items: list[dict[str, Any]] = []
     findings: list[Finding] = []
-    success_count = failure_count = 0
     change_count = failed_change_count = read_count = 0
 
     for event in events:
@@ -39,16 +48,13 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         )
         action = str(event.get("action_name") or "작업 미확인")
         operation_kind = _operation_kind(action)
-        result = str(event.get("result") or "UNKNOWN").upper()
+        result = _normalized_result(event.get("result"))
+        result_kind = _result_kind(result)
         by_product[product] += 1
         by_action[action] += 1
-        if result in {"SUCCESS", "SUCCEEDED", "OK"}:
-            success_count += 1
-        elif result in _FAILURE_RESULTS:
-            failure_count += 1
         if operation_kind == "CHANGE":
             change_count += 1
-            if result in _FAILURE_RESULTS:
+            if result_kind == "FAILURE":
                 failed_change_count += 1
         elif operation_kind == "READ":
             read_count += 1
@@ -69,7 +75,7 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
             "user_type": event.get("user_type"),
             "source_type": event.get("source_type"),
         })
-        if result in _FAILURE_RESULTS:
+        if result_kind == "FAILURE":
             if operation_kind == "CHANGE":
                 rule_id = "ACTIVITY_CHANGE_FAILED"
                 category = "CHANGE"
@@ -113,11 +119,9 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         reverse=True,
     )
     return {
+        **activity_summary,
         "status": "AVAILABLE" if events else "UNAVAILABLE",
         "source_state": CALCULATED if events else UNAVAILABLE,
-        "total_count": len(events),
-        "success_count": success_count,
-        "failure_count": failure_count,
         "change_count": change_count,
         "failed_change_count": failed_change_count,
         "read_count": read_count,
@@ -125,6 +129,37 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         "by_action": _counter_rows(by_action),
         "items": items,
     }, findings
+
+
+def summarize_activity_events(value: Any) -> dict[str, int]:
+    """담당자가 확인할 Activity 작업을 보수적으로 집계한다."""
+    events = flatten_records(value)
+    summary = {
+        "total_count": len(events),
+        "success_count": 0,
+        "failure_count": 0,
+        "unknown_result_count": 0,
+        "created_success_count": 0,
+        "deleted_success_count": 0,
+        "login_failure_count": 0,
+    }
+    for event in events:
+        result_kind = _result_kind(event.get("result"))
+        action = event.get("action_name")
+        if result_kind == "SUCCESS":
+            summary["success_count"] += 1
+            lifecycle = _lifecycle_kind(action)
+            if lifecycle == "CREATE":
+                summary["created_success_count"] += 1
+            elif lifecycle == "DELETE":
+                summary["deleted_success_count"] += 1
+        elif result_kind == "FAILURE":
+            summary["failure_count"] += 1
+            if _is_login_action(action):
+                summary["login_failure_count"] += 1
+        else:
+            summary["unknown_result_count"] += 1
+    return summary
 
 
 def _counter_rows(counter: Counter[str]) -> list[dict[str, Any]]:
@@ -146,4 +181,50 @@ def _operation_kind(action: str) -> str:
     return "UNKNOWN"
 
 
-__all__ = ["analyze_changes"]
+def _normalized_result(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return "UNKNOWN"
+    return value.strip().upper()
+
+
+def _result_kind(value: Any) -> str:
+    normalized = _normalized_result(value)
+    if normalized in _SUCCESS_RESULTS:
+        return "SUCCESS"
+    if normalized in _FAILURE_RESULTS:
+        return "FAILURE"
+    return "UNKNOWN"
+
+
+def _lifecycle_kind(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return "OTHER"
+    action = value.strip()
+    words = action.split()
+    first = words[0].casefold().strip(":_-()[]")
+    last = words[-1].casefold().strip(":_-()[]")
+    if first in _CREATE_ACTIONS or last in {"생성", "추가", "연결"}:
+        return "CREATE"
+    if (
+        first in _DELETE_ACTIONS
+        or "".join(character for character in action.casefold() if character.isalnum())
+        == "servertermination"
+        or any(
+            part in {"삭제", "제거", "반납", "분리"}
+            for part in last.split("/")
+        )
+    ):
+        return "DELETE"
+    return "OTHER"
+
+
+def _is_login_action(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = "".join(
+        character for character in value.casefold() if character.isalnum()
+    )
+    return normalized in {"login", "signin", "로그인"}
+
+
+__all__ = ["analyze_changes", "summarize_activity_events"]
