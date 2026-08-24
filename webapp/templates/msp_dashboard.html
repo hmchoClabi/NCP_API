@@ -5,6 +5,10 @@
 {% set storage = artifact_storage|default({'status': 'UNAVAILABLE'}, true) %}
 {% set storage_status = storage.status|default('UNAVAILABLE', true) %}
 {% set storage_labels = {'NORMAL': '정상', 'WARNING': '주의', 'CRITICAL': '위험', 'UNAVAILABLE': '확인 불가'} %}
+{% set review = recent_review %}
+{% set report_type_labels = {'DAILY': '일간', 'WEEKLY': '주간', 'MONTHLY': '월간', 'CUSTOM': '사용자 지정'} %}
+{% set category_labels = {'DATA_QUALITY': '수집 신뢰도', 'METRIC': '성능 지표', 'EVENT': '이벤트', 'CHANGE': '변경 이력', 'AVAILABILITY': '가용성', 'PERFORMANCE': '성능', 'SECURITY': '보안', 'COST': '비용', 'OPERATION': '운영'} %}
+{% set severity_labels = {'CRITICAL': '즉시 확인', 'WARNING': '우선 확인', 'REVIEW': '변경 검토'} %}
 <section class="panel storage-panel {{ storage_status|lower }}" aria-labelledby="storage-title">
   <div class="panel-heading">
     <div><h2 id="storage-title">보고서 저장공간</h2><p>{% if storage_status == 'NORMAL' %}저장공간 여유가 있습니다.{% elif storage_status == 'WARNING' %}80% 이상 사용 중입니다. 정리 또는 증설을 계획하세요.{% elif storage_status == 'CRITICAL' %}90% 이상 사용 중입니다. 즉시 정리하거나 증설하세요.{% else %}저장공간 정보를 확인할 수 없습니다. PVC 상태를 점검하세요.{% endif %}</p></div>
@@ -33,14 +37,42 @@
   <article class="stat-card"><span>전체 고객</span><strong>{{ summary.customer_count }}</strong><small>활성·온보딩 고객사</small></article>
   <article class="stat-card blue"><span>민간 고객</span><strong>{{ summary.public_count }}</strong><small>Public 환경</small></article>
   <article class="stat-card violet"><span>공공 고객</span><strong>{{ summary.gov_count }}</strong><small>GOV 환경</small></article>
-  <article class="stat-card alert"><span>확인 필요</span><strong>{{ summary.issue_count }}</strong><small>오류·이벤트·미수집</small></article>
+  <article class="stat-card alert"><span>점검 고객</span><strong>{{ summary.issue_count }}</strong><small>어제 이후 점검 후보</small></article>
 </section>
-<section class="panel">
-  <div class="panel-heading"><div><h2>확인이 필요한 고객</h2><p>최근 보고서 기준으로 수집 오류와 주요 이벤트를 모았습니다.</p></div></div>
-  {% if issue_customers %}
-  <div class="table-wrap"><table><thead><tr><th>고객사</th><th>환경</th><th>보고일</th><th>상태</th><th>Critical</th><th>Warning</th><th>수집 오류</th><th></th></tr></thead><tbody>
-  {% for item in issue_customers %}<tr><td><strong>{{ item.customer_name }}</strong><small>{{ item.customer_code }}</small></td><td><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></td><td>{{ item.fact_date or '보고서 없음' }}</td><td><span class="status {{ 'ok' if item.collection_status == 'SUCCESS' else 'warn' }}">{{ item.collection_status or '미수집' }}</span></td><td>{{ item.critical_count or 0 }}</td><td>{{ item.warning_count or 0 }}</td><td>{{ item.collection_error_count or 0 }}</td><td><a class="table-link" href="{{ url_for('msp_customer', tenant_id=item.tenant_id) }}">상세 보기</a></td></tr>{% endfor %}
-  </tbody></table></div>
-  {% else %}<div class="empty"><strong>현재 확인할 이슈가 없습니다.</strong><p>모든 고객 보고서가 정상 상태입니다.</p></div>{% endif %}
+<section class="panel attention-panel" aria-labelledby="recent-review-title">
+  <div class="panel-heading">
+    <div>
+      <h2 id="recent-review-title">어제 이후 MSP 점검 항목</h2>
+      <p>{{ review.window_started_at|kst('%Y-%m-%d %H:%M') }}부터 완료된 보고서 {{ review.report_count }}건 · 고객 {{ review.customer_count }}곳 · 분석 가능 {{ review.analyzed_report_count }}/{{ review.report_count }}건입니다. 현재 장애 확정이 아닌 각 보고기간의 점검 후보입니다.</p>
+    </div>
+    <span class="count-pill">{{ review.attention_count }}건</span>
+  </div>
+  <div class="summary-list attention-counts" aria-label="점검 항목 우선순위">
+    <div><span>즉시 확인</span><strong>{{ review.critical_count }}건</strong></div>
+    <div><span>우선 확인</span><strong>{{ review.warning_count }}건</strong></div>
+    <div><span>변경 검토</span><strong>{{ review.review_count }}건</strong></div>
+  </div>
+  {% if review['items'] %}
+  <div class="table-wrap">
+    <table class="attention-table">
+      <thead><tr><th scope="col">고객·계정</th><th scope="col">점검 대상</th><th scope="col">왜 확인해야 하나</th><th scope="col">어떻게 점검하나</th><th scope="col">근거 보고서</th></tr></thead>
+      <tbody>
+      {% for item in review['items'] %}
+        <tr>
+          <td><strong>{{ item.customer_name }}</strong><small>{{ item.account_name }} · {{ item.customer_code }}</small><small><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></small></td>
+          <td><span class="status {{ item.severity|lower }}">{{ severity_labels.get(item.severity, item.severity) }}</span><strong class="attention-title">{{ item.title }}</strong><small>{{ category_labels.get(item.category, item.category) }}{% if item.resource_name %} · {{ item.resource_name }}{% endif %}</small></td>
+          <td><p>{{ item.impact }}</p>{% if item.evidence %}<div class="attention-evidence">{% for evidence in item.evidence %}<small><strong>{{ evidence.label }}</strong> {{ evidence.value }}{% if evidence.unit %} {{ evidence.unit }}{% endif %}</small>{% endfor %}</div>{% endif %}</td>
+          <td><p>{{ item.recommendation }}</p></td>
+          <td><strong>{{ report_type_labels.get(item.report_type, item.report_type) }} · {{ item.report_status }}</strong><small>보고기간 {{ item.period_start|kst('%Y-%m-%d') }} ~ {{ item.period_end|inclusive_end(item.end_exclusive)|kst('%Y-%m-%d') }}</small><small>생성 {{ item.completed_at|kst }}</small>{% if item.report_count > 1 %}<small>{{ item.report_count }}개 보고서에서 반복</small>{% endif %}<a class="table-link" href="{{ url_for('report_detail', report_id=item.report_id) }}" aria-label="{{ item.customer_name }} {{ report_type_labels.get(item.report_type, item.report_type) }} 보고서 보기">보고서 보기</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif review.report_count == 0 %}
+  <div class="empty"><strong>어제 이후 생성된 보고서가 없습니다.</strong><p>고객별 실행 일정과 Worker 상태를 확인하세요.</p></div>
+  {% else %}
+  <div class="empty"><strong>우선 점검할 항목이 발견되지 않았습니다.</strong><p>어제 이후 생성된 보고서 {{ review.report_count }}건의 수집·검사 범위 기준입니다.</p></div>
+  {% endif %}
 </section>
 {% endblock %}

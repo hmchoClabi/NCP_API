@@ -67,7 +67,7 @@ document.getElementById('select-all-retention-customers')?.addEventListener('cha
 const bulkReportType = document.querySelector('[data-bulk-report-type]');
 const syncScheduleFields = () => document.querySelectorAll('[data-schedule-field]').forEach((field) => {
   const active = field.dataset.scheduleField === bulkReportType?.value;
-  field.hidden = !active;
+  field.setAttribute('aria-disabled', String(!active));
   field.querySelectorAll('input,select').forEach((input) => { input.disabled = !active; });
 });
 bulkReportType?.addEventListener('change', syncScheduleFields);

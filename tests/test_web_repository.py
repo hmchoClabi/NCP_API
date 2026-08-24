@@ -13,6 +13,7 @@ from webapp.repository import (
     ReportCleanupProtectedError,
     _artifact_storage_usage,
     _artifact_fingerprint,
+    _build_dashboard_review,
     _local_report_artifact_paths,
     _preserved_legacy_analysis_policies,
     _remove_queued_artifact,
@@ -60,6 +61,151 @@ class ArtifactStorageUsageTests(unittest.TestCase):
                 "free_bytes": None,
                 "used_percent": None,
             },
+        )
+
+
+class DashboardReviewTests(unittest.TestCase):
+    def test_findings_are_deduplicated_and_successful_changes_stay_reviewable(self):
+        window = datetime(
+            2026, 8, 23, tzinfo=timezone(timedelta(hours=9))
+        )
+        finding = {
+            "fingerprint": "same-finding",
+            "rule_id": "CPU_HIGH",
+            "severity": "CRITICAL",
+            "category": "METRIC",
+            "status": "OPEN",
+            "title": "CPU 사용률이 높습니다.",
+            "resource": {"id": "server-1", "name": "web-1"},
+            "evidence": [{"label": "최대", "value": 95, "unit": "%"}],
+            "impact": "응답 지연 가능성이 있습니다.",
+            "recommendation": "프로세스별 부하를 확인하세요.",
+        }
+        reports = []
+        for report_id, completed_at in (
+            ("report-new", datetime(2026, 8, 24, tzinfo=timezone.utc)),
+            ("report-old", datetime(2026, 8, 23, tzinfo=timezone.utc)),
+        ):
+            reports.append({
+                "id": report_id,
+                "tenant_id": "tenant-1",
+                "cloud_account_id": "account-1",
+                "customer_code": "customer",
+                "customer_name": "Customer",
+                "environment": "public",
+                "account_name": "Primary",
+                "report_type": "DAILY",
+                "status": "SUCCESS",
+                "period_start": completed_at - timedelta(days=1),
+                "period_end": completed_at,
+                "end_exclusive": True,
+                "error_count": 0,
+                "completed_at": completed_at,
+                "analysis": {
+                    "findings": [finding],
+                    "changes": {
+                        "created_success_count": 1,
+                        "deleted_success_count": 0,
+                    },
+                },
+            })
+
+        review = _build_dashboard_review(reports, window)
+
+        self.assertEqual(review["report_count"], 2)
+        self.assertEqual(review["customer_count"], 1)
+        self.assertEqual(review["analyzed_report_count"], 2)
+        self.assertEqual(review["critical_count"], 1)
+        self.assertEqual(review["review_count"], 2)
+        finding_item = next(
+            item for item in review["items"]
+            if item["severity"] == "CRITICAL"
+        )
+        self.assertEqual(finding_item["report_id"], "report-new")
+        self.assertEqual(finding_item["report_count"], 2)
+
+    def test_missing_analysis_and_unexplained_partial_collection_are_visible(self):
+        window = datetime(
+            2026, 8, 23, tzinfo=timezone(timedelta(hours=9))
+        )
+        common = {
+            "tenant_id": "tenant-1",
+            "cloud_account_id": "account-1",
+            "customer_code": "customer",
+            "customer_name": "Customer",
+            "environment": "public",
+            "account_name": "Primary",
+            "report_type": "DAILY",
+            "period_start": datetime(2026, 8, 22, tzinfo=timezone.utc),
+            "period_end": datetime(2026, 8, 23, tzinfo=timezone.utc),
+            "end_exclusive": True,
+            "completed_at": datetime(2026, 8, 23, tzinfo=timezone.utc),
+        }
+        review = _build_dashboard_review([
+            {
+                **common,
+                "id": "missing-analysis",
+                "status": "SUCCESS",
+                "error_count": 0,
+                "analysis": {},
+            },
+            {
+                **common,
+                "id": "partial",
+                "status": "PARTIAL_SUCCESS",
+                "error_count": 2,
+                "analysis": {
+                    "findings": [],
+                    "changes": {"created_success_count": "invalid"},
+                },
+            },
+        ], window)
+
+        self.assertEqual(review["analyzed_report_count"], 1)
+        self.assertEqual(review["warning_count"], 2)
+        self.assertEqual(
+            {item["title"] for item in review["items"]},
+            {
+                "최근 보고서의 운영 분석 결과를 확인할 수 없습니다.",
+                "보고서 수집이 완전하지 않습니다.",
+            },
+        )
+
+    def test_dashboard_query_scopes_recent_snapshots_by_environment(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = {
+            "customer_count": 1,
+            "public_count": 0,
+            "gov_count": 1,
+        }
+        cursor.fetchall.return_value = []
+
+        with patch(
+            "webapp.repository._artifact_storage_usage",
+            return_value={"status": "UNAVAILABLE"},
+        ):
+            dashboard = repository.dashboard({"gov"})
+
+        self.assertEqual(dashboard["summary"]["issue_count"], 0)
+        self.assertEqual(dashboard["recent_review"]["report_count"], 0)
+        self.assertEqual(cursor.execute.call_count, 2)
+        query, parameters = cursor.execute.call_args_list[1].args
+        self.assertIn("report.completed_at >= %s", query)
+        self.assertIn("report.environment = ANY(%s)", query)
+        self.assertIn("public_snapshot.normalized_data -> 'analysis'", query)
+        self.assertIn("tenant.status <> 'OFFBOARDED'", query)
+        self.assertEqual(parameters[1], ["gov"])
+        self.assertEqual(
+            parameters[0].utcoffset(), timedelta(hours=9)
+        )
+        self.assertEqual(
+            (parameters[0].hour, parameters[0].minute), (0, 0)
         )
 
 

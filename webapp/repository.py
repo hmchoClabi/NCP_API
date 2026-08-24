@@ -59,6 +59,8 @@ _LEGACY_ANALYSIS_POLICY_KEYS = (
     "require_backup",
 )
 LOGGER = logging.getLogger(__name__)
+_DASHBOARD_KST = timezone(timedelta(hours=9))
+_DASHBOARD_SEVERITY_ORDER = {"CRITICAL": 0, "WARNING": 1, "REVIEW": 2}
 
 
 class ReportCleanupProtectedError(ValueError):
@@ -191,6 +193,270 @@ def _artifact_storage_usage() -> dict[str, Any]:
         "used_bytes": used,
         "free_bytes": free,
         "used_percent": used_percent,
+    }
+
+
+def _build_dashboard_review(
+    reports: list[dict[str, Any]],
+    window_started_at: datetime,
+) -> dict[str, Any]:
+    """Summarize recent persisted analysis without re-running its rules."""
+
+    grouped: dict[tuple[str, ...], dict[str, Any]] = {}
+    report_ids: set[str] = set()
+    customer_ids: set[str] = set()
+    analyzed_report_ids: set[str] = set()
+
+    def add_item(
+        report: Mapping[str, Any],
+        identity: tuple[str, ...],
+        *,
+        severity: str,
+        category: str,
+        title: str,
+        evidence: Any,
+        impact: str,
+        recommendation: str,
+        resource: Any = None,
+    ) -> None:
+        report_id = str(report.get("id") or "")
+        key = (
+            str(report.get("tenant_id") or ""),
+            str(report.get("cloud_account_id") or ""),
+            *identity,
+        )
+        existing = grouped.get(key)
+        if existing is not None:
+            existing["_report_ids"].add(report_id)
+            existing["report_count"] = len(existing["_report_ids"])
+            return
+        resource_data = resource if isinstance(resource, Mapping) else {}
+        evidence_rows = [
+            dict(entry)
+            for entry in evidence
+            if isinstance(entry, Mapping) and entry.get("value") is not None
+        ] if isinstance(evidence, list) else []
+        grouped[key] = {
+            "tenant_id": report.get("tenant_id"),
+            "customer_code": report.get("customer_code"),
+            "customer_name": report.get("customer_name"),
+            "environment": report.get("environment"),
+            "account_name": (
+                report.get("account_name")
+                or report.get("account_code")
+                or "계정 미확인"
+            ),
+            "report_id": report.get("id"),
+            "report_type": report.get("report_type"),
+            "report_status": report.get("status"),
+            "completed_at": report.get("completed_at"),
+            "period_start": report.get("period_start"),
+            "period_end": report.get("period_end"),
+            "end_exclusive": report.get("end_exclusive", True),
+            "severity": severity,
+            "category": category,
+            "title": title,
+            "evidence": evidence_rows,
+            "impact": impact,
+            "recommendation": recommendation,
+            "resource_name": (
+                resource_data.get("name") or resource_data.get("id") or ""
+            ),
+            "report_count": 1,
+            "_report_ids": {report_id},
+        }
+
+    for report in reports:
+        report_id = str(report.get("id") or "")
+        report_ids.add(report_id)
+        customer_ids.add(str(report.get("tenant_id") or ""))
+        analysis = report.get("analysis")
+        findings = (
+            analysis.get("findings")
+            if isinstance(analysis, Mapping)
+            else None
+        )
+        if not isinstance(findings, list):
+            add_item(
+                report,
+                ("COVERAGE", "ANALYSIS_UNAVAILABLE"),
+                severity="WARNING",
+                category="DATA_QUALITY",
+                title="최근 보고서의 운영 분석 결과를 확인할 수 없습니다.",
+                evidence=[
+                    {"label": "보고서 상태", "value": report.get("status")},
+                    {
+                        "label": "수집 오류",
+                        "value": report.get("error_count") or 0,
+                        "unit": "건",
+                    },
+                ],
+                impact=(
+                    "이 보고서는 통합 대시보드에서 운영 상태를 "
+                    "자동 판정할 수 없습니다."
+                ),
+                recommendation=(
+                    "고객 보고서 설정의 핵심 요약·운영 분석을 활성화한 뒤 "
+                    "보고서를 다시 생성하세요."
+                ),
+            )
+            continue
+
+        analyzed_report_ids.add(report_id)
+        has_quality_finding = False
+        for finding in findings:
+            if not isinstance(finding, Mapping):
+                continue
+            severity = str(finding.get("severity") or "").upper()
+            if (
+                severity not in {"CRITICAL", "WARNING"}
+                or str(finding.get("status") or "OPEN").upper()
+                == "EXCEPTION"
+            ):
+                continue
+            category = str(finding.get("category") or "OPERATION")
+            has_quality_finding = (
+                has_quality_finding or category == "DATA_QUALITY"
+            )
+            resource = (
+                finding.get("resource")
+                if isinstance(finding.get("resource"), Mapping)
+                else {}
+            )
+            fallback = json.dumps(
+                [
+                    finding.get("rule_id"),
+                    finding.get("title"),
+                    resource.get("id"),
+                    resource.get("name"),
+                    resource.get("type"),
+                ],
+                ensure_ascii=False,
+                default=str,
+            )
+            add_item(
+                report,
+                ("FINDING", str(finding.get("fingerprint") or fallback)),
+                severity=severity,
+                category=category,
+                title=str(finding.get("title") or "운영 점검 항목"),
+                evidence=finding.get("evidence"),
+                impact=str(
+                    finding.get("impact")
+                    or "보고기간에 규칙 기반 점검 항목이 탐지되었습니다."
+                ),
+                recommendation=str(
+                    finding.get("recommendation")
+                    or "근거 보고서와 대상 자원의 현재 상태를 확인하세요."
+                ),
+                resource=resource,
+            )
+
+        if (
+            not has_quality_finding
+            and (
+                str(report.get("status") or "").upper()
+                == "PARTIAL_SUCCESS"
+                or int(report.get("error_count") or 0) > 0
+            )
+        ):
+            add_item(
+                report,
+                ("COVERAGE", "COLLECTION_PARTIAL"),
+                severity="WARNING",
+                category="DATA_QUALITY",
+                title="보고서 수집이 완전하지 않습니다.",
+                evidence=[
+                    {"label": "보고서 상태", "value": report.get("status")},
+                    {
+                        "label": "수집 오류",
+                        "value": report.get("error_count") or 0,
+                        "unit": "건",
+                    },
+                ],
+                impact=(
+                    "일부 데이터가 빠져 정상 여부와 추세를 "
+                    "확정할 수 없습니다."
+                ),
+                recommendation=(
+                    "보고서의 데이터 수집 요약에서 실패 데이터셋과 "
+                    "API 권한을 확인한 뒤 다시 생성하세요."
+                ),
+            )
+
+        changes = (
+            analysis.get("changes")
+            if isinstance(analysis.get("changes"), Mapping)
+            else {}
+        )
+        created_count = changes.get("created_success_count")
+        deleted_count = changes.get("deleted_success_count")
+        created_count = (
+            created_count
+            if isinstance(created_count, int)
+            and not isinstance(created_count, bool)
+            and created_count > 0
+            else 0
+        )
+        deleted_count = (
+            deleted_count
+            if isinstance(deleted_count, int)
+            and not isinstance(deleted_count, bool)
+            and deleted_count > 0
+            else 0
+        )
+        if created_count or deleted_count:
+            add_item(
+                report,
+                ("CHANGE_REVIEW", report_id),
+                severity="REVIEW",
+                category="CHANGE",
+                title=(
+                    f"생성·추가 {created_count}건, 삭제·분리 "
+                    f"{deleted_count}건의 승인 여부를 확인하세요."
+                ),
+                evidence=[
+                    {"label": "생성·추가", "value": created_count, "unit": "건"},
+                    {"label": "삭제·분리", "value": deleted_count, "unit": "건"},
+                ],
+                impact=(
+                    "성공한 변경도 승인되지 않았거나 인벤토리·모니터링·"
+                    "과금에 반영되지 않았을 수 있습니다."
+                ),
+                recommendation=(
+                    "Activity Tracer의 수행 계정과 상세 이력을 현재 "
+                    "자원 인벤토리와 대조하세요."
+                ),
+            )
+
+    items = list(grouped.values())
+    for item in items:
+        item.pop("_report_ids", None)
+    items.sort(key=lambda item: (
+        _DASHBOARD_SEVERITY_ORDER.get(str(item.get("severity")), 99),
+        str(item.get("customer_name") or "").casefold(),
+        str(item.get("account_name") or "").casefold(),
+        str(item.get("title") or "").casefold(),
+    ))
+    return {
+        "window_started_at": window_started_at,
+        "report_count": len(report_ids),
+        "customer_count": len(customer_ids),
+        "analyzed_report_count": len(analyzed_report_ids),
+        "affected_customer_count": len({
+            str(item.get("tenant_id") or "") for item in items
+        }),
+        "attention_count": len(items),
+        "critical_count": sum(
+            item["severity"] == "CRITICAL" for item in items
+        ),
+        "warning_count": sum(
+            item["severity"] == "WARNING" for item in items
+        ),
+        "review_count": sum(
+            item["severity"] == "REVIEW" for item in items
+        ),
+        "items": items,
     }
 
 
@@ -1002,6 +1268,11 @@ class PortalRepository:
         self, allowed_environments: Optional[set[str]] = None
     ) -> dict[str, Any]:
         artifact_storage = _artifact_storage_usage()
+        window_started_at = (
+            datetime.now(_DASHBOARD_KST).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=1)
+        )
         if allowed_environments is not None and not allowed_environments:
             return {
                 "summary": {
@@ -1010,16 +1281,23 @@ class PortalRepository:
                     "gov_count": 0,
                     "issue_count": 0,
                 },
-                "issue_customers": [],
+                "recent_review": _build_dashboard_review(
+                    [], window_started_at
+                ),
                 "artifact_storage": artifact_storage,
             }
         tenant_filter = ""
-        status_filter = ""
         parameters: tuple[Any, ...] = ()
+        report_filter = ""
+        report_parameters: tuple[Any, ...] = (window_started_at,)
         if allowed_environments is not None:
             tenant_filter = "AND environment = ANY(%s)"
-            status_filter = "WHERE environment = ANY(%s)"
             parameters = (sorted(allowed_environments),)
+            report_filter = "AND report.environment = ANY(%s)"
+            report_parameters = (
+                window_started_at,
+                sorted(allowed_environments),
+            )
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -1034,30 +1312,53 @@ class PortalRepository:
             summary = cursor.fetchone()
             cursor.execute(
                 f"""
-                SELECT DISTINCT ON (tenant_id)
-                       tenant_id, customer_code, customer_name, environment,
-                       fact_date, collection_status, critical_count, warning_count,
-                       activity_failure_count, collection_error_count, updated_at
-                FROM control.v_msp_customer_daily_status
-                {status_filter}
-                ORDER BY tenant_id, fact_date DESC NULLS LAST
+                SELECT report.id, report.tenant_id,
+                       report.cloud_account_id,
+                       tenant.customer_code, tenant.customer_name,
+                       report.environment, account.account_code,
+                       account.display_name AS account_name,
+                       report.report_type, report.status,
+                       report.period_start, report.period_end,
+                       report.end_exclusive, report.error_count,
+                       report.completed_at,
+                       COALESCE(
+                           CASE
+                               WHEN report.environment = 'public'
+                                   THEN public_snapshot.normalized_data -> 'analysis'
+                               ELSE gov_snapshot.normalized_data -> 'analysis'
+                           END,
+                           '{{}}'::jsonb
+                       ) AS analysis
+                FROM control.report_runs report
+                JOIN control.tenants tenant
+                  ON tenant.id = report.tenant_id
+                LEFT JOIN control.cloud_accounts account
+                  ON account.id = report.cloud_account_id
+                 AND account.tenant_id = report.tenant_id
+                LEFT JOIN public_data.report_snapshots public_snapshot
+                  ON report.environment = 'public'
+                 AND public_snapshot.report_run_id = report.id
+                 AND public_snapshot.tenant_id = report.tenant_id
+                LEFT JOIN gov_data.report_snapshots gov_snapshot
+                  ON report.environment = 'gov'
+                 AND gov_snapshot.report_run_id = report.id
+                 AND gov_snapshot.tenant_id = report.tenant_id
+                WHERE tenant.status <> 'OFFBOARDED'
+                  AND report.status IN ('SUCCESS', 'PARTIAL_SUCCESS')
+                  AND report.completed_at >= %s
+                  {report_filter}
+                ORDER BY report.completed_at DESC, report.id DESC
                 """,
-                parameters,
+                report_parameters,
             )
-            customers = cursor.fetchall()
-        issue_customers = [
-            row for row in customers
-            if row["collection_status"] not in (None, "SUCCESS")
-            or (row["critical_count"] or 0) > 0
-            or (row["warning_count"] or 0) > 0
-            or (row["activity_failure_count"] or 0) > 0
-            or (row["collection_error_count"] or 0) > 0
-            or row["fact_date"] is None
-        ]
-        summary["issue_count"] = len(issue_customers)
+            reports = cursor.fetchall()
+        recent_review = _build_dashboard_review(
+            reports, window_started_at
+        )
+        summary["issue_count"] = recent_review["affected_customer_count"]
         return {
             "summary": summary,
-            "issue_customers": issue_customers,
+            "recent_review": recent_review,
             "artifact_storage": artifact_storage,
         }
 

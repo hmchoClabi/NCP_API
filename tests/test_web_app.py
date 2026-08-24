@@ -37,6 +37,51 @@ class FakePortalRepository:
         self.bulk_retention_updates = []
         self.updated_logos = []
         self.deleted_logos = []
+        self.recent_review = {
+            "window_started_at": datetime(
+                2026, 8, 22, 15, 0, tzinfo=timezone.utc
+            ),
+            "report_count": 2,
+            "customer_count": 1,
+            "analyzed_report_count": 2,
+            "affected_customer_count": 1,
+            "attention_count": 1,
+            "critical_count": 0,
+            "warning_count": 1,
+            "review_count": 0,
+            "items": [{
+                "tenant_id": "tenant-1",
+                "customer_code": "customer",
+                "customer_name": "Customer",
+                "environment": "public",
+                "account_name": "Primary",
+                "report_id": "report-review",
+                "report_type": "DAILY",
+                "report_status": "SUCCESS",
+                "completed_at": datetime(
+                    2026, 8, 23, 1, 30, tzinfo=timezone.utc
+                ),
+                "period_start": datetime(
+                    2026, 8, 22, 15, 0, tzinfo=timezone.utc
+                ),
+                "period_end": datetime(
+                    2026, 8, 23, 15, 0, tzinfo=timezone.utc
+                ),
+                "end_exclusive": True,
+                "severity": "WARNING",
+                "category": "METRIC",
+                "title": "web-1 CPU 사용률이 기준을 초과했습니다.",
+                "resource_name": "web-1",
+                "impact": "응답 지연 가능성이 있어 확인이 필요합니다.",
+                "recommendation": "같은 시간대의 프로세스와 부하를 확인하세요.",
+                "evidence": [{
+                    "label": "최대",
+                    "value": 92.4,
+                    "unit": "%",
+                }],
+                "report_count": 2,
+            }],
+        }
 
     def session_user(self, session_token):
         if not session_token:
@@ -360,7 +405,9 @@ class FakePortalRepository:
                 "customer_count": 1,
                 "public_count": 1,
                 "gov_count": 0,
-                "issue_count": 0,
+                "issue_count": self.recent_review[
+                    "affected_customer_count"
+                ],
             },
             "artifact_storage": {
                 "status": "CRITICAL",
@@ -369,7 +416,7 @@ class FakePortalRepository:
                 "free_bytes": int(0.8 * 1024**3),
                 "used_percent": 92.0,
             },
-            "issue_customers": [],
+            "recent_review": self.recent_review,
         }
 
     def accounts_for_tenants(self, tenant_ids):
@@ -932,6 +979,8 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn(b'name="report_type" value="WEEKLY"', response.data)
         self.assertIn(b'type="week"', response.data)
         self.assertIn(b'name="weekly_day"', response.data)
+        self.assertIn(b'name="report_type" value="MONTHLY"', response.data)
+        self.assertIn(b'name="monthly_day"', response.data)
         self.assertIn(b'name="retention_daily_mode"', response.data)
         self.assertIn(b'name="retention_daily_days"', response.data)
         self.assertIn(b'value="30"', response.data)
@@ -966,6 +1015,49 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("0.80 GiB".encode("utf-8"), response.data)
         self.assertIn("보고서 정리".encode("utf-8"), response.data)
         self.assertIn("증설 안내".encode("utf-8"), response.data)
+
+    def test_msp_dashboard_shows_recent_report_actions_and_evidence(self):
+        response = self.client.get("/msp")
+
+        self.assertEqual(response.status_code, 200)
+        for text in (
+            "어제 이후 MSP 점검 항목",
+            "web-1 CPU 사용률이 기준을 초과했습니다.",
+            "응답 지연 가능성이 있어 확인이 필요합니다.",
+            "같은 시간대의 프로세스와 부하를 확인하세요.",
+            "최대",
+            "92.4 %",
+            "2개 보고서에서 반복",
+            "2026-08-23 10:30:00 KST",
+        ):
+            self.assertIn(text.encode("utf-8"), response.data)
+        self.assertIn(b'href="/reports/report-review"', response.data)
+
+    def test_msp_dashboard_distinguishes_no_reports_from_no_findings(self):
+        base_review = {
+            **self.repository.recent_review,
+            "affected_customer_count": 0,
+            "attention_count": 0,
+            "critical_count": 0,
+            "warning_count": 0,
+            "review_count": 0,
+            "items": [],
+        }
+        for report_count, expected in (
+            (0, "어제 이후 생성된 보고서가 없습니다."),
+            (2, "우선 점검할 항목이 발견되지 않았습니다."),
+        ):
+            with self.subTest(report_count=report_count):
+                self.repository.recent_review = {
+                    **base_review,
+                    "report_count": report_count,
+                    "customer_count": 0 if report_count == 0 else 1,
+                    "analyzed_report_count": report_count,
+                }
+                response = self.client.get("/msp")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(expected.encode("utf-8"), response.data)
 
     def test_msp_operator_sees_storage_without_cleanup_action(self):
         self.use_scoped_msp("MSP_OPERATOR", "public")
@@ -1606,6 +1698,9 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(schedules.status_code, 200)
         self.assertIn(b'<option value="WEEKLY">', schedules.data)
         self.assertIn(b'name="weekly_day"', schedules.data)
+        self.assertIn(b'<option value="MONTHLY">', schedules.data)
+        self.assertIn(b'name="monthly_day"', schedules.data)
+        self.assertNotIn(b'field.hidden = !active', schedules.data)
         self.assertIn("보존 정책 일괄 적용".encode("utf-8"), schedules.data)
         self.assertIn(b'name="tenant_id" value="tenant-1"', schedules.data)
         self.assertEqual(self.client.get("/history").status_code, 200)
