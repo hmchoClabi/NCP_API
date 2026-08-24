@@ -1,8 +1,9 @@
 """보고 기간 계산과 NCP API timestamp 변환을 제공하는 날짜 유틸리티."""
 
 import calendar
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Tuple
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,19 @@ from dateutil.relativedelta import relativedelta
 
 
 KST = ZoneInfo("Asia/Seoul")
+
+
+def parse_iso_week(value: str) -> tuple[date, date, str]:
+    match = re.fullmatch(r"(\d{4})-[Ww](\d{2})", str(value).strip())
+    if not match:
+        raise ValueError("ISO week must use YYYY-Www format.")
+    year, week = (int(part) for part in match.groups())
+    start = date.fromisocalendar(year, week, 1)
+    try:
+        end = start + timedelta(days=6)
+    except OverflowError as exc:
+        raise ValueError("ISO week is outside the supported date range.") from exc
+    return start, end, f"{year:04d}-W{week:02d}"
 
 
 def _now_kst_naive() -> datetime:

@@ -21,6 +21,33 @@
 .range-form { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
 .text-action { border: 0; background: none; color: var(--blue); font-weight: 800; cursor: pointer; }
 .muted { color: var(--muted); }
+.storage-panel { border-left: 4px solid var(--ok); }
+.storage-panel.warning { border-left-color: #d97706; }
+.storage-panel.critical { border-left-color: var(--danger); }
+.storage-panel.unavailable { border-left-color: var(--muted); }
+.storage-panel .panel-heading { align-items: center; }
+.storage-status.normal { background: #e6f7f1; color: #08745f; }
+.storage-status.warning { background: #fff7df; color: #9a5b00; }
+.storage-status.critical { background: #fff0ed; color: #c43e35; }
+.storage-status.unavailable { background: #eef2f7; color: #526175; }
+.storage-usage label { display: flex; justify-content: space-between; margin-bottom: 7px; font-size: 12px; color: var(--muted); }
+.storage-usage strong { color: var(--ink); }
+.storage-meter { width: 100%; height: 12px; accent-color: var(--ok); }
+.storage-panel.warning .storage-meter { accent-color: #d97706; }
+.storage-panel.critical .storage-meter { accent-color: var(--danger); }
+.storage-metrics { margin: 14px 0; }
+.storage-actions { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.storage-guide { max-width: 680px; padding: 9px 12px; border-radius: 9px; background: #f8fafc; color: var(--muted); font-size: 12px; }
+.storage-guide summary { color: var(--blue); font-weight: 800; cursor: pointer; }
+.storage-guide p { margin-top: 8px; line-height: 1.55; }
+.selection-panel { padding: 14px; border-radius: 10px; background: #f8fafc; }
+.selection-panel > label, .selection-options label { display: flex; align-items: center; gap: 8px; }
+.selection-panel input { width: auto; }
+.selection-options { display: flex; gap: 12px 18px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.checkbox-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cleanup-selected-count { align-self: center; color: var(--muted); font-size: 12px; }
+.cleanup-selected-count strong { display: inline; color: var(--ink); }
+.cleanup-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .schedule-form > small { color: var(--muted); }
 .status.pending { background: #e8f0fb; color: #1559b5; }
 .report-detail-shell {

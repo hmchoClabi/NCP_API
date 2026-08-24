@@ -30,7 +30,9 @@ from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
 CUSTOMER_DETAIL_RECENT_LIMIT = 10
 DATA_CLEANUP_CONFIRM_PHRASE = "선택 보고서 삭제"
-DATA_CLEANUP_MAX_SELECTION = 20
+DATA_CLEANUP_MAX_SELECTION = 500
+RETENTION_BULK_MAX_SELECTION = 500
+RETENTION_REPORT_TYPES = ("DAILY", "WEEKLY", "MONTHLY")
 
 
 def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
@@ -44,6 +46,28 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
         ):
             abort(404)
         return tenant
+
+    def retention_policies_from_form() -> dict[str, dict[str, Any]]:
+        return {
+            report_type: {
+                "mode": request.form.get(
+                    f"retention_{report_type.lower()}_mode", "FOREVER"
+                ),
+                "days": request.form.get(
+                    f"retention_{report_type.lower()}_days"
+                ) or None,
+            }
+            for report_type in RETENTION_REPORT_TYPES
+        }
+
+    def active_retention_customers() -> list[dict[str, Any]]:
+        return [
+            customer
+            for customer in repository.tenants(
+                allowed_environments=_msp_admin_environment_scopes(g.user)
+            )
+            if customer.get("status") == "ACTIVE"
+        ]
 
     @app.get("/msp")
     @_msp_required
@@ -89,65 +113,41 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 raise ValueError(
                     f"확인 문구 '{DATA_CLEANUP_CONFIRM_PHRASE}'를 정확히 입력하세요."
                 )
+            selection_scope = request.form.get(
+                "selection_scope", "selected"
+            ).strip().casefold()
+            if selection_scope not in {"selected", "all"}:
+                raise ValueError("정리 요청 범위가 올바르지 않습니다.")
             report_ids = list(dict.fromkeys(
                 report_id.strip()
                 for report_id in request.form.getlist("report_id")
                 if report_id.strip()
             ))
-            if not report_ids:
+            if selection_scope == "selected" and not report_ids:
                 raise ValueError("정리할 보고서를 하나 이상 선택하세요.")
             if len(report_ids) > DATA_CLEANUP_MAX_SELECTION:
                 raise ValueError(
-                    f"한 번에 최대 {DATA_CLEANUP_MAX_SELECTION}건까지 정리할 수 있습니다."
+                    f"한 번에 최대 {DATA_CLEANUP_MAX_SELECTION}건까지 "
+                    "정리 요청할 수 있습니다."
                 )
 
-            candidates = repository.report_cleanup_candidates(
-                _msp_admin_environment_scopes(g.user)
+            result = repository.request_report_cleanup(
+                report_ids if selection_scope == "selected" else None,
+                str(g.user["id"]),
+                allowed_environments=_msp_admin_environment_scopes(g.user),
+                all_eligible=selection_scope == "all",
             )
-            eligible_ids = {
-                str(report["id"])
-                for report in candidates
-                if report["eligible"]
-            }
-            if not set(report_ids).issubset(eligible_ids):
-                raise ValueError(
-                    "선택 항목에 접근할 수 없거나 보호된 보고서가 있습니다. "
-                    "대상을 다시 확인하세요."
-                )
-
-            deleted_count = 0
-            removed_files = 0
-            pending_files = 0
-            skipped_reasons: list[str] = []
-            for report_id in report_ids:
-                try:
-                    deleted = repository.delete_report(
-                        report_id,
-                        str(g.user["id"]),
-                        protect_latest=True,
-                    )
-                except ValueError as exc:
-                    skipped_reasons.append(str(exc))
-                    continue
-                deleted_count += 1
-                removed_files += int(deleted["removed_artifact_files"])
-                pending_files += int(deleted["failed_artifact_files"])
-
-            message = (
-                f"보고서 {deleted_count}건을 정리하고 산출물 파일 "
-                f"{removed_files}개를 삭제했습니다."
-            )
-            if pending_files:
-                message += f" 파일 {pending_files}개는 안전한 재시도 큐에 남았습니다."
-            if skipped_reasons:
-                reasons = "; ".join(dict.fromkeys(skipped_reasons))
-                message += (
-                    f" {len(skipped_reasons)}건은 실행 시점 재검증에서 "
-                    f"건너뛰었습니다: {reasons}"
-                )
+            queued = int(result.get("queued_count") or 0)
+            already_queued = int(result.get("already_queued_count") or 0)
+            protected = int(result.get("protected_count") or 0)
+            message = f"보고서 {queued}건의 백그라운드 정리를 요청했습니다."
+            if already_queued:
+                message += f" 이미 요청된 {already_queued}건은 중복 등록하지 않았습니다."
+            if protected:
+                message += f" 보호 대상 {protected}건은 제외했습니다."
             flash(
                 message,
-                "warning" if pending_files or skipped_reasons else "success",
+                "warning" if not queued or already_queued or protected else "success",
             )
         except ValueError as exc:
             flash(str(exc), "error")
@@ -174,12 +174,49 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
     def msp_schedules():
         scopes = _msp_environment_scopes(g.user)
         admin_scopes = _msp_admin_environment_scopes(g.user)
+        can_manage = "MSP_ADMIN" in set(g.user.get("platform_roles", []))
         return render_template(
             "schedules.html",
             schedules=repository.schedules(scopes),
             schedule_accounts=repository.schedulable_accounts(admin_scopes),
+            retention_customers=(
+                active_retention_customers() if can_manage else []
+            ),
             manageable_environment_scopes=admin_scopes,
         )
+
+    @app.post("/msp/report-retention/bulk")
+    @_msp_admin_required
+    def bulk_report_retention():
+        try:
+            tenant_ids = list(dict.fromkeys(
+                tenant_id.strip()
+                for tenant_id in request.form.getlist("tenant_id")
+                if tenant_id.strip()
+            ))
+            if not tenant_ids:
+                raise ValueError("보존 정책을 적용할 고객을 하나 이상 선택하세요.")
+            if len(tenant_ids) > RETENTION_BULK_MAX_SELECTION:
+                raise ValueError(
+                    f"한 번에 최대 {RETENTION_BULK_MAX_SELECTION}개 고객까지 "
+                    "적용할 수 있습니다."
+                )
+            allowed_ids = {
+                str(customer["id"])
+                for customer in active_retention_customers()
+            }
+            if not set(tenant_ids).issubset(allowed_ids):
+                abort(403)
+            count = repository.bulk_update_report_retention(
+                tenant_ids,
+                retention_policies_from_form(),
+                str(g.user["id"]),
+                allowed_environments=_msp_admin_environment_scopes(g.user),
+            )
+            flash(f"선택한 고객 {count}곳에 보존 정책을 적용했습니다.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_schedules"))
 
     @app.get("/msp/users")
     @_msp_admin_required
@@ -332,11 +369,21 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 try:
                     run_hour = int(request.form.get("run_hour", "9"))
                     run_minute = int(request.form.get("run_minute", "0"))
-                    monthly_day_text = request.form.get("monthly_day", "1")
-                    monthly_day = int(monthly_day_text)
+                    monthly_day_text = request.form.get(
+                        "monthly_day", ""
+                    ).strip()
+                    weekly_day_text = request.form.get(
+                        "weekly_day", ""
+                    ).strip()
+                    monthly_day = (
+                        int(monthly_day_text) if monthly_day_text else None
+                    )
+                    weekly_day = (
+                        int(weekly_day_text) if weekly_day_text else None
+                    )
                 except (TypeError, ValueError) as exc:
                     raise ValueError(
-                        "실행 시각 또는 월간 실행일이 올바르지 않습니다."
+                        "실행 시각 또는 실행 요일·날짜가 올바르지 않습니다."
                     ) from exc
                 count = jobs.bulk_upsert_schedules(
                     account_ids,
@@ -345,6 +392,7 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                     run_minute,
                     monthly_day,
                     str(g.user["id"]),
+                    weekly_day=weekly_day,
                 )
                 flash(f"선택한 계정 {count}개에 일정을 적용했습니다.", "success")
             else:
@@ -454,8 +502,9 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
                     },
                 },
                 str(g.user["id"]),
+                retention_policies=retention_policies_from_form(),
             )
-            flash("고객별 보고서 출력 설정을 저장했습니다.", "success")
+            flash("고객별 보고서 출력·보존 설정을 저장했습니다.", "success")
         except ValueError as exc:
             flash(str(exc), "error")
         return redirect(url_for("msp_customer", tenant_id=tenant_id))

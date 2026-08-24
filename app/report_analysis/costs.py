@@ -253,7 +253,7 @@ def _preferred_fact_names(report: Any) -> tuple[str, ...]:
             "month_to_date_estimate",
             "month_end_projection",
         )
-    if period_type in {"DAILY", "RANGE"}:
+    if period_type in {"DAILY", "WEEKLY", "RANGE"}:
         return ("period_estimate",)
     return (
         "period_estimate",

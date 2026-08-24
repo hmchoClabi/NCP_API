@@ -203,7 +203,21 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn("Data Disk File System Utilization Average", html)
         self.assertIn("web-01 · /", html)
         self.assertIn("web-01 · /data", html)
-        self.assertEqual(html.count("<polyline"), 4)
+        self.assertEqual(html.count('class="chart-line"'), 4)
+        self.assertEqual(html.count('class="chart-hit-line"'), 4)
+        self.assertEqual(html.count('data-chart-tooltip role="status"'), 4)
+        self.assertIn('data-chart-points="[[', html)
+        self.assertIn(',1781485200000,10.0]', html)
+        self.assertNotIn('&quot;timestamp&quot;', html)
+        tooltip_payload = html.split(
+            'data-chart-points="', 1
+        )[1].split('"', 1)[0]
+        self.assertNotIn("KST", tooltip_payload)
+        self.assertNotIn("&quot;", tooltip_payload)
+        first_svg = html.split("<svg ", 1)[1].split("</svg>", 1)[0]
+        self.assertNotIn("data-chart-tooltip", first_svg)
+        self.assertIn('</svg><div class="chart-tooltip"', html)
+        self.assertIn("const copy = svg.cloneNode(true);", html)
         self.assertIn('data-chart-toggle="server-chart-1-series-1"', html)
         self.assertEqual(
             html.count('<button type="button" data-chart-download>'),
@@ -263,6 +277,11 @@ class HtmlReportRendererTests(unittest.TestCase):
             ".chart-toolbar, .chart-legend, .chart-order-controls",
             html,
         )
+        self.assertIn(".chart-tooltip {", html)
+        self.assertIn(".chart-tooltip { display: none; }", html)
+        self.assertIn('line.addEventListener("pointermove"', html)
+        self.assertIn('line.addEventListener("pointerleave"', html)
+        self.assertIn('document.addEventListener("focusin"', html)
         self.assertNotIn('data-chart-series tabindex=', html)
         self.assertNotIn('series.setAttribute("aria-pressed"', html)
         self.assertNotIn('document.addEventListener("keydown"', html)
@@ -305,6 +324,30 @@ class HtmlReportRendererTests(unittest.TestCase):
             HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE,
             f"'sha256-{script_hash}'",
         )
+
+    def test_weekly_report_uses_weekly_brief_label(self):
+        report = self._sample_report()
+        report.period.update({
+            "period_type": "week",
+            "start_dt": "2026-07-27 00:00:00",
+            "end_dt": "2026-08-02 23:59:59",
+            "file_suffix": "20260727_20260802",
+        })
+        report.analysis = {
+            "period_type": "WEEKLY",
+            "data_quality": {"overall_status": "COMPLETE", "datasets": []},
+            "findings": [],
+            "metrics": {},
+            "changes": {},
+            "availability": {},
+            "security": {},
+            "costs": {"facts": []},
+        }
+
+        html = HtmlReportRenderer().render(report)
+
+        self.assertIn("WEEKLY BRIEF", html)
+        self.assertIn("이번 주 요약", html)
 
     def test_collapsed_sections_expose_escaped_decision_summaries(self):
         renderer = HtmlReportRenderer()
@@ -724,6 +767,131 @@ assert.deepStrictEqual(
   ["server-1", "server-2", "server-3", "server-4", "외 1개 선택"]
 );
 """
+
+        completed = subprocess.run(
+            [shutil.which("node"), "-e", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    def test_chart_tooltip_uses_nearest_exact_point_and_legend_focus(self):
+        html = HtmlReportRenderer().render(self._sample_report())
+        script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        harness = r"""
+const assert = require("assert");
+const handlers = {};
+const lineHandlers = {};
+
+class ClassList {
+  constructor() { this.values = new Set(); }
+  add(name) { this.values.add(name); }
+  remove(name) { this.values.delete(name); }
+  contains(name) { return this.values.has(name); }
+  toggle(name, enabled) {
+    if (enabled) this.values.add(name); else this.values.delete(name);
+  }
+}
+
+const tooltip = {hidden: true, textContent: "", style: {}};
+const chart = {
+  getBoundingClientRect() {
+    return {left: 0, top: 0, width: 500, height: 220};
+  },
+  querySelector(selector) {
+    return selector === "[data-chart-tooltip]" ? tooltip : null;
+  },
+  querySelectorAll(selector) {
+    return selector === "[data-chart-toggle]" ? [button] : [];
+  },
+  contains(item) { return item === series; },
+};
+const series = {
+  id: "chart-series-1",
+  classList: new ClassList(),
+  closest(selector) { return selector === ".chart" ? chart : null; },
+  querySelectorAll(selector) {
+    return selector === "[data-chart-points]" ? [line] : [];
+  },
+};
+const line = {
+  dataset: {
+    chartLabel: "server <1>",
+    chartUnit: "%",
+    chartPoints: JSON.stringify([
+      [100, 1781485200000, 12.345],
+      [900, 1781492400000, 67.89],
+    ]),
+  },
+  ownerSVGElement: {
+    viewBox: {baseVal: {x: 0, width: 1000}},
+    getBoundingClientRect() {
+      return {left: 0, width: 500};
+    },
+  },
+  addEventListener(name, handler) { lineHandlers[name] = handler; },
+  closest(selector) {
+    if (selector === "[data-chart-series]") return series;
+    if (selector === ".chart") return chart;
+    return null;
+  },
+};
+const button = {
+  dataset: {chartToggle: series.id},
+  closest(selector) {
+    if (selector === "[data-chart-toggle]") return this;
+    if (selector === ".chart") return chart;
+    return null;
+  },
+};
+
+global.document = {
+  querySelectorAll(selector) {
+    return selector === "[data-chart-points]" ? [line] : [];
+  },
+  getElementById(id) { return id === series.id ? series : null; },
+  addEventListener(name, handler) { handlers[name] = handler; },
+};
+eval(__REPORT_SCRIPT__);
+
+lineHandlers.pointermove({clientX: 445, clientY: 100});
+assert.strictEqual(tooltip.hidden, false);
+assert.strictEqual(
+  tooltip.textContent,
+  "server <1> · 2026-06-15 12:00 KST · 67.89%"
+);
+assert.strictEqual(
+  tooltip.style.transform,
+  "translate(calc(-100% - 10px), calc(-100% - 10px))"
+);
+lineHandlers.pointermove({clientX: 50, clientY: 5});
+assert.strictEqual(
+  tooltip.textContent,
+  "server <1> · 2026-06-15 10:00 KST · 12.345%"
+);
+assert.strictEqual(tooltip.style.transform, "translate(10px, 10px)");
+lineHandlers.pointerleave();
+assert.strictEqual(tooltip.hidden, true);
+
+handlers.focusin({target: button});
+assert.strictEqual(tooltip.hidden, false);
+assert.strictEqual(
+  tooltip.textContent,
+  "server <1> · 2026-06-15 12:00 KST · 67.89%"
+);
+handlers.focusout({target: button});
+assert.strictEqual(tooltip.hidden, true);
+
+series.classList.add("chart-series-hidden");
+lineHandlers.pointermove({clientX: 445, clientY: 100});
+assert.strictEqual(tooltip.hidden, true);
+""".replace("__REPORT_SCRIPT__", json.dumps(script))
 
         completed = subprocess.run(
             [shutil.which("node"), "-e", harness],
@@ -2756,6 +2924,41 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertEqual(sampled[0], points[0])
         self.assertEqual(sampled[-1], points[-1])
         self.assertIn((5_000, 999.0), sampled)
+
+    def test_chart_tooltip_attributes_escape_series_label_and_unit(self):
+        renderer = HtmlReportRenderer()
+        html = renderer._line_chart(
+            "CPU",
+            {'server"><img src=x onerror=alert(1)>': [(0, 12.345)]},
+            {
+                "period_type": "day",
+                "start_dt": "1970-01-01 09:00:00",
+                "end_dt": "1970-01-01 09:01:00",
+            },
+            "fixed",
+            "Min1",
+            unit='%"><script>alert(2)</script>',
+            chart_id="safe-chart",
+        )
+
+        self.assertNotIn("<img", html)
+        self.assertNotIn("<script>alert", html)
+        self.assertIn(
+            'data-chart-label="server&quot;&gt;&lt;img src=x '
+            'onerror=alert(1)&gt;"',
+            html,
+        )
+        self.assertIn(
+            'data-chart-unit="%&quot;&gt;&lt;script&gt;alert(2)'
+            '&lt;/script&gt;"',
+            html,
+        )
+        self.assertIn('data-chart-points="[[58.0,0,12.345]]"', html)
+        self.assertIn(
+            '<polyline points="58.00,228.37 58.00,228.37" '
+            'class="chart-hit-line"',
+            html,
+        )
 
     def test_event_tables_are_sorted_oldest_first(self):
         renderer = HtmlReportRenderer()

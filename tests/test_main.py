@@ -118,6 +118,29 @@ class MainTests(unittest.TestCase):
     @patch("main.validate_settings")
     @patch("main.setup_logging")
     @patch("main.ReportRunner")
+    def test_weekly_target_is_forwarded(
+        self,
+        runner_class,
+        _setup_logging,
+        _validate_settings,
+    ):
+        runner = runner_class.return_value
+
+        main.main(["--target-week", "2026-w31"])
+
+        expected = {
+            "target_month": None,
+            "target_day": None,
+            "start_date": None,
+            "end_date": None,
+            "target_week": "2026-W31",
+        }
+        runner.get_period.assert_called_once_with(**expected)
+        runner.run.assert_called_once_with(**expected)
+
+    @patch("main.validate_settings")
+    @patch("main.setup_logging")
+    @patch("main.ReportRunner")
     def test_runtime_value_error_is_not_reported_as_argument_error(
         self,
         runner_class,
@@ -202,6 +225,33 @@ class MainTests(unittest.TestCase):
             mailer_class.return_value.send.call_args.kwargs["html_body"],
             "<html>summary</html>",
         )
+
+    @patch("main.HtmlReportRenderer")
+    @patch("main.SMTPMailer")
+    @patch("main.SMTPConfig.from_env")
+    def test_send_report_email_labels_weekly_period(
+        self,
+        _config_from_env,
+        mailer_class,
+        _renderer_class,
+    ):
+        report = MagicMock()
+        report.period = {
+            "period_type": "week",
+            "is_full_month": False,
+            "start_dt": "2026-07-27 00:00:00",
+            "end_dt": "2026-08-02 23:59:59",
+            "file_suffix": "20260727_20260802",
+        }
+        report.customer = {"name": "테스트 고객"}
+        report.generated_at = "2026-08-03 09:00:00"
+        runner = MagicMock(output_dir="output/report/test")
+
+        main.send_report_email(report, runner, ["viewer@example.com"])
+
+        send = mailer_class.return_value.send.call_args.kwargs
+        self.assertIn("NCP 주간 보고서", send["subject"])
+        self.assertIn("보고서 유형: 주간", send["body"])
 
     def test_customer_and_gov_options_are_injected_per_run(self):
         with (

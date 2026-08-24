@@ -2,6 +2,33 @@
 {% block title %}MSP 통합 대시보드{% endblock %}
 {% block content %}
 <header class="page-header"><div><span class="eyebrow">MSP CONTROL CENTER</span><h1>통합 대시보드</h1><p>확인이 필요한 고객을 우선순위대로 살펴보세요.</p></div>{% if 'MSP_ADMIN' in current_user.platform_roles %}<a class="secondary" href="{{ url_for('msp_users') }}">MSP 계정 관리</a>{% else %}<span class="live-badge">운영 데이터</span>{% endif %}</header>
+{% set storage = artifact_storage|default({'status': 'UNAVAILABLE'}, true) %}
+{% set storage_status = storage.status|default('UNAVAILABLE', true) %}
+{% set storage_labels = {'NORMAL': '정상', 'WARNING': '주의', 'CRITICAL': '위험', 'UNAVAILABLE': '확인 불가'} %}
+<section class="panel storage-panel {{ storage_status|lower }}" aria-labelledby="storage-title">
+  <div class="panel-heading">
+    <div><h2 id="storage-title">보고서 저장공간</h2><p>{% if storage_status == 'NORMAL' %}저장공간 여유가 있습니다.{% elif storage_status == 'WARNING' %}80% 이상 사용 중입니다. 정리 또는 증설을 계획하세요.{% elif storage_status == 'CRITICAL' %}90% 이상 사용 중입니다. 즉시 정리하거나 증설하세요.{% else %}저장공간 정보를 확인할 수 없습니다. PVC 상태를 점검하세요.{% endif %}</p></div>
+    <span class="status storage-status {{ storage_status|lower }}">{{ storage_labels.get(storage_status, '확인 불가') }}</span>
+  </div>
+  {% if storage_status != 'UNAVAILABLE' %}
+  <div class="storage-usage">
+    <label for="artifact-storage-progress"><span>사용률</span><strong>{{ '%.1f'|format(storage.used_percent) }}%</strong></label>
+    <progress id="artifact-storage-progress" class="storage-meter" value="{{ storage.used_percent }}" max="100">{{ '%.1f'|format(storage.used_percent) }}%</progress>
+  </div>
+  <div class="summary-list storage-metrics" aria-label="저장공간 용량">
+    <div><span>전체</span><strong>{{ '%.2f'|format(storage.total_bytes / 1073741824) }} GiB</strong></div>
+    <div><span>사용</span><strong>{{ '%.2f'|format(storage.used_bytes / 1073741824) }} GiB</strong></div>
+    <div><span>남음</span><strong>{{ '%.2f'|format(storage.free_bytes / 1073741824) }} GiB</strong></div>
+  </div>
+  {% endif %}
+  <div class="storage-actions">
+    {% if 'MSP_ADMIN' in current_user.platform_roles %}<a class="secondary" href="{{ url_for('msp_data_cleanup') }}">보고서 정리</a>{% endif %}
+    <details class="storage-guide">
+      <summary>증설 안내</summary>
+      <p>웹앱은 Kubernetes 변경 권한을 사용하지 않습니다. 플랫폼 운영 담당자에게 보고서 저장 PVC 증설을 요청하고, 완료 후 이 화면에서 남은 용량을 다시 확인하세요.</p>
+    </details>
+  </div>
+</section>
 <section class="stat-grid">
   <article class="stat-card"><span>전체 고객</span><strong>{{ summary.customer_count }}</strong><small>활성·온보딩 고객사</small></article>
   <article class="stat-card blue"><span>민간 고객</span><strong>{{ summary.public_count }}</strong><small>Public 환경</small></article>

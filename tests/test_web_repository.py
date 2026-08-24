@@ -2,18 +2,175 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.report_branding import validate_customer_logo
+from webapp import artifact_cleanup
 from webapp.repository import (
     PortalRepository,
+    ReportCleanupProtectedError,
+    _artifact_storage_usage,
     _artifact_fingerprint,
     _local_report_artifact_paths,
     _preserved_legacy_analysis_policies,
     _remove_queued_artifact,
     _validate_msp_status_change,
+    normalize_report_retention_policies,
+    validate_report_retention_policies,
 )
+
+
+class ArtifactStorageUsageTests(unittest.TestCase):
+    def test_usage_thresholds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for used, free, expected_status, expected_percent in (
+                (799, 201, "NORMAL", 79.9),
+                (800, 200, "WARNING", 80.0),
+                (900, 100, "CRITICAL", 90.0),
+                (800, 100, "WARNING", 88.9),
+            ):
+                with self.subTest(used=used, free=free), patch.dict(
+                    os.environ, {"REPORT_OUTPUT_DIR": directory}
+                ), patch(
+                    "webapp.repository.disk_usage",
+                    return_value=(1000, used, free),
+                ):
+                    usage = _artifact_storage_usage()
+
+                self.assertEqual(usage["status"], expected_status)
+                self.assertEqual(usage["total_bytes"], 1000)
+                self.assertEqual(usage["used_bytes"], used)
+                self.assertEqual(usage["free_bytes"], free)
+                self.assertEqual(usage["used_percent"], expected_percent)
+
+    def test_unavailable_does_not_expose_path_or_error(self):
+        with patch.dict(
+            os.environ, {"REPORT_OUTPUT_DIR": "missing-artifact-directory"}
+        ):
+            usage = _artifact_storage_usage()
+
+        self.assertEqual(
+            usage,
+            {
+                "status": "UNAVAILABLE",
+                "total_bytes": None,
+                "used_bytes": None,
+                "free_bytes": None,
+                "used_percent": None,
+            },
+        )
+
+
+class ReportRetentionPolicyTests(unittest.TestCase):
+    def test_missing_policy_defaults_to_forever_without_accepting_bad_days(self):
+        self.assertEqual(
+            normalize_report_retention_policies({
+                "DAILY": {"mode": "DAYS", "days": 30},
+                "WEEKLY": {"mode": "DAYS", "days": "0"},
+            }),
+            {
+                "DAILY": {"mode": "DAYS", "days": 30},
+                "WEEKLY": {"mode": "FOREVER", "days": None},
+                "MONTHLY": {"mode": "FOREVER", "days": None},
+            },
+        )
+
+    def test_explicit_policy_requires_every_type_and_bounded_days(self):
+        valid = {
+            "DAILY": {"mode": "DAYS", "days": "7"},
+            "WEEKLY": {"mode": "FOREVER", "days": "ignored"},
+            "MONTHLY": {"mode": "DAYS", "days": 3650},
+        }
+
+        self.assertEqual(
+            validate_report_retention_policies(valid)["DAILY"],
+            {"mode": "DAYS", "days": 7},
+        )
+        for invalid in (
+            {"DAILY": {"mode": "FOREVER"}},
+            {**valid, "DAILY": {"mode": "DAYS", "days": 0}},
+            {**valid, "DAILY": {"mode": "DAYS", "days": 3651}},
+            {**valid, "CUSTOM": {"mode": "DAYS", "days": 1}},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                validate_report_retention_policies(invalid)
+
+    def test_report_option_update_preserves_existing_retention(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        retention = {
+            "DAILY": {"mode": "DAYS", "days": 30},
+            "WEEKLY": {"mode": "FOREVER", "days": None},
+            "MONTHLY": {"mode": "FOREVER", "days": None},
+        }
+        cursor.fetchone.side_effect = [
+            {"id": "11111111-1111-1111-1111-111111111111"},
+            {"settings": {"retention_policies": retention}},
+        ]
+
+        repository.update_tenant_report_settings(
+            "11111111-1111-1111-1111-111111111111",
+            {
+                "sections": ["billing"],
+                "resource_categories": [],
+                "monitoring_categories": [],
+            },
+            "22222222-2222-2222-2222-222222222222",
+        )
+
+        upsert = next(
+            call for call in cursor.execute.call_args_list
+            if "ON CONFLICT (tenant_id) DO UPDATE SET" in call.args[0]
+        )
+        stored = json.loads(upsert.args[1][1])
+        self.assertEqual(stored["retention_policies"], retention)
+        self.assertEqual(stored["sections"], ["billing"])
+
+    def test_bulk_retention_update_rechecks_active_scoped_tenants(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        tenant_ids = [
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+        ]
+        cursor.fetchall.return_value = [
+            {"id": tenant_id} for tenant_id in tenant_ids
+        ]
+        policies = {
+            report_type: {"mode": "DAYS", "days": 30}
+            for report_type in ("DAILY", "WEEKLY", "MONTHLY")
+        }
+
+        updated = repository.bulk_update_report_retention(
+            tenant_ids,
+            policies,
+            "33333333-3333-3333-3333-333333333333",
+            allowed_environments={"public"},
+        )
+
+        self.assertEqual(updated, 2)
+        tenant_select = cursor.execute.call_args_list[0]
+        self.assertIn("status = 'ACTIVE'", tenant_select.args[0])
+        self.assertIn("environment = ANY(%s)", tenant_select.args[0])
+        settings_updates = [
+            call for call in cursor.execute.call_args_list
+            if "UPDATE control.tenant_report_settings" in call.args[0]
+        ]
+        self.assertEqual(len(settings_updates), 1)
+        self.assertIn("jsonb_build_object", settings_updates[0].args[0])
+        self.assertEqual(json.loads(settings_updates[0].args[1][0]), policies)
 
 
 class ReportArtifactCleanupTests(unittest.TestCase):
@@ -227,6 +384,206 @@ class TenantDeletionArtifactCleanupTests(unittest.TestCase):
         repository._finish_artifact_cleanup.assert_not_called()
 
 
+class DurableReportCleanupQueueTests(unittest.TestCase):
+    REPORT_ID = "11111111-1111-1111-1111-111111111111"
+    TENANT_ID = "22222222-2222-2222-2222-222222222222"
+    ACTOR_ID = "33333333-3333-3333-3333-333333333333"
+
+    def _repository_with_cursor(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        return repository, cursor
+
+    def test_manual_request_queues_only_currently_eligible_rows(self):
+        repository, cursor = self._repository_with_cursor()
+        protected_id = "44444444-4444-4444-4444-444444444444"
+        queued_id = "55555555-5555-5555-5555-555555555555"
+        cursor.fetchall.side_effect = [
+            [
+                {
+                    "id": self.REPORT_ID,
+                    "cleanup_requested_at": None,
+                    "protection_reason": None,
+                },
+                {
+                    "id": protected_id,
+                    "cleanup_requested_at": None,
+                    "protection_reason": "LATEST",
+                },
+                {
+                    "id": queued_id,
+                    "cleanup_requested_at": datetime.now(timezone.utc),
+                    "protection_reason": "CLEANUP_QUEUED",
+                },
+            ],
+            [{"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}],
+        ]
+
+        result = repository.request_report_cleanup(
+            [self.REPORT_ID, protected_id, queued_id],
+            self.ACTOR_ID,
+            allowed_environments={"public"},
+        )
+
+        self.assertEqual(result, {
+            "queued_count": 1,
+            "already_queued_count": 1,
+            "protected_count": 1,
+        })
+        update = next(
+            call for call in cursor.execute.call_args_list
+            if "SET cleanup_requested_at" in call.args[0]
+        )
+        self.assertIn("retention_policies", update.args[0])
+        self.assertIn("retention_until >= CURRENT_DATE", update.args[0])
+        self.assertIn("latest.status IN", update.args[0])
+        self.assertEqual(update.args[1], (self.ACTOR_ID, [self.REPORT_ID]))
+
+    def test_all_request_only_queues_eligible_preview_rows(self):
+        repository, cursor = self._repository_with_cursor()
+        repository.report_cleanup_candidates = MagicMock(return_value=[
+            {"id": self.REPORT_ID, "eligible": True},
+            {"id": "44444444-4444-4444-4444-444444444444", "eligible": False},
+        ])
+        cursor.fetchall.side_effect = [
+            [{
+                "id": self.REPORT_ID,
+                "cleanup_requested_at": None,
+                "protection_reason": None,
+            }],
+            [{"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}],
+        ]
+
+        result = repository.request_report_cleanup(
+            None,
+            self.ACTOR_ID,
+            allowed_environments={"public"},
+            all_eligible=True,
+        )
+
+        self.assertEqual(result["queued_count"], 1)
+        repository.report_cleanup_candidates.assert_called_once_with({"public"})
+        preview_recheck = cursor.execute.call_args_list[0]
+        self.assertIn("report.id = ANY(%s::uuid[])", preview_recheck.args[0])
+        self.assertEqual(
+            preview_recheck.args[1],
+            (["public"], [self.REPORT_ID]),
+        )
+
+    def test_retention_enqueue_is_bounded_and_malformed_json_is_fail_closed(self):
+        repository, cursor = self._repository_with_cursor()
+        cursor.fetchall.return_value = [
+            {"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}
+        ]
+
+        self.assertEqual(repository.enqueue_expired_report_cleanup(limit=25), 1)
+
+        enqueue = cursor.execute.call_args_list[0]
+        sql = enqueue.args[0]
+        self.assertIn("jsonb_typeof(policy.value -> 'days') = 'number'", sql)
+        self.assertIn("~ '^[1-9][0-9]{0,3}$'", sql)
+        self.assertIn("parsed.retention_days BETWEEN 1 AND 3650", sql)
+        self.assertIn("COALESCE(report.completed_at, report.created_at)", sql)
+        self.assertIn("FOR UPDATE OF report SKIP LOCKED", sql)
+        self.assertIn("retention_until >= CURRENT_DATE", sql)
+        self.assertNotIn("latest", sql.casefold())
+        self.assertEqual(enqueue.args[1], (25,))
+
+    def test_processor_isolates_protected_and_failed_requests(self):
+        repository, cursor = self._repository_with_cursor()
+        protected_id = "44444444-4444-4444-4444-444444444444"
+        failed_id = "55555555-5555-5555-5555-555555555555"
+        cursor.fetchall.return_value = [
+            {
+                "id": self.REPORT_ID,
+                "cleanup_requested_by": None,
+                "cleanup_reason": "RETENTION_POLICY",
+            },
+            {
+                "id": protected_id,
+                "cleanup_requested_by": self.ACTOR_ID,
+                "cleanup_reason": "MANUAL",
+            },
+            {
+                "id": failed_id,
+                "cleanup_requested_by": self.ACTOR_ID,
+                "cleanup_reason": "MANUAL",
+            },
+        ]
+        repository.delete_report = MagicMock(side_effect=[
+            {
+                "removed_artifact_files": 2,
+                "failed_artifact_files": 1,
+            },
+            ReportCleanupProtectedError("protected"),
+            RuntimeError("temporary failure"),
+        ])
+        repository._record_report_cleanup_failure = MagicMock()
+
+        result = repository.process_requested_report_cleanup(limit=3)
+
+        self.assertEqual(result, {
+            "claimed_count": 3,
+            "deleted_count": 1,
+            "protected_count": 1,
+            "failed_count": 1,
+            "removed_artifact_files": 2,
+            "pending_artifact_files": 1,
+        })
+        self.assertEqual(
+            repository.delete_report.call_args_list[0].kwargs,
+            {"protect_latest": False, "automated_retention": True},
+        )
+        self.assertEqual(
+            repository.delete_report.call_args_list[1].kwargs,
+            {"protect_latest": True, "automated_retention": False},
+        )
+        repository._record_report_cleanup_failure.assert_any_call(
+            protected_id,
+            "PROTECTED_AT_EXECUTION",
+            terminal=True,
+        )
+        repository._record_report_cleanup_failure.assert_any_call(
+            failed_id,
+            "DELETE_FAILED",
+            terminal=False,
+        )
+
+    @patch("webapp.artifact_cleanup.PortalRepository")
+    @patch("webapp.artifact_cleanup.DatabaseSettings.from_env")
+    def test_cleanup_consumer_enqueues_expires_processes_and_drains_outbox(
+        self,
+        settings_from_env,
+        repository_class,
+    ):
+        repository = repository_class.return_value
+        repository.enqueue_expired_report_cleanup.return_value = 2
+        repository.process_requested_report_cleanup.return_value = {
+            "deleted_count": 1,
+            "protected_count": 1,
+            "failed_count": 0,
+            "removed_artifact_files": 1,
+        }
+        repository.retry_artifact_cleanup.return_value = (2, 0)
+
+        with patch("sys.argv", ["artifact-cleanup", "--limit", "25"]):
+            artifact_cleanup.main()
+
+        settings_from_env.assert_called_once_with()
+        repository.enqueue_expired_report_cleanup.assert_called_once_with(
+            limit=25
+        )
+        repository.process_requested_report_cleanup.assert_called_once_with(
+            limit=25
+        )
+        repository.retry_artifact_cleanup.assert_called_once_with(limit=25)
+
+
 class ReportDeletionArtifactCleanupTests(unittest.TestCase):
     def test_cleanup_preview_marks_latest_and_scopes_environments(self):
         repository = PortalRepository(MagicMock())
@@ -310,6 +667,106 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
         deleted = repository.delete_report("report-1", "admin-1")
 
         self.assertEqual(deleted["tenant_id"], "tenant-1")
+
+    def test_explicit_forever_policy_blocks_regular_manual_delete(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.side_effect = [
+            {
+                "id": "report-1",
+                "tenant_id": "tenant-1",
+                "environment": "public",
+                "status": "SUCCESS",
+                "report_type": "DAILY",
+                "customer_name": "Customer",
+                "is_latest": False,
+                "retention_protected": False,
+            },
+            {
+                "settings": {
+                    "retention_policies": {
+                        "DAILY": {"mode": "FOREVER", "days": None}
+                    }
+                },
+                "evaluated_at": datetime.now(timezone.utc),
+            },
+        ]
+        repository._queue_artifact_cleanup = MagicMock()
+
+        with self.assertRaisesRegex(
+            ReportCleanupProtectedError,
+            "영구 보존",
+        ):
+            repository.delete_report("report-1", "admin-1")
+
+        repository._queue_artifact_cleanup.assert_not_called()
+
+    def test_automated_delete_rechecks_policy_under_lock_and_audits_basis(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = MagicMock()
+        repository._connect = MagicMock(return_value=connection)
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value = cursor
+        cursor.__enter__.return_value = cursor
+        completed_at = datetime.now(timezone.utc) - timedelta(days=31)
+        cursor.fetchone.side_effect = [
+            {
+                "id": "report-1",
+                "tenant_id": "tenant-1",
+                "environment": "public",
+                "status": "SUCCESS",
+                "report_type": "DAILY",
+                "completed_at": completed_at,
+                "created_at": completed_at - timedelta(minutes=5),
+                "cleanup_reason": "RETENTION_POLICY",
+                "customer_name": "Customer",
+                "is_latest": True,
+                "retention_protected": False,
+            },
+            {
+                "settings": {
+                    "retention_policies": {
+                        "DAILY": {"mode": "DAYS", "days": 30}
+                    }
+                },
+                "evaluated_at": datetime.now(timezone.utc),
+            },
+        ]
+        cursor.fetchall.side_effect = [[], [], []]
+        repository._queue_artifact_cleanup = MagicMock(
+            return_value=(None, 0, 0)
+        )
+
+        repository.delete_report(
+            "report-1",
+            None,
+            protect_latest=False,
+            automated_retention=True,
+        )
+
+        settings_lock = cursor.execute.call_args_list[1]
+        self.assertIn("FOR UPDATE", settings_lock.args[0])
+        audit = next(
+            call for call in cursor.execute.call_args_list
+            if "INSERT INTO audit.data_change_logs" in call.args[0]
+        )
+        changed_fields = json.loads(audit.args[1][3])
+        self.assertTrue(changed_fields["automated"])
+        self.assertEqual(
+            changed_fields["cleanup_reason"],
+            "RETENTION_POLICY_EXPIRED",
+        )
+        self.assertEqual(
+            changed_fields["retention_policy"],
+            {"mode": "DAYS", "days": 30},
+        )
+        self.assertEqual(changed_fields["retention_basis"], "completed_at")
 
     def test_commit_failure_does_not_start_report_file_cleanup(self):
         repository = PortalRepository(MagicMock())

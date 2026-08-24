@@ -9,7 +9,14 @@
 {% set protection_labels = {
   'ACTIVE': '실행 중',
   'LATEST': '계정·보고서 유형별 최신 정상본',
-  'RETENTION': '보존 기한 내'
+  'RETENTION': '보존 기한 내',
+  'POLICY_FOREVER': '영구 보존 정책',
+  'CLEANUP_QUEUED': '정리 요청됨'
+} %}
+{% set cleanup_error_labels = {
+  'INVALID_CLEANUP_REQUEST': '요청 검증 실패 (INVALID_CLEANUP_REQUEST)',
+  'PROTECTED_AT_EXECUTION': '실행 시점 보호 조건 확인 (PROTECTED_AT_EXECUTION)',
+  'DELETE_FAILED': '정리 처리 실패 (DELETE_FAILED)'
 } %}
 {% block title %}데이터 정리{% endblock %}
 {% block content %}
@@ -17,7 +24,7 @@
   <div>
     <span class="eyebrow">DATA CLEANUP</span>
     <h1>데이터 정리</h1>
-    <p>삭제 대상과 예상 용량을 확인한 뒤 보고서를 명시적으로 선택하세요.</p>
+    <p>대상과 예상 용량을 확인한 뒤 백그라운드 정리를 요청하세요.</p>
   </div>
   <span class="count-pill">{{ reports|length }}건 표시 · 목록 상한 500건</span>
 </header>
@@ -25,7 +32,7 @@
 <section class="stat-grid" aria-label="정리 미리보기 요약">
   <article class="stat-card blue"><span>표시 보고서</span><strong>{{ reports|length }}</strong><small>현재 접근 범위</small></article>
   <article class="stat-card"><span>정리 가능</span><strong>{{ summary.eligible_reports }}</strong><small>명시적 선택 가능</small></article>
-  <article class="stat-card violet"><span>보호됨</span><strong>{{ summary.protected_reports }}</strong><small>유형별 최신본·실행 중·보존 기한</small></article>
+  <article class="stat-card violet"><span>보호·요청 중</span><strong>{{ summary.protected_reports }}</strong><small>최신본·실행 중·보존 정책·정리 큐</small></article>
   <article class="stat-card alert"><span>예상 정리 용량</span><strong>{{ file_size(summary.artifact_bytes) }}</strong><small>등록 산출물 {{ summary.artifact_count }}개 기준</small></article>
 </section>
 
@@ -33,7 +40,7 @@
   <div class="panel-heading">
     <div>
       <h2>보고서별 미리보기</h2>
-      <p>정리하면 보고서와 연결된 수집 데이터가 함께 삭제되며 복구할 수 없습니다.</p>
+      <p>요청한 보고서와 연결된 수집 데이터·산출물은 백그라운드에서 정리되며 복구할 수 없습니다.</p>
     </div>
   </div>
   <form method="post" action="{{ url_for('run_data_cleanup') }}">
@@ -41,11 +48,11 @@
     {% if reports %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th scope="col">선택</th><th scope="col">고객·계정</th><th scope="col">보고서</th><th scope="col">생성 시각</th><th scope="col">산출물</th><th scope="col">정리 상태</th></tr></thead>
+        <thead><tr><th scope="col"><label class="checkbox-label"><input id="select-all-cleanup-reports" type="checkbox"{% if not summary.eligible_reports %} disabled{% endif %}> 정리 가능 전체 선택</label></th><th scope="col">고객·계정</th><th scope="col">보고서</th><th scope="col">생성 시각</th><th scope="col">산출물</th><th scope="col">정리 상태</th></tr></thead>
         <tbody>
         {% for report in reports %}
           <tr>
-            <td><input type="checkbox" name="report_id" value="{{ report.id }}" aria-label="{{ report.customer_name }} {{ report.account_name or '기본 계정' }} {{ report.created_at|kst }} 보고서 선택"{% if not report.eligible %} disabled{% endif %}></td>
+            <td><input class="cleanup-report" type="checkbox" name="report_id" value="{{ report.id }}" aria-label="{{ report.customer_name }} {{ report.account_name or '기본 계정' }} {{ report.created_at|kst }} 보고서 선택"{% if not report.eligible %} disabled{% endif %}></td>
             <td><strong>{{ report.customer_name }}</strong><small><span class="tag {{ report.environment }}">{{ '공공' if report.environment == 'gov' else '민간' }}</span> · {{ report.account_name or '기본 계정' }}</small></td>
             <td><strong>{{ report.report_type }} · {{ report.status }}</strong><small>{{ report.period_start|kst('%Y-%m-%d %H:%M') }} ~ {{ report.period_end|inclusive_end|kst('%Y-%m-%d %H:%M') }}</small></td>
             <td>{{ report.created_at|kst }}</td>
@@ -54,9 +61,14 @@
               {% if report.eligible %}
               <span class="status ok">정리 가능</span>
               {% else %}
-              <span class="status warn">보호됨</span>
+              <span class="status {{ 'pending' if report.protection_reason == 'CLEANUP_QUEUED' else 'warn' }}">{{ '정리 요청됨' if report.protection_reason == 'CLEANUP_QUEUED' else '보호됨' }}</span>
+              {% if report.protection_reason == 'CLEANUP_QUEUED' %}
+              <small>{{ report.cleanup_attempt_count|default(0, true) }}회 시도{% if report.cleanup_next_attempt_at %} · 다음 시도 {{ report.cleanup_next_attempt_at|kst }}{% endif %}</small>
+              {% else %}
               <small>{{ protection_labels.get(report.protection_reason, report.protection_reason) }}{% if report.protection_reason == 'RETENTION' and report.retention_until %} · {{ report.retention_until }}까지{% endif %}</small>
               {% endif %}
+              {% endif %}
+              {% if report.cleanup_last_error_code %}<small>이전 요청 결과 · {{ cleanup_error_labels.get(report.cleanup_last_error_code, '처리 실패(재확인 필요)') }}</small>{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -69,15 +81,19 @@
 
     <div class="lifecycle-action permanent-action">
       <div>
-        <strong>선택 보고서 영구 삭제</strong>
-        <p>실행 직전에 권한·최신 정상본·보존 기한을 다시 검증합니다. 공유 또는 내용이 변경된 파일은 삭제하지 않고 안전한 재시도 큐에 남깁니다.</p>
-        <small class="muted">예상 용량은 DB에 등록된 산출물 기준이며, 공유 참조와 구버전 파일에 따라 실제 확보 용량은 달라질 수 있습니다. 한 번에 최대 {{ max_selection }}건입니다.</small>
+        <strong>보고서 정리 요청</strong>
+        <p>권한·최신 정상본·보존 정책을 다시 검증한 뒤 영속 큐에 등록합니다. 실제 파일 삭제는 백그라운드에서 처리되며 실패 항목은 안전하게 재시도합니다.</p>
+        <small class="muted">예상 용량은 DB에 등록된 산출물 기준이며 실제 확보 용량은 달라질 수 있습니다. 선택 요청은 한 번에 최대 {{ max_selection }}건이며, 전체 요청도 현재 표시된 정리 가능 항목(최대 {{ max_selection }}건)에만 적용됩니다.</small>
       </div>
       <div class="danger-form">
         <label>확인 문구
           <input name="confirm_phrase" required autocomplete="off" placeholder="{{ confirm_phrase }}">
         </label>
-        <button class="danger-button" type="submit"{% if not summary.eligible_reports %} disabled{% endif %}>선택 항목 정리</button>
+        <span class="cleanup-selected-count" aria-live="polite"><strong id="cleanup-selected-count">0</strong>건 선택</span>
+        <div class="cleanup-buttons">
+          <button class="danger-button" type="submit" name="selection_scope" value="selected" data-cleanup-selected-submit{% if not summary.eligible_reports %} disabled{% endif %}>선택 항목 정리 요청</button>
+          <button class="danger-button" type="submit" name="selection_scope" value="all"{% if not summary.eligible_reports %} disabled{% endif %}>표시 항목 전체 정리 요청</button>
+        </div>
       </div>
     </div>
   </form>

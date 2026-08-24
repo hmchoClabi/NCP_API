@@ -1,6 +1,44 @@
 (() => {
   "use strict";
 
+  document.querySelectorAll("[data-retention-policy]").forEach((policy) => {
+    const mode = policy.querySelector("[data-retention-mode]");
+    const daysLabel = policy.querySelector("[data-retention-days]");
+    const days = daysLabel?.querySelector("input");
+    const sync = () => {
+      const timed = mode?.value === "DAYS";
+      if (daysLabel) daysLabel.hidden = !timed;
+      if (days) {
+        days.disabled = !timed;
+        days.required = timed;
+      }
+    };
+    mode?.addEventListener("change", sync);
+    sync();
+  });
+
+  const cleanupReports = Array.from(
+    document.querySelectorAll(".cleanup-report:not(:disabled)")
+  );
+  const cleanupSelectAll = document.querySelector("#select-all-cleanup-reports");
+  const cleanupCount = document.querySelector("#cleanup-selected-count");
+  const cleanupSubmit = document.querySelector("[data-cleanup-selected-submit]");
+  const syncCleanupSelection = () => {
+    const selected = cleanupReports.filter((item) => item.checked).length;
+    if (cleanupCount) cleanupCount.textContent = String(selected);
+    if (cleanupSubmit) cleanupSubmit.disabled = selected === 0;
+    if (cleanupSelectAll) {
+      cleanupSelectAll.checked = cleanupReports.length > 0 && selected === cleanupReports.length;
+      cleanupSelectAll.indeterminate = selected > 0 && selected < cleanupReports.length;
+    }
+  };
+  cleanupSelectAll?.addEventListener("change", () => {
+    cleanupReports.forEach((item) => { item.checked = cleanupSelectAll.checked; });
+    syncCleanupSelection();
+  });
+  cleanupReports.forEach((item) => item.addEventListener("change", syncCleanupSelection));
+  syncCleanupSelection();
+
   const region = document.querySelector(".notification-region");
   if (!region) return;
 

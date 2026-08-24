@@ -53,6 +53,129 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     series.closest(".chart").querySelectorAll("[data-chart-toggle]")
   ).find((button) => button.dataset.chartToggle === series.id);
 
+  const hideChartTooltip = (chart) => {
+    const tooltip = chart && chart.querySelector("[data-chart-tooltip]");
+    if (tooltip) tooltip.hidden = true;
+  };
+
+  const chartPointCache = new WeakMap();
+  const chartPoints = (line) => {
+    if (chartPointCache.has(line)) return chartPointCache.get(line);
+    try {
+      const points = JSON.parse(line.dataset.chartPoints || "[]").filter(
+        (point) => Array.isArray(point)
+          && Number.isFinite(Number(point[0]))
+          && Number.isFinite(Number(point[1]))
+          && Number.isFinite(Number(point[2]))
+      );
+      chartPointCache.set(line, points);
+      return points;
+    } catch (error) {
+      chartPointCache.set(line, []);
+      return [];
+    }
+  };
+
+  const exactChartValue = (value, unit) => {
+    const number = Number(value);
+    const text = Number.isFinite(number)
+      ? number.toLocaleString("ko-KR", {maximumFractionDigits: 20})
+      : String(value);
+    const suffix = String(unit || "").trim();
+    if (!suffix) return text;
+    return suffix === "%" ? `${text}%` : `${text} ${suffix}`;
+  };
+
+  const kstDateTime = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const chartTime = (timestamp) => {
+    const parts = Object.fromEntries(
+      kstDateTime.formatToParts(new Date(Number(timestamp))).map(
+        (part) => [part.type, part.value]
+      )
+    );
+    return `${parts.year}-${parts.month}-${parts.day} `
+      + `${parts.hour}:${parts.minute} KST`;
+  };
+
+  const showChartTooltip = (line, point, event) => {
+    const series = line.closest("[data-chart-series]");
+    const chart = line.closest(".chart");
+    if (
+      !chart
+      || !series
+      || series.classList.contains("chart-series-hidden")
+    ) {
+      hideChartTooltip(chart);
+      return;
+    }
+    const tooltip = chart.querySelector("[data-chart-tooltip]");
+    if (!tooltip) return;
+    const chartBounds = chart.getBoundingClientRect();
+    const hasPointer = event && Number.isFinite(Number(event.clientX));
+    const x = hasPointer
+      ? Number(event.clientX) - chartBounds.left
+      : chartBounds.width / 2;
+    const y = hasPointer
+      ? Number(event.clientY) - chartBounds.top
+      : chartBounds.height / 2;
+    tooltip.style.left = `${Math.max(8, Math.min(x, chartBounds.width - 8))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(y, chartBounds.height - 8))}px`;
+    const translateX = x > chartBounds.width / 2
+      ? "calc(-100% - 10px)"
+      : "10px";
+    const translateY = y < 48 ? "10px" : "calc(-100% - 10px)";
+    tooltip.style.transform = `translate(${translateX}, ${translateY})`;
+    tooltip.hidden = false;
+    tooltip.textContent = [
+      line.dataset.chartLabel || "Series",
+      chartTime(point[1]),
+      exactChartValue(point[2], line.dataset.chartUnit),
+    ].join(" · ");
+  };
+
+  const nearestChartPoint = (line, event) => {
+    const points = chartPoints(line);
+    const svg = line.ownerSVGElement;
+    if (!points.length || !svg) return null;
+    const bounds = svg.getBoundingClientRect();
+    const viewBox = svg.viewBox && svg.viewBox.baseVal;
+    const width = viewBox && viewBox.width ? viewBox.width : 1000;
+    const origin = viewBox && Number.isFinite(viewBox.x) ? viewBox.x : 0;
+    const x = origin + (
+      (Number(event.clientX) - bounds.left) / Math.max(bounds.width, 1)
+      * width
+    );
+    return points.reduce(
+      (nearest, point) => (
+        Math.abs(Number(point[0]) - x) < Math.abs(Number(nearest[0]) - x)
+          ? point
+          : nearest
+      ),
+      points[0]
+    );
+  };
+
+  const latestChartPoint = (series) => {
+    let latest = null;
+    Array.from(series.querySelectorAll("[data-chart-points]")).forEach(
+      (line) => chartPoints(line).forEach((point) => {
+        if (!latest || Number(point[1]) > Number(latest.point[1])) {
+          latest = {line, point};
+        }
+      })
+    );
+    return latest;
+  };
+
   const toggleSeries = (button) => {
     const chart = button.closest(".chart");
     const targetSeries = document.getElementById(
@@ -79,6 +202,7 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
       item.classList.toggle("is-muted", !visible);
       series.classList.toggle("chart-series-hidden", !visible);
     });
+    hideChartTooltip(chart);
   };
 
   const appendExportLegend = (chart, copy, viewBox) => {
@@ -311,6 +435,31 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
   document.addEventListener("dragend", () => {
     if (draggedChartCard) draggedChartCard.classList.remove("is-dragging");
     draggedChartCard = null;
+  });
+
+  if (document.querySelectorAll) {
+    document.querySelectorAll("[data-chart-points]").forEach((line) => {
+      line.addEventListener("pointermove", (event) => {
+        const point = nearestChartPoint(line, event);
+        if (point) showChartTooltip(line, point, event);
+      });
+      line.addEventListener("pointerleave", () => {
+        hideChartTooltip(line.closest(".chart"));
+      });
+    });
+  }
+
+  document.addEventListener("focusin", (event) => {
+    const button = event.target.closest("[data-chart-toggle]");
+    if (!button) return;
+    const series = document.getElementById(button.dataset.chartToggle || "");
+    const latest = series && latestChartPoint(series);
+    if (latest) showChartTooltip(latest.line, latest.point, null);
+  });
+
+  document.addEventListener("focusout", (event) => {
+    const button = event.target.closest("[data-chart-toggle]");
+    if (button) hideChartTooltip(button.closest(".chart"));
   });
 
   document.addEventListener("click", (event) => {
@@ -1378,9 +1527,13 @@ class HtmlReportRenderer:
             datasets=datasets,
             cost_enabled=cost_enabled,
         )
-        monthly = analysis.get("period_type") == "MONTHLY"
-        brief_eyebrow = "MONTHLY BRIEF" if monthly else "DAILY BRIEF"
-        brief_title = "이번 달 요약" if monthly else "오늘의 요약"
+        period_type = analysis.get("period_type")
+        if period_type == "MONTHLY":
+            brief_eyebrow, brief_title = "MONTHLY BRIEF", "이번 달 요약"
+        elif period_type == "WEEKLY":
+            brief_eyebrow, brief_title = "WEEKLY BRIEF", "이번 주 요약"
+        else:
+            brief_eyebrow, brief_title = "DAILY BRIEF", "오늘의 요약"
 
         return "".join((
             '<section class="operational-overview" aria-label="운영 판단 요약">',
@@ -3735,6 +3888,7 @@ class HtmlReportRenderer:
                 )
                 coordinates = []
                 circles = []
+                tooltip_points = []
                 show_markers = len(segment) <= 60
                 for point_time, value in segment:
                     x = (
@@ -3750,6 +3904,11 @@ class HtmlReportRenderer:
                         clamped_value / y_max * plot_height
                     )
                     coordinates.append(f"{x:.2f},{y:.2f}")
+                    tooltip_points.append([
+                        round(x, 2),
+                        point_time,
+                        value,
+                    ])
                     if show_markers:
                         circles.append(
                             f'<circle cx="{x:.2f}" cy="{y:.2f}" '
@@ -3760,11 +3919,26 @@ class HtmlReportRenderer:
                             "</title></circle>"
                         )
 
+                tooltip_data = self._text(json.dumps(
+                    tooltip_points,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ))
+                hit_coordinates = (
+                    coordinates
+                    if len(coordinates) > 1
+                    else coordinates * 2
+                )
                 series_parts.append(
                     f'<polyline points="{" ".join(coordinates)}" '
                     f'stroke="{color}" class="chart-line"><title>'
                     f"{self._text(label)}</title></polyline>"
                     + "".join(circles)
+                    + f'<polyline points="{" ".join(hit_coordinates)}" '
+                    'class="chart-hit-line" aria-hidden="true" '
+                    f'data-chart-points="{tooltip_data}" '
+                    f'data-chart-label="{self._text(label)}" '
+                    f'data-chart-unit="{self._text(unit)}"/>'
                 )
             line_parts.append(
                 f'<g id="{series_id}" data-chart-series>'
@@ -3797,10 +3971,14 @@ class HtmlReportRenderer:
             '<style>.chart-grid-line{stroke:#e2e8f0;stroke-width:1}'
             '.chart-axis-label{fill:#64748b;font:13px Arial,sans-serif}'
             '.chart-line{fill:none;stroke-width:2.4;stroke-linejoin:round;'
-            'stroke-linecap:round}.chart-series-hidden{display:none}</style>'
+            'stroke-linecap:round}.chart-hit-line{fill:none;stroke:transparent;'
+            'stroke-width:18;stroke-linecap:round;pointer-events:stroke}'
+            '.chart-series-hidden{display:none}</style>'
             + "".join(grid_parts)
             + "".join(line_parts)
-            + "</svg><div class=\"chart-legend\">"
+            + ('</svg><div class="chart-tooltip" data-chart-tooltip '
+               'role="status" aria-live="polite" aria-atomic="true" '
+               'hidden></div><div class="chart-legend">')
             + "".join(legend_parts)
             + "</div></div>"
         )

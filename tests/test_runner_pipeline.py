@@ -494,6 +494,64 @@ class RunnerPipelineTests(unittest.TestCase):
             interval="Day1",
         )
 
+    def test_runner_uses_min30_metrics_for_weekly_report(self):
+        runner = self._runner_without_factory_init()
+        server_data = [{"server_id": "one"}]
+
+        with patch("app.runner.InsightMetricCollector") as collector_class:
+            collector = collector_class.return_value
+            collector.collect.return_value = []
+            collector.last_errors = []
+            collector._select_metric_interval.return_value = "Min1"
+
+            runner.collect_insight_metrics(
+                server_data=server_data,
+                period={
+                    "start_time": 1,
+                    "end_time": 2,
+                    "period_type": "week",
+                    "is_full_month": False,
+                },
+            )
+
+        collector.collect.assert_called_once_with(
+            server_data,
+            start_time=1,
+            end_time=2,
+            interval="Min30",
+        )
+        collector._select_metric_interval.assert_called_once_with(1, 2)
+
+    def test_runner_keeps_retained_interval_for_old_weekly_report(self):
+        runner = self._runner_without_factory_init()
+        server_data = [{"server_id": "one"}]
+
+        for retained_interval in ("Hour2", "Day1"):
+            with self.subTest(retained_interval=retained_interval), patch(
+                "app.runner.InsightMetricCollector"
+            ) as collector_class:
+                collector = collector_class.return_value
+                collector.collect.return_value = []
+                collector.last_errors = []
+                collector._select_metric_interval.return_value = retained_interval
+
+                runner.collect_insight_metrics(
+                    server_data=server_data,
+                    period={
+                        "start_time": 1,
+                        "end_time": 2,
+                        "period_type": "week",
+                        "is_full_month": False,
+                    },
+                )
+
+            collector.collect.assert_called_once_with(
+                server_data,
+                start_time=1,
+                end_time=2,
+                interval=retained_interval,
+            )
+
     def test_load_balancer_monitoring_keeps_target_group_resources(self):
         runner = self._runner_without_factory_init()
 
@@ -662,6 +720,60 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertEqual(context["month_to_date_end"], "20260807")
         self.assertEqual(context["confirmed_demand_month"], "202607")
         self.assertFalse(context["target_month_closed"])
+
+    def test_iso_week_crossing_month_uses_end_month_billing_context(self):
+        runner = self._runner_without_factory_init()
+        runner._today_kst = lambda: date(2026, 8, 10)
+
+        period = runner.get_period(target_week="2026-W31")
+        context = runner._billing_period_context(period)
+
+        self.assertEqual(period["period_type"], "week")
+        self.assertEqual(period["start_dt"], "2026-07-27 00:00:00")
+        self.assertEqual(period["end_dt"], "2026-08-02 23:59:59")
+        self.assertEqual(period["billing_month"], "202608")
+        self.assertEqual(context["usage_query_end_date"], "20260802")
+        self.assertEqual(context["month_to_date_start"], "20260801")
+        self.assertEqual(context["month_to_date_end"], "20260802")
+
+    def test_weekly_option_preserves_existing_positional_period_arguments(self):
+        runner = self._runner_without_factory_init()
+
+        period = runner.get_period(
+            None,
+            None,
+            "2026-07-01",
+            "2026-07-02",
+        )
+
+        self.assertEqual(period["period_type"], "range")
+        self.assertEqual(period["start_dt"], "2026-07-01 00:00:00")
+        self.assertEqual(period["end_dt"], "2026-07-02 23:59:59")
+
+        captured = {}
+
+        def stop_after_period(**kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("stop after period arguments")
+
+        runner.get_period = stop_after_period
+        with self.assertRaisesRegex(RuntimeError, "stop after period"):
+            runner.run(None, None, "2026-07-01", "2026-07-02")
+
+        self.assertEqual(captured["start_date"], "2026-07-01")
+        self.assertEqual(captured["end_date"], "2026-07-02")
+        self.assertIsNone(captured["target_week"])
+
+    def test_non_week_cross_month_period_keeps_start_billing_month(self):
+        runner = self._runner_without_factory_init()
+
+        period = runner.build_period(
+            start=date(2026, 7, 31),
+            end=date(2026, 8, 2),
+            period_type="range",
+        )
+
+        self.assertEqual(period["billing_month"], "202607")
 
     def test_monthly_snapshot_window_covers_full_report_period(self):
         runner = self._runner_without_factory_init()

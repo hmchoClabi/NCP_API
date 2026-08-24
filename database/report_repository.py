@@ -1586,6 +1586,8 @@ class PostgresReportRepository:
         period_type = str(period.get("period_type") or "").casefold()
         if period_type in {"day", "today", "yesterday"}:
             return "DAILY"
+        if period_type in {"week", "weekly"}:
+            return "WEEKLY"
         if period_type in {"month", "prev_month"}:
             return "MONTHLY"
         return "CUSTOM"

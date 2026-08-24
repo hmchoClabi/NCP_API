@@ -102,15 +102,48 @@ def test_artifact_cleanup_outbox_is_durable_and_msp_only():
     assert "FOR ALL TO ncp_msp_app" in migration
     assert "REFERENCES control.tenants" not in migration
     assert "VALUES ('190'" in migration
-    assert 'schemaVersion: "190"' in (
+
+
+def test_weekly_and_cleanup_migrations_match_schema_wait():
+    weekly_migration = (
+        ROOT / "database" / "schema" / "200_weekly_reports.sql"
+    ).read_text(encoding="utf-8")
+    cleanup_migration = (
+        ROOT / "database" / "schema" / "210_report_cleanup_queue.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS weekly_day smallint" in weekly_migration
+    assert "report_type IN ('DAILY', 'WEEKLY', 'MONTHLY')" in weekly_migration
+    assert (
+        "report_type IN ('DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM')"
+        in weekly_migration
+    )
+    assert "weekly_day BETWEEN 1 AND 7" in weekly_migration
+    assert "VALUES ('200'" in weekly_migration
+    assert "cleanup_requested_at timestamptz" in cleanup_migration
+    assert "cleanup_requested_by uuid" in cleanup_migration
+    assert "cleanup_next_attempt_at timestamptz" in cleanup_migration
+    assert "report_runs_cleanup_due_idx" in cleanup_migration
+    assert "VALUES ('210'" in cleanup_migration
+    assert 'schemaVersion: "210"' in (
         CHART / "values.yaml"
     ).read_text(encoding="utf-8")
     assert "waitForSchema: true" in (
         CHART / "values.yaml"
     ).read_text(encoding="utf-8")
-    assert 'REPORT_SCHEMA_VERSION:-190' in (
+    assert 'REPORT_SCHEMA_VERSION:-210' in (
         ROOT / "deploy" / "docker" / "migrate.sh"
     ).read_text(encoding="utf-8")
+    deployment_guide = (
+        ROOT / "deploy" / "NCP_DEPLOYMENT.md"
+    ).read_text(encoding="utf-8")
+    assert "schema version `210`" in deployment_guide
+    assert "disable every WEEKLY" in deployment_guide
+    assert "WEEKLY job is running" in deployment_guide
+    assert (
+        "must not be rolled back by dropping data or columns"
+        in deployment_guide
+    )
 
 
 def test_artifact_cleanup_has_a_scheduled_least_privilege_consumer():
@@ -419,7 +452,7 @@ def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
     assert "kind: Job" not in manifest
     assert manifest.count("name: wait-schema") == 4
     assert '${registry_endpoint}/ncp-report-migrate:latest' in manifest
-    assert '"190"' in manifest
+    assert '"210"' in manifest
     assert "namespace: ncp-report" in manifest
 
 

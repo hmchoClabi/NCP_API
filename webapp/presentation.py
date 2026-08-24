@@ -92,11 +92,14 @@ def register_presentation(app: Flask) -> None:
         now = datetime.now(KST)
         today = now.date()
         previous_month_end = today.replace(day=1) - timedelta(days=1)
+        previous_week = today - timedelta(days=today.isoweekday())
+        iso_year, iso_week, _ = previous_week.isocalendar()
         return {
             "current_user": g.get("user"),
             "csrf_token": g.get("csrf_token", ""),
             "default_daily_target": (today - timedelta(days=1)).isoformat(),
             "default_monthly_target": previous_month_end.strftime("%Y-%m"),
+            "default_weekly_target": f"{iso_year:04d}-W{iso_week:02d}",
             "default_range_start": (
                 now.replace(second=0, microsecond=0) - timedelta(hours=1)
             ).strftime("%Y-%m-%dT%H:%M"),

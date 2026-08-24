@@ -2,6 +2,7 @@
 {% block title %}전체 실행 일정{% endblock %}
 {% block content %}
 <header class="page-header"><div><span class="eyebrow">MSP SCHEDULER</span><h1>전체 실행 일정</h1><p>전체 고객 또는 선택한 고객 계정에 동일한 자동 실행 일정을 일괄 적용합니다.</p></div><span class="count-pill">{{ schedules|length }}개</span></header>
+{% set weekdays = {1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일'} %}
 
 {% if 'MSP_ADMIN' in current_user.platform_roles %}
 <section class="panel">
@@ -9,10 +10,11 @@
   {% if schedule_accounts %}<form class="form-stack" method="post" action="{{ url_for('bulk_schedules') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="schedule-form">
-      <label>보고서 유형<select name="report_type"><option value="DAILY">일일</option><option value="MONTHLY">월간</option></select></label>
+      <label>보고서 유형<select name="report_type" data-bulk-report-type><option value="DAILY">일일</option><option value="WEEKLY">주간</option><option value="MONTHLY">월간</option></select></label>
       <label>시<input type="number" name="run_hour" min="0" max="23" value="9" required></label>
       <label>분<input type="number" name="run_minute" min="0" max="59" value="0" required></label>
-      <label>월간 실행일<input type="number" name="monthly_day" min="1" max="28" value="1" required></label>
+      <label data-schedule-field="WEEKLY">주간 실행 요일<select name="weekly_day" required>{% for value, day_label in weekdays.items() %}<option value="{{ value }}">{{ day_label }}요일</option>{% endfor %}</select></label>
+      <label data-schedule-field="MONTHLY">월간 실행일<input type="number" name="monthly_day" min="1" max="28" value="1" required></label>
     </div>
     <div style="padding:14px;background:#f8fafc;border-radius:10px">
       <label style="display:flex;align-items:center;gap:8px"><input id="select-all-accounts" type="checkbox" style="width:auto"> <strong>고객 전체 선택</strong></label>
@@ -26,10 +28,30 @@
     <div style="display:flex;gap:9px"><button class="primary" type="submit" name="action" value="create">선택 일정 추가·갱신</button><button class="text-action" type="submit" name="action" value="delete" onclick="return confirm('선택한 계정의 해당 유형 일정을 삭제하시겠습니까?')">선택 일정 삭제</button></div>
   </form>{% else %}<div class="empty compact"><p>활성 API 키가 등록된 고객 계정이 없습니다.</p></div>{% endif %}
 </section>
+
+<section class="panel">
+  <div class="panel-heading"><div><h2>보존 정책 일괄 적용</h2><p>선택한 활성 고객의 일일·주간·월간 보고서 보존 정책을 같은 값으로 변경합니다.</p></div></div>
+  {% if retention_customers %}
+  <form class="form-stack" method="post" action="{{ url_for('bulk_report_retention') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% set retention_policies = {} %}
+    {% include '_retention_policy_fields.html' %}
+    <div class="selection-panel">
+      <label><input id="select-all-retention-customers" type="checkbox"> <strong>활성 고객 전체 선택</strong> <small>최대 500개</small></label>
+      <div class="selection-options">
+        {% for customer in retention_customers %}
+        <label><input class="retention-customer" type="checkbox" name="tenant_id" value="{{ customer.id }}"> {{ customer.customer_name }} <span class="tag {{ customer.environment }}">{{ '공공' if customer.environment == 'gov' else '민간' }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+    <button class="primary" type="submit">선택 고객에 보존 정책 적용</button>
+  </form>
+  {% else %}<div class="empty compact"><p>현재 권한 범위에 적용할 활성 고객이 없습니다.</p></div>{% endif %}
+</section>
 {% endif %}
 
-<section class="panel"><div class="panel-heading"><div><h2>등록 일정</h2><p>민간·공공 고객의 계정별 일일 및 월간 자동 실행 일정입니다.</p></div></div><div class="table-wrap"><table><thead><tr><th>환경</th><th>고객 / 계정</th><th>유형</th><th>실행 시각</th><th>다음 실행</th><th>상태</th><th></th></tr></thead><tbody>
-{% for item in schedules %}<tr><td><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></td><td><strong><a class="table-link" href="{{ url_for('msp_customer', tenant_id=item.tenant_id) }}">{{ item.customer_name }}</a></strong><small>{{ item.account_name }} · {{ item.account_code }}</small></td><td>{{ '일일' if item.report_type == 'DAILY' else '월간' }}</td><td>{% if item.report_type == 'MONTHLY' %}매월 {{ item.monthly_day }}일 {% else %}매일 {% endif %}{{ '%02d:%02d'|format(item.run_hour, item.run_minute) }} KST</td><td>{{ item.next_run_local.strftime('%Y-%m-%d %H:%M') }} KST</td><td><span class="status {{ 'ok' if item.enabled else 'warn' }}">{{ '활성' if item.enabled else '중지' }}</span></td><td>{% if 'MSP_ADMIN' in current_user.platform_roles and (manageable_environment_scopes is none or item.environment in manageable_environment_scopes) %}<form method="post" action="{{ url_for('set_schedule_enabled', schedule_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="enabled" value="{{ 'false' if item.enabled else 'true' }}"><button class="text-action" type="submit">{{ '중지' if item.enabled else '재개' }}</button></form>{% endif %}</td></tr>
+<section class="panel"><div class="panel-heading"><div><h2>등록 일정</h2><p>민간·공공 고객의 계정별 일일·주간·월간 자동 실행 일정입니다.</p></div></div><div class="table-wrap"><table><thead><tr><th>환경</th><th>고객 / 계정</th><th>유형</th><th>실행 시각</th><th>다음 실행</th><th>상태</th><th></th></tr></thead><tbody>
+{% for item in schedules %}<tr><td><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></td><td><strong><a class="table-link" href="{{ url_for('msp_customer', tenant_id=item.tenant_id) }}">{{ item.customer_name }}</a></strong><small>{{ item.account_name }} · {{ item.account_code }}</small></td><td>{{ '일일' if item.report_type == 'DAILY' else ('주간' if item.report_type == 'WEEKLY' else '월간') }}</td><td>{% if item.report_type == 'WEEKLY' %}매주 {{ weekdays.get(item.weekly_day|int, '-') }}요일 {% elif item.report_type == 'MONTHLY' %}매월 {{ item.monthly_day }}일 {% else %}매일 {% endif %}{{ '%02d:%02d'|format(item.run_hour, item.run_minute) }} KST</td><td>{{ item.next_run_local.strftime('%Y-%m-%d %H:%M') }} KST</td><td><span class="status {{ 'ok' if item.enabled else 'warn' }}">{{ '활성' if item.enabled else '중지' }}</span></td><td>{% if 'MSP_ADMIN' in current_user.platform_roles and (manageable_environment_scopes is none or item.environment in manageable_environment_scopes) %}<form method="post" action="{{ url_for('set_schedule_enabled', schedule_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="enabled" value="{{ 'false' if item.enabled else 'true' }}"><button class="text-action" type="submit">{{ '중지' if item.enabled else '재개' }}</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7"><div class="empty compact"><p>등록된 자동 실행 일정이 없습니다.</p></div></td></tr>{% endfor %}
 </tbody></table></div></section>
 <script>
@@ -39,5 +61,16 @@ document.querySelectorAll('.customer-toggle').forEach((toggle) => toggle.addEven
 document.getElementById('select-all-accounts')?.addEventListener('change', (event) => {
   document.querySelectorAll('.schedule-account,.customer-toggle').forEach((item) => { item.checked = event.target.checked; });
 });
+document.getElementById('select-all-retention-customers')?.addEventListener('change', (event) => {
+  document.querySelectorAll('.retention-customer').forEach((item) => { item.checked = event.target.checked; });
+});
+const bulkReportType = document.querySelector('[data-bulk-report-type]');
+const syncScheduleFields = () => document.querySelectorAll('[data-schedule-field]').forEach((field) => {
+  const active = field.dataset.scheduleField === bulkReportType?.value;
+  field.hidden = !active;
+  field.querySelectorAll('input,select').forEach((input) => { input.disabled = !active; });
+});
+bulkReportType?.addEventListener('change', syncScheduleFields);
+syncScheduleFields();
 </script>
 {% endblock %}

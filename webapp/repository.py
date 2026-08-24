@@ -6,9 +6,10 @@ import os
 import re
 import secrets
 from collections.abc import Mapping
-from hashlib import sha256
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
+from shutil import disk_usage
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 from uuid import UUID, uuid4
@@ -28,6 +29,10 @@ from app.report_options import (
 
 
 _ANONYMIZED_VALUE = "[익명화됨]"
+REPORT_RETENTION_TYPES = ("DAILY", "WEEKLY", "MONTHLY")
+REPORT_RETENTION_MIN_DAYS = 1
+REPORT_RETENTION_MAX_DAYS = 3_650
+REPORT_RETENTION_SETTINGS_KEY = "retention_policies"
 _PERSONAL_DATA_KEYS = {
     "account_name", "actor", "actor_id", "email", "email_address",
     "member_no", "member_number", "user", "user_id", "user_name",
@@ -54,6 +59,139 @@ _LEGACY_ANALYSIS_POLICY_KEYS = (
     "require_backup",
 )
 LOGGER = logging.getLogger(__name__)
+
+
+class ReportCleanupProtectedError(ValueError):
+    """보고서가 실행 시점 보호 조건에 걸려 정리할 수 없음을 나타낸다."""
+
+
+def default_report_retention_policies() -> dict[str, dict[str, Any]]:
+    return {
+        report_type: {"mode": "FOREVER", "days": None}
+        for report_type in REPORT_RETENTION_TYPES
+    }
+
+
+def _retention_days(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        days = value
+    elif isinstance(value, str) and re.fullmatch(
+        r"[1-9][0-9]{0,3}", value.strip()
+    ):
+        days = int(value.strip())
+    else:
+        return None
+    if REPORT_RETENTION_MIN_DAYS <= days <= REPORT_RETENTION_MAX_DAYS:
+        return days
+    return None
+
+
+def normalize_report_retention_policies(
+    value: Any,
+) -> dict[str, dict[str, Any]]:
+    normalized = default_report_retention_policies()
+    if not isinstance(value, Mapping):
+        return normalized
+    for report_type in REPORT_RETENTION_TYPES:
+        policy = value.get(report_type)
+        if not isinstance(policy, Mapping):
+            continue
+        mode = str(policy.get("mode") or "").strip().upper()
+        if mode == "FOREVER":
+            normalized[report_type] = {"mode": "FOREVER", "days": None}
+        elif mode == "DAYS":
+            days = _retention_days(policy.get("days"))
+            if days is not None:
+                normalized[report_type] = {"mode": "DAYS", "days": days}
+    return normalized
+
+
+def validate_report_retention_policies(
+    value: Any,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        raise ValueError("보고서 보존 정책은 객체 형식이어야 합니다.")
+    unknown = set(value) - set(REPORT_RETENTION_TYPES)
+    if unknown:
+        raise ValueError("지원하지 않는 보고서 유형이 포함되어 있습니다.")
+    normalized: dict[str, dict[str, Any]] = {}
+    for report_type in REPORT_RETENTION_TYPES:
+        policy = value.get(report_type)
+        if not isinstance(policy, Mapping):
+            raise ValueError(f"{report_type} 보존 정책을 선택하세요.")
+        mode = str(policy.get("mode") or "").strip().upper()
+        if mode == "FOREVER":
+            normalized[report_type] = {"mode": "FOREVER", "days": None}
+            continue
+        if mode != "DAYS":
+            raise ValueError(f"{report_type} 보존 방식을 확인하세요.")
+        days = _retention_days(policy.get("days"))
+        if days is None:
+            raise ValueError(
+                f"{report_type} 보존 기간은 {REPORT_RETENTION_MIN_DAYS}~"
+                f"{REPORT_RETENTION_MAX_DAYS}일 사이여야 합니다."
+            )
+        normalized[report_type] = {"mode": "DAYS", "days": days}
+    return normalized
+
+
+def _explicit_report_retention_policy(
+    settings: Any,
+    report_type: str,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(settings, Mapping):
+        return None
+    policies = settings.get(REPORT_RETENTION_SETTINGS_KEY)
+    if not isinstance(policies, Mapping):
+        return None
+    policy = policies.get(report_type)
+    if not isinstance(policy, Mapping):
+        return None
+    mode = str(policy.get("mode") or "").strip().upper()
+    if mode == "FOREVER":
+        return {"mode": "FOREVER", "days": None}
+    if mode != "DAYS":
+        return None
+    days = _retention_days(policy.get("days"))
+    return {"mode": "DAYS", "days": days} if days is not None else None
+
+
+def _artifact_storage_usage() -> dict[str, Any]:
+    unavailable = {
+        "status": "UNAVAILABLE",
+        "total_bytes": None,
+        "used_bytes": None,
+        "free_bytes": None,
+        "used_percent": None,
+    }
+    try:
+        output_root = Path(
+            os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
+        ).resolve(strict=True)
+        if not output_root.is_dir():
+            return unavailable
+        total, used, free = disk_usage(output_root)
+    except (OSError, RuntimeError, ValueError):
+        return unavailable
+    usable = used + free
+    if total <= 0 or usable <= 0:
+        return unavailable
+    used_percent = round(used / usable * 100, 1)
+    if used_percent >= 90:
+        status = "CRITICAL"
+    elif used_percent >= 80:
+        status = "WARNING"
+    else:
+        status = "NORMAL"
+    return {
+        "status": status,
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "used_percent": used_percent,
+    }
 
 
 def _local_report_artifact_paths(
@@ -863,6 +1001,7 @@ class PortalRepository:
     def dashboard(
         self, allowed_environments: Optional[set[str]] = None
     ) -> dict[str, Any]:
+        artifact_storage = _artifact_storage_usage()
         if allowed_environments is not None and not allowed_environments:
             return {
                 "summary": {
@@ -872,6 +1011,7 @@ class PortalRepository:
                     "issue_count": 0,
                 },
                 "issue_customers": [],
+                "artifact_storage": artifact_storage,
             }
         tenant_filter = ""
         status_filter = ""
@@ -915,7 +1055,11 @@ class PortalRepository:
             or row["fact_date"] is None
         ]
         summary["issue_count"] = len(issue_customers)
-        return {"summary": summary, "issue_customers": issue_customers}
+        return {
+            "summary": summary,
+            "issue_customers": issue_customers,
+            "artifact_storage": artifact_storage,
+        }
 
     def tenants(
         self,
@@ -990,8 +1134,18 @@ class PortalRepository:
                 (tenant_id,),
             )
             report_settings = cursor.fetchone()
-            tenant["report_options"] = normalize_report_options(
+            stored_settings = (
                 report_settings["settings"] if report_settings else None
+            )
+            tenant["report_options"] = normalize_report_options(
+                stored_settings
+            )
+            tenant["retention_policies"] = (
+                normalize_report_retention_policies(
+                    stored_settings.get(REPORT_RETENTION_SETTINGS_KEY)
+                    if isinstance(stored_settings, Mapping)
+                    else None
+                )
             )
             cursor.execute(
                 """
@@ -1046,29 +1200,65 @@ class PortalRepository:
         tenant_id: str,
         options: dict[str, Any],
         actor_id: str,
+        *,
+        retention_policies: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         normalized = validate_report_options(options)
+        normalized_retention = (
+            validate_report_retention_policies(retention_policies)
+            if retention_policies is not None
+            else None
+        )
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT tenant.id, report_settings.settings
+                SELECT tenant.id
                 FROM control.tenants tenant
-                LEFT JOIN control.tenant_report_settings report_settings
-                  ON report_settings.tenant_id = tenant.id
                 WHERE tenant.id = %s AND tenant.status <> 'OFFBOARDED'
+                FOR UPDATE
                 """,
                 (tenant_id,),
             )
             tenant = cursor.fetchone()
             if not tenant:
                 raise ValueError("활성 고객을 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                INSERT INTO control.tenant_report_settings (tenant_id)
+                VALUES (%s)
+                ON CONFLICT (tenant_id) DO NOTHING
+                """,
+                (tenant_id,),
+            )
+            cursor.execute(
+                """
+                SELECT settings
+                FROM control.tenant_report_settings
+                WHERE tenant_id = %s
+                FOR UPDATE
+                """,
+                (tenant_id,),
+            )
+            settings_row = cursor.fetchone()
+            stored_settings = (
+                settings_row["settings"]
+                if settings_row and isinstance(settings_row["settings"], Mapping)
+                else {}
+            )
             legacy_policies = _preserved_legacy_analysis_policies(
-                tenant.get("settings")
+                stored_settings
             )
             if legacy_policies:
                 normalized["operational_analysis"]["policies"] = (
                     legacy_policies
                 )
+            settings = dict(normalized)
+            if normalized_retention is not None:
+                settings[REPORT_RETENTION_SETTINGS_KEY] = normalized_retention
+            elif REPORT_RETENTION_SETTINGS_KEY in stored_settings:
+                settings[REPORT_RETENTION_SETTINGS_KEY] = stored_settings[
+                    REPORT_RETENTION_SETTINGS_KEY
+                ]
             cursor.execute(
                 """
                 INSERT INTO control.tenant_report_settings (
@@ -1080,10 +1270,15 @@ class PortalRepository:
                 """,
                 (
                     tenant_id,
-                    json.dumps(normalized, ensure_ascii=False),
+                    json.dumps(settings, ensure_ascii=False),
                     actor_id,
                 ),
             )
+            changed_fields: dict[str, Any] = {"report_options": normalized}
+            if normalized_retention is not None:
+                changed_fields[REPORT_RETENTION_SETTINGS_KEY] = (
+                    normalized_retention
+                )
             cursor.execute(
                 """
                 INSERT INTO audit.data_change_logs (
@@ -1096,10 +1291,115 @@ class PortalRepository:
                     tenant_id,
                     actor_id,
                     tenant_id,
-                    json.dumps({"report_options": normalized}, ensure_ascii=False),
+                    json.dumps(changed_fields, ensure_ascii=False),
                 ),
             )
         return normalized
+
+    def update_report_retention(
+        self,
+        tenant_id: str,
+        policies: dict[str, Any],
+        actor_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        normalized = validate_report_retention_policies(policies)
+        updated = self.bulk_update_report_retention(
+            [tenant_id],
+            normalized,
+            actor_id,
+        )
+        if updated != 1:
+            raise ValueError("활성 고객을 찾을 수 없습니다.")
+        return normalized
+
+    def bulk_update_report_retention(
+        self,
+        tenant_ids: list[str],
+        policies: dict[str, Any],
+        actor_id: str,
+        *,
+        allowed_environments: Optional[set[str]] = None,
+    ) -> int:
+        normalized = validate_report_retention_policies(policies)
+        try:
+            normalized_tenant_ids = sorted({
+                str(UUID(str(tenant_id))) for tenant_id in tenant_ids
+            })
+        except (TypeError, ValueError) as exc:
+            raise ValueError("고객 선택값이 올바르지 않습니다.") from exc
+        if not normalized_tenant_ids:
+            raise ValueError("보존 정책을 적용할 고객을 하나 이상 선택하세요.")
+        if len(normalized_tenant_ids) > 500:
+            raise ValueError("한 번에 최대 500개 고객까지 설정할 수 있습니다.")
+        if allowed_environments is not None and not allowed_environments:
+            raise ValueError("접근 가능한 고객을 찾을 수 없습니다.")
+
+        environment_filter = ""
+        parameters: list[Any] = [normalized_tenant_ids]
+        if allowed_environments is not None:
+            environment_filter = "AND environment = ANY(%s)"
+            parameters.append(sorted(allowed_environments))
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT id
+                FROM control.tenants
+                WHERE id = ANY(%s::uuid[])
+                  AND status = 'ACTIVE'
+                  {environment_filter}
+                ORDER BY id
+                FOR UPDATE
+                """,
+                tuple(parameters),
+            )
+            matched_ids = [str(row["id"]) for row in cursor.fetchall()]
+            if matched_ids != normalized_tenant_ids:
+                raise ValueError(
+                    "선택 항목에 접근할 수 없거나 비활성 고객이 있습니다."
+                )
+            cursor.execute(
+                """
+                INSERT INTO control.tenant_report_settings (tenant_id)
+                SELECT unnest(%s::uuid[])
+                ON CONFLICT (tenant_id) DO NOTHING
+                """,
+                (normalized_tenant_ids,),
+            )
+            cursor.execute(
+                """
+                UPDATE control.tenant_report_settings
+                SET settings = settings || jsonb_build_object(
+                        'retention_policies', %s::jsonb
+                    ),
+                    updated_by = %s
+                WHERE tenant_id = ANY(%s::uuid[])
+                """,
+                (
+                    json.dumps(normalized, ensure_ascii=False),
+                    actor_id,
+                    normalized_tenant_ids,
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    tenant_id, actor_id, table_name, record_id,
+                    operation, changed_fields
+                )
+                SELECT tenant.id, %s, 'control.tenant_report_settings',
+                       tenant.id::text, 'UPDATE', %s::jsonb
+                FROM control.tenants tenant
+                WHERE tenant.id = ANY(%s::uuid[])
+                """,
+                (
+                    actor_id,
+                    json.dumps({
+                        REPORT_RETENTION_SETTINGS_KEY: normalized,
+                    }, ensure_ascii=False),
+                    normalized_tenant_ids,
+                ),
+            )
+        return len(normalized_tenant_ids)
 
     def update_tenant_logo(
         self,
@@ -1431,9 +1731,21 @@ class PortalRepository:
                        COALESCE(artifacts.artifact_count, 0) AS artifact_count,
                        COALESCE(artifacts.artifact_bytes, 0) AS artifact_bytes,
                        artifacts.retention_until,
+                       report.cleanup_requested_at,
+                       report.cleanup_reason,
+                       report.cleanup_attempt_count,
+                       report.cleanup_next_attempt_at,
+                       report.cleanup_last_error_code,
                        CASE
                            WHEN report.status IN ('QUEUED', 'RUNNING', 'RETRYING')
                                THEN 'ACTIVE'
+                           WHEN report.cleanup_requested_at IS NOT NULL
+                               THEN 'CLEANUP_QUEUED'
+                           WHEN report_settings.settings
+                                    -> 'retention_policies'
+                                    -> report.report_type
+                                    ->> 'mode' = 'FOREVER'
+                               THEN 'POLICY_FOREVER'
                            WHEN latest.id IS NOT NULL THEN 'LATEST'
                            WHEN artifacts.retention_until >= CURRENT_DATE
                                THEN 'RETENTION'
@@ -1443,6 +1755,8 @@ class PortalRepository:
                 JOIN control.tenants tenant ON tenant.id = report.tenant_id
                 LEFT JOIN control.cloud_accounts account
                     ON account.id = report.cloud_account_id
+                LEFT JOIN control.tenant_report_settings report_settings
+                    ON report_settings.tenant_id = report.tenant_id
                 LEFT JOIN latest_reports latest ON latest.id = report.id
                 LEFT JOIN artifacts ON artifacts.report_run_id = report.id
                 {environment_filter}
@@ -1450,6 +1764,11 @@ class PortalRepository:
                              report.status IN (
                                  'QUEUED', 'RUNNING', 'RETRYING'
                              )
+                             OR report.cleanup_requested_at IS NOT NULL
+                             OR report_settings.settings
+                                    -> 'retention_policies'
+                                    -> report.report_type
+                                    ->> 'mode' = 'FOREVER'
                              OR latest.id IS NOT NULL
                              OR COALESCE(
                                  artifacts.retention_until >= CURRENT_DATE,
@@ -1465,6 +1784,415 @@ class PortalRepository:
         for report in reports:
             report["eligible"] = report.get("protection_reason") is None
         return reports
+
+    def request_report_cleanup(
+        self,
+        report_ids: Optional[list[str]],
+        actor_id: str,
+        *,
+        allowed_environments: Optional[set[str]] = None,
+        all_eligible: bool = False,
+    ) -> dict[str, int]:
+        if all_eligible and report_ids:
+            raise ValueError("전체 정리와 개별 선택을 동시에 요청할 수 없습니다.")
+        if allowed_environments is not None and not allowed_environments:
+            return {
+                "queued_count": 0,
+                "already_queued_count": 0,
+                "protected_count": 0,
+            }
+        normalized_ids: list[str] = []
+        if all_eligible:
+            normalized_ids = [
+                str(report["id"])
+                for report in self.report_cleanup_candidates(
+                    allowed_environments
+                )
+                if report.get("eligible")
+            ]
+            if not normalized_ids:
+                return {
+                    "queued_count": 0,
+                    "already_queued_count": 0,
+                    "protected_count": 0,
+                }
+        else:
+            try:
+                normalized_ids = list(dict.fromkeys(
+                    str(UUID(str(report_id))) for report_id in (report_ids or [])
+                ))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("보고서 선택값이 올바르지 않습니다.") from exc
+            if not normalized_ids:
+                raise ValueError("정리할 보고서를 하나 이상 선택하세요.")
+            if len(normalized_ids) > 500:
+                raise ValueError("한 번에 최대 500건까지 선택할 수 있습니다.")
+
+        filters: list[str] = []
+        parameters: list[Any] = []
+        if allowed_environments is not None:
+            filters.append("report.environment = ANY(%s)")
+            parameters.append(sorted(allowed_environments))
+        filters.append("report.id = ANY(%s::uuid[])")
+        parameters.append(normalized_ids)
+        where_clause = " AND ".join(filters) if filters else "TRUE"
+
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT report.id, report.cleanup_requested_at,
+                       CASE
+                           WHEN report.status IN ('QUEUED', 'RUNNING', 'RETRYING')
+                               THEN 'ACTIVE'
+                           WHEN report.cleanup_requested_at IS NOT NULL
+                               THEN 'CLEANUP_QUEUED'
+                           WHEN report_settings.settings
+                                    -> 'retention_policies'
+                                    -> report.report_type
+                                    ->> 'mode' = 'FOREVER'
+                               THEN 'POLICY_FOREVER'
+                           WHEN report.id = (
+                               SELECT latest.id
+                               FROM control.report_runs latest
+                               WHERE latest.tenant_id = report.tenant_id
+                                 AND latest.cloud_account_id IS NOT DISTINCT FROM
+                                     report.cloud_account_id
+                                 AND latest.report_type = report.report_type
+                                 AND latest.status IN (
+                                     'SUCCESS', 'PARTIAL_SUCCESS'
+                                 )
+                               ORDER BY latest.completed_at DESC NULLS LAST,
+                                        latest.created_at DESC, latest.id DESC
+                               LIMIT 1
+                           ) THEN 'LATEST'
+                           WHEN EXISTS (
+                               SELECT 1
+                               FROM control.report_artifacts artifact
+                               WHERE artifact.report_run_id = report.id
+                                 AND artifact.retention_until >= CURRENT_DATE
+                           ) THEN 'RETENTION'
+                           ELSE NULL
+                       END AS protection_reason
+                FROM control.report_runs report
+                LEFT JOIN control.tenant_report_settings report_settings
+                    ON report_settings.tenant_id = report.tenant_id
+                WHERE {where_clause}
+                ORDER BY report.id
+                """,
+                tuple(parameters),
+            )
+            rows = cursor.fetchall()
+            if not all_eligible and {
+                str(row["id"]) for row in rows
+            } != set(normalized_ids):
+                raise ValueError(
+                    "선택 항목에 접근할 수 없거나 존재하지 않는 보고서가 있습니다."
+                )
+
+            already_queued = sum(
+                row.get("protection_reason") == "CLEANUP_QUEUED"
+                for row in rows
+            )
+            protected = sum(
+                row.get("protection_reason") not in (None, "CLEANUP_QUEUED")
+                for row in rows
+            )
+            eligible_ids = [
+                str(row["id"])
+                for row in rows
+                if row.get("protection_reason") is None
+            ]
+            queued_rows: list[dict[str, Any]] = []
+            if eligible_ids:
+                cursor.execute(
+                    """
+                    UPDATE control.report_runs report
+                    SET cleanup_requested_at = clock_timestamp(),
+                        cleanup_requested_by = %s,
+                        cleanup_reason = 'MANUAL',
+                        cleanup_attempt_count = 0,
+                        cleanup_next_attempt_at = clock_timestamp(),
+                        cleanup_last_error_code = NULL
+                    WHERE report.id = ANY(%s::uuid[])
+                      AND report.cleanup_requested_at IS NULL
+                      AND report.status NOT IN ('QUEUED', 'RUNNING', 'RETRYING')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM control.tenant_report_settings settings
+                          WHERE settings.tenant_id = report.tenant_id
+                            AND settings.settings
+                                  -> 'retention_policies'
+                                  -> report.report_type
+                                  ->> 'mode' = 'FOREVER'
+                      )
+                      AND report.id IS DISTINCT FROM (
+                          SELECT latest.id
+                          FROM control.report_runs latest
+                          WHERE latest.tenant_id = report.tenant_id
+                            AND latest.cloud_account_id IS NOT DISTINCT FROM
+                                report.cloud_account_id
+                            AND latest.report_type = report.report_type
+                            AND latest.status IN (
+                                'SUCCESS', 'PARTIAL_SUCCESS'
+                            )
+                          ORDER BY latest.completed_at DESC NULLS LAST,
+                                   latest.created_at DESC, latest.id DESC
+                          LIMIT 1
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM control.report_artifacts artifact
+                          WHERE artifact.report_run_id = report.id
+                            AND artifact.retention_until >= CURRENT_DATE
+                      )
+                    RETURNING report.id, report.tenant_id
+                    """,
+                    (actor_id, eligible_ids),
+                )
+                queued_rows = cursor.fetchall()
+                if queued_rows:
+                    cursor.execute(
+                        """
+                        INSERT INTO audit.data_change_logs (
+                            tenant_id, actor_id, table_name, record_id,
+                            operation, changed_fields
+                        )
+                        SELECT report.tenant_id, %s,
+                               'control.report_runs', report.id::text,
+                               'UPDATE', %s::jsonb
+                        FROM control.report_runs report
+                        WHERE report.id = ANY(%s::uuid[])
+                        """,
+                        (
+                            actor_id,
+                            json.dumps({
+                                "cleanup_requested": True,
+                                "cleanup_reason": "MANUAL",
+                            }),
+                            [str(row["id"]) for row in queued_rows],
+                        ),
+                    )
+            protected += len(eligible_ids) - len(queued_rows)
+        return {
+            "queued_count": len(queued_rows),
+            "already_queued_count": int(already_queued),
+            "protected_count": int(protected),
+        }
+
+    def enqueue_expired_report_cleanup(self, *, limit: int = 100) -> int:
+        """만료된 명시적 DAYS 정책 보고서를 durable 정리 큐에 넣는다."""
+
+        limit = max(1, min(int(limit), 1_000))
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH expired AS (
+                    SELECT report.id, report.tenant_id,
+                           parsed.retention_days,
+                           COALESCE(
+                               report.completed_at, report.created_at
+                           ) AS retention_base_at
+                    FROM control.report_runs report
+                    JOIN control.tenant_report_settings settings
+                      ON settings.tenant_id = report.tenant_id
+                    CROSS JOIN LATERAL (
+                        SELECT settings.settings
+                                   -> 'retention_policies'
+                                   -> report.report_type AS value
+                    ) policy
+                    CROSS JOIN LATERAL (
+                        SELECT CASE
+                            WHEN jsonb_typeof(policy.value) = 'object'
+                             AND policy.value ->> 'mode' = 'DAYS'
+                             AND jsonb_typeof(policy.value -> 'days') = 'number'
+                             AND policy.value ->> 'days' ~ '^[1-9][0-9]{0,3}$'
+                            THEN (policy.value ->> 'days')::integer
+                            ELSE NULL
+                        END AS retention_days
+                    ) parsed
+                    WHERE report.cleanup_requested_at IS NULL
+                      AND report.status NOT IN ('QUEUED', 'RUNNING', 'RETRYING')
+                      AND parsed.retention_days BETWEEN 1 AND 3650
+                      AND COALESCE(report.completed_at, report.created_at)
+                            + make_interval(days => parsed.retention_days)
+                          <= clock_timestamp()
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM control.report_artifacts artifact
+                          WHERE artifact.report_run_id = report.id
+                            AND artifact.retention_until >= CURRENT_DATE
+                      )
+                    ORDER BY COALESCE(
+                                 report.completed_at, report.created_at
+                             ), report.id
+                    FOR UPDATE OF report SKIP LOCKED
+                    LIMIT %s
+                )
+                UPDATE control.report_runs report
+                SET cleanup_requested_at = clock_timestamp(),
+                    cleanup_requested_by = NULL,
+                    cleanup_reason = 'RETENTION_POLICY',
+                    cleanup_attempt_count = 0,
+                    cleanup_next_attempt_at = clock_timestamp(),
+                    cleanup_last_error_code = NULL
+                FROM expired
+                WHERE report.id = expired.id
+                RETURNING report.id, report.tenant_id
+                """,
+                (limit,),
+            )
+            queued_rows = cursor.fetchall()
+            if queued_rows:
+                cursor.execute(
+                    """
+                    INSERT INTO audit.data_change_logs (
+                        tenant_id, actor_id, table_name, record_id,
+                        operation, changed_fields
+                    )
+                    SELECT report.tenant_id, NULL,
+                           'control.report_runs', report.id::text,
+                           'UPDATE', %s::jsonb
+                    FROM control.report_runs report
+                    WHERE report.id = ANY(%s::uuid[])
+                    """,
+                    (
+                        json.dumps({
+                            "automated": True,
+                            "cleanup_requested": True,
+                            "cleanup_reason": "RETENTION_POLICY_EXPIRED",
+                        }),
+                        [str(row["id"]) for row in queued_rows],
+                    ),
+                )
+        return len(queued_rows)
+
+    def _record_report_cleanup_failure(
+        self,
+        report_id: str,
+        error_code: str,
+        *,
+        terminal: bool,
+    ) -> None:
+        with self._connect() as connection, connection.cursor() as cursor:
+            if terminal:
+                cursor.execute(
+                    """
+                    UPDATE control.report_runs
+                    SET cleanup_requested_at = NULL,
+                        cleanup_requested_by = NULL,
+                        cleanup_reason = NULL,
+                        cleanup_next_attempt_at = NULL,
+                        cleanup_last_error_code = %s
+                    WHERE id = %s
+                    """,
+                    (error_code, report_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE control.report_runs
+                    SET cleanup_last_error_code = %s
+                    WHERE id = %s
+                    """,
+                    (error_code, report_id),
+                )
+
+    def process_requested_report_cleanup(
+        self,
+        *,
+        limit: int = 100,
+    ) -> dict[str, int]:
+        """정리 요청을 짧게 claim한 뒤 보고서별 독립 transaction으로 처리한다."""
+
+        limit = max(1, min(int(limit), 1_000))
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH due AS (
+                    SELECT id
+                    FROM control.report_runs
+                    WHERE cleanup_requested_at IS NOT NULL
+                      AND cleanup_next_attempt_at <= clock_timestamp()
+                    ORDER BY cleanup_next_attempt_at, cleanup_requested_at, id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT %s
+                )
+                UPDATE control.report_runs report
+                SET cleanup_attempt_count = cleanup_attempt_count + 1,
+                    cleanup_next_attempt_at = clock_timestamp()
+                        + make_interval(
+                            mins => 5 * (
+                                1 << LEAST(cleanup_attempt_count, 8)
+                            )
+                        ),
+                    cleanup_last_error_code = NULL
+                FROM due
+                WHERE report.id = due.id
+                RETURNING report.id, report.cleanup_requested_by,
+                          report.cleanup_reason
+                """,
+                (limit,),
+            )
+            claimed = cursor.fetchall()
+
+        deleted_count = 0
+        protected_count = 0
+        failed_count = 0
+        removed_files = 0
+        pending_files = 0
+        for request_row in claimed:
+            report_id = str(request_row["id"])
+            reason = str(request_row.get("cleanup_reason") or "")
+            requested_by = request_row.get("cleanup_requested_by")
+            if reason not in {"MANUAL", "RETENTION_POLICY"} or (
+                reason == "MANUAL" and requested_by is None
+            ):
+                self._record_report_cleanup_failure(
+                    report_id,
+                    "INVALID_CLEANUP_REQUEST",
+                    terminal=True,
+                )
+                failed_count += 1
+                continue
+            try:
+                result = self.delete_report(
+                    report_id,
+                    str(requested_by) if requested_by is not None else None,
+                    protect_latest=reason == "MANUAL",
+                    automated_retention=reason == "RETENTION_POLICY",
+                )
+            except ReportCleanupProtectedError:
+                self._record_report_cleanup_failure(
+                    report_id,
+                    "PROTECTED_AT_EXECUTION",
+                    terminal=True,
+                )
+                protected_count += 1
+            except Exception as exc:
+                self._record_report_cleanup_failure(
+                    report_id,
+                    "DELETE_FAILED",
+                    terminal=False,
+                )
+                LOGGER.warning(
+                    "Report cleanup %s failed with %s and remains queued.",
+                    report_id,
+                    type(exc).__name__,
+                )
+                failed_count += 1
+            else:
+                deleted_count += 1
+                removed_files += int(result["removed_artifact_files"])
+                pending_files += int(result["failed_artifact_files"])
+
+        return {
+            "claimed_count": len(claimed),
+            "deleted_count": deleted_count,
+            "protected_count": protected_count,
+            "failed_count": failed_count,
+            "removed_artifact_files": removed_files,
+            "pending_artifact_files": pending_files,
+        }
 
     @staticmethod
     def _other_artifact_storage_uris(
@@ -1718,20 +2446,26 @@ class PortalRepository:
     def delete_report(
         self,
         report_id: str,
-        actor_id: str,
+        actor_id: Optional[str],
         *,
         protect_latest: bool = False,
+        automated_retention: bool = False,
     ) -> dict[str, Any]:
+        if automated_retention and actor_id is not None:
+            raise ValueError("자동 보존 정리는 시스템 actor로 실행해야 합니다.")
         storage_uris: list[str] = []
         cleanup_operation_id: Optional[str] = None
         cleanup_queued_count = 0
         shared_artifact_count = 0
+        retention_audit: dict[str, Any] = {}
         result: dict[str, Any]
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT report.id, report.tenant_id, report.environment,
                        report.status, report.report_type,
+                       report.completed_at, report.created_at,
+                       report.cleanup_reason,
                        tenant.customer_name,
                        report.id = (
                            SELECT latest.id
@@ -1762,11 +2496,65 @@ class PortalRepository:
             if not report:
                 raise ValueError("보고서를 찾을 수 없습니다.")
             if report["status"] in _ACTIVE_REPORT_STATUSES:
-                raise ValueError("실행 중인 보고서는 삭제할 수 없습니다.")
+                raise ReportCleanupProtectedError(
+                    "실행 중인 보고서는 삭제할 수 없습니다."
+                )
+            cursor.execute(
+                """
+                SELECT settings, clock_timestamp() AS evaluated_at
+                FROM control.tenant_report_settings
+                WHERE tenant_id = %s
+                FOR UPDATE
+                """,
+                (report["tenant_id"],),
+            )
+            settings_row = cursor.fetchone()
+            policy = _explicit_report_retention_policy(
+                settings_row.get("settings") if settings_row else None,
+                str(report["report_type"]),
+            )
+            if policy and policy["mode"] == "FOREVER":
+                raise ReportCleanupProtectedError(
+                    "영구 보존 정책이 적용된 보고서는 정리할 수 없습니다."
+                )
             if protect_latest and bool(report.get("is_latest")):
-                raise ValueError("계정별 최신 정상 보고서는 정리할 수 없습니다.")
+                raise ReportCleanupProtectedError(
+                    "계정별 최신 정상 보고서는 정리할 수 없습니다."
+                )
             if bool(report.get("retention_protected")):
-                raise ValueError("보존 기한이 지나지 않은 보고서는 정리할 수 없습니다.")
+                raise ReportCleanupProtectedError(
+                    "보존 기한이 지나지 않은 보고서는 정리할 수 없습니다."
+                )
+            if automated_retention:
+                if not policy or policy["mode"] != "DAYS" or not settings_row:
+                    raise ReportCleanupProtectedError(
+                        "유효한 기간 보존 정책을 확인할 수 없습니다."
+                    )
+                retention_base = report.get("completed_at") or report.get(
+                    "created_at"
+                )
+                evaluated_at = settings_row.get("evaluated_at")
+                if retention_base is None or evaluated_at is None:
+                    raise ReportCleanupProtectedError(
+                        "보고서 보존 기간의 기준 시각을 확인할 수 없습니다."
+                    )
+                expires_at = retention_base + timedelta(days=policy["days"])
+                if expires_at > evaluated_at:
+                    raise ReportCleanupProtectedError(
+                        "보고서 보존 기간이 아직 지나지 않았습니다."
+                    )
+                retention_audit = {
+                    "automated": True,
+                    "cleanup_reason": "RETENTION_POLICY_EXPIRED",
+                    "retention_policy": policy,
+                    "retention_basis": (
+                        "completed_at"
+                        if report.get("completed_at") is not None
+                        else "created_at"
+                    ),
+                    "retention_base_at": retention_base.isoformat(),
+                    "retention_expired_at": expires_at.isoformat(),
+                }
 
             schema = (
                 "public_data" if report["environment"] == "public"
@@ -1812,6 +2600,17 @@ class PortalRepository:
                 owner_id=report_id,
             )
 
+            changed_fields = {
+                "report_type": report["report_type"],
+                "status": report["status"],
+                "artifact_reference_count": len(set(storage_uris)),
+                "cleanup_operation_id": cleanup_operation_id,
+                "cleanup_file_count": cleanup_queued_count,
+                "shared_artifact_count": shared_artifact_count,
+                **retention_audit,
+            }
+            if report.get("cleanup_reason") and not automated_retention:
+                changed_fields["cleanup_reason"] = report["cleanup_reason"]
             cursor.execute(
                 """
                 INSERT INTO audit.data_change_logs (
@@ -1821,14 +2620,7 @@ class PortalRepository:
                 """,
                 (
                     report["tenant_id"], actor_id, report_id,
-                    json.dumps({
-                        "report_type": report["report_type"],
-                        "status": report["status"],
-                        "artifact_reference_count": len(set(storage_uris)),
-                        "cleanup_operation_id": cleanup_operation_id,
-                        "cleanup_file_count": cleanup_queued_count,
-                        "shared_artifact_count": shared_artifact_count,
-                    }),
+                    json.dumps(changed_fields),
                 ),
             )
             cursor.execute(

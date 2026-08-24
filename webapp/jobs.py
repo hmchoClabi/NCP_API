@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from psycopg.rows import dict_row
 
 from database.config import DatabaseSettings
+from utils.data_utils import parse_iso_week
 
 
 class ReportJobRepository:
@@ -98,20 +99,14 @@ class ReportJobRepository:
         monthly_day: Optional[int],
         actor_id: str,
         timezone_name: str = "Asia/Seoul",
+        weekly_day: Optional[int] = None,
     ) -> str:
-        report_type = report_type.strip().upper()
-        if report_type not in {"DAILY", "MONTHLY"}:
-            raise ValueError("지원하지 않는 보고서 유형입니다.")
-        if not 0 <= run_hour <= 23 or not 0 <= run_minute <= 59:
-            raise ValueError("실행 시간이 올바르지 않습니다.")
-        if report_type == "MONTHLY":
-            monthly_day = 1 if monthly_day is None else monthly_day
-            if not 1 <= monthly_day <= 28:
-                raise ValueError("월간 실행일은 1일부터 28일까지 가능합니다.")
-        else:
-            monthly_day = None
+        report_type, monthly_day, weekly_day = self._validate_schedule_values(
+            report_type, run_hour, run_minute, monthly_day, weekly_day
+        )
         next_run = self.next_run_at(
-            report_type, run_hour, run_minute, monthly_day, timezone_name
+            report_type, run_hour, run_minute, monthly_day, timezone_name,
+            weekly_day=weekly_day,
         )
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -125,12 +120,14 @@ class ReportJobRepository:
                 """
                 INSERT INTO control.account_report_schedules (
                     tenant_id, cloud_account_id, report_type, timezone,
-                    run_hour, run_minute, monthly_day, next_run_at, created_by
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    run_hour, run_minute, monthly_day, weekly_day,
+                    next_run_at, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (cloud_account_id, report_type) DO UPDATE SET
                     timezone = EXCLUDED.timezone, run_hour = EXCLUDED.run_hour,
                     run_minute = EXCLUDED.run_minute,
                     monthly_day = EXCLUDED.monthly_day,
+                    weekly_day = EXCLUDED.weekly_day,
                     next_run_at = EXCLUDED.next_run_at,
                     enabled = true
                 RETURNING id
@@ -138,7 +135,7 @@ class ReportJobRepository:
                 (
                     account["tenant_id"], account_id, report_type,
                     timezone_name, run_hour, run_minute, monthly_day,
-                    next_run, actor_id,
+                    weekly_day, next_run, actor_id,
                 ),
             )
             return str(cursor.fetchone()["id"])
@@ -176,6 +173,7 @@ class ReportJobRepository:
                     schedule["run_minute"], schedule["monthly_day"],
                     schedule["timezone"],
                     now=datetime.now(timezone.utc) + timedelta(seconds=1),
+                    weekly_day=schedule.get("weekly_day"),
                 )
                 cursor.execute(
                     """
@@ -269,7 +267,8 @@ class ReportJobRepository:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT report_type, run_hour, run_minute, monthly_day, timezone
+                SELECT report_type, run_hour, run_minute, monthly_day,
+                       weekly_day, timezone
                 FROM control.account_report_schedules
                 WHERE id = %s
                 FOR UPDATE
@@ -285,6 +284,7 @@ class ReportJobRepository:
                     schedule["report_type"], schedule["run_hour"],
                     schedule["run_minute"], schedule["monthly_day"],
                     schedule["timezone"],
+                    weekly_day=schedule.get("weekly_day"),
                 )
             cursor.execute(
                 """
@@ -307,13 +307,15 @@ class ReportJobRepository:
         monthly_day: Optional[int],
         actor_id: str,
         timezone_name: str = "Asia/Seoul",
+        weekly_day: Optional[int] = None,
     ) -> int:
-        report_type, monthly_day = self._validate_schedule_values(
-            report_type, run_hour, run_minute, monthly_day
+        report_type, monthly_day, weekly_day = self._validate_schedule_values(
+            report_type, run_hour, run_minute, monthly_day, weekly_day
         )
         normalized_ids = self._normalize_account_ids(account_ids)
         next_run = self.next_run_at(
-            report_type, run_hour, run_minute, monthly_day, timezone_name
+            report_type, run_hour, run_minute, monthly_day, timezone_name,
+            weekly_day=weekly_day,
         )
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -341,14 +343,15 @@ class ReportJobRepository:
                     """
                     INSERT INTO control.account_report_schedules (
                         tenant_id, cloud_account_id, report_type, timezone,
-                        run_hour, run_minute, monthly_day, next_run_at,
-                        created_by
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        run_hour, run_minute, monthly_day, weekly_day,
+                        next_run_at, created_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (cloud_account_id, report_type) DO UPDATE SET
                         timezone = EXCLUDED.timezone,
                         run_hour = EXCLUDED.run_hour,
                         run_minute = EXCLUDED.run_minute,
                         monthly_day = EXCLUDED.monthly_day,
+                        weekly_day = EXCLUDED.weekly_day,
                         next_run_at = EXCLUDED.next_run_at,
                         enabled = true,
                         updated_at = clock_timestamp()
@@ -356,7 +359,7 @@ class ReportJobRepository:
                     (
                         account["tenant_id"], account["id"], report_type,
                         timezone_name, run_hour, run_minute, monthly_day,
-                        next_run, actor_id,
+                        weekly_day, next_run, actor_id,
                     ),
                 )
             return len(accounts)
@@ -365,8 +368,8 @@ class ReportJobRepository:
         self, account_ids: list[str], report_type: str
     ) -> int:
         normalized_type = str(report_type).strip().upper()
-        report_type, _ = self._validate_schedule_values(
-            normalized_type, 0, 0, 1 if normalized_type == "MONTHLY" else None
+        report_type, _, _ = self._validate_schedule_values(
+            normalized_type, 0, 0, None, None
         )
         normalized_ids = self._normalize_account_ids(account_ids)
         with self._connect() as connection, connection.cursor() as cursor:
@@ -386,9 +389,10 @@ class ReportJobRepository:
         run_hour: int,
         run_minute: int,
         monthly_day: Optional[int],
-    ) -> tuple[str, Optional[int]]:
+        weekly_day: Optional[int] = None,
+    ) -> tuple[str, Optional[int], Optional[int]]:
         report_type = str(report_type).strip().upper()
-        if report_type not in {"DAILY", "MONTHLY"}:
+        if report_type not in {"DAILY", "WEEKLY", "MONTHLY"}:
             raise ValueError("지원하지 않는 보고서 유형입니다.")
         if not 0 <= run_hour <= 23 or not 0 <= run_minute <= 59:
             raise ValueError("실행 시각이 올바르지 않습니다.")
@@ -396,9 +400,16 @@ class ReportJobRepository:
             monthly_day = 1 if monthly_day is None else monthly_day
             if not 1 <= monthly_day <= 28:
                 raise ValueError("월간 실행일은 1일부터 28일까지 가능합니다.")
+            weekly_day = None
+        elif report_type == "WEEKLY":
+            weekly_day = 1 if weekly_day is None else weekly_day
+            if not 1 <= weekly_day <= 7:
+                raise ValueError("주간 실행 요일은 월요일(1)부터 일요일(7)까지입니다.")
+            monthly_day = None
         else:
             monthly_day = None
-        return report_type, monthly_day
+            weekly_day = None
+        return report_type, monthly_day, weekly_day
 
     @staticmethod
     def _normalize_account_ids(account_ids: list[str]) -> list[str]:
@@ -430,6 +441,14 @@ class ReportJobRepository:
                 normalized = datetime.strptime(target_value, "%Y-%m-%d").date().isoformat()
             except ValueError as exc:
                 raise ValueError("일일 보고서 날짜 형식은 YYYY-MM-DD입니다.") from exc
+            return report_type, normalized, normalized, None, None
+        if report_type == "WEEKLY":
+            try:
+                _, _, normalized = parse_iso_week(target_value)
+            except ValueError as exc:
+                raise ValueError(
+                    "주간 보고서 형식은 YYYY-Www입니다."
+                ) from exc
             return report_type, normalized, normalized, None, None
         if report_type == "MONTHLY" and re.fullmatch(r"\d{4}-\d{2}", target_value):
             try:
@@ -472,21 +491,32 @@ class ReportJobRepository:
         report_type: str, run_hour: int, run_minute: int,
         monthly_day: Optional[int], timezone_name: str,
         now: Optional[datetime] = None,
+        weekly_day: Optional[int] = None,
     ) -> datetime:
         zone = ZoneInfo(timezone_name)
         local_now = (now or datetime.now(timezone.utc)).astimezone(zone)
-        day = local_now.day if report_type == "DAILY" else int(monthly_day or 1)
-        candidate = local_now.replace(
-            day=day, hour=run_hour, minute=run_minute,
-            second=0, microsecond=0,
-        )
-        if candidate <= local_now:
-            if report_type == "DAILY":
-                candidate += timedelta(days=1)
-            else:
-                year = candidate.year + (1 if candidate.month == 12 else 0)
-                month = 1 if candidate.month == 12 else candidate.month + 1
-                candidate = candidate.replace(year=year, month=month, day=day)
+        if report_type == "WEEKLY":
+            candidate = (
+                local_now
+                + timedelta(
+                    days=(int(weekly_day or 1) - local_now.isoweekday()) % 7
+                )
+            ).replace(hour=run_hour, minute=run_minute, second=0, microsecond=0)
+            if candidate <= local_now:
+                candidate += timedelta(days=7)
+        else:
+            day = local_now.day if report_type == "DAILY" else int(monthly_day or 1)
+            candidate = local_now.replace(
+                day=day, hour=run_hour, minute=run_minute,
+                second=0, microsecond=0,
+            )
+            if candidate <= local_now:
+                if report_type == "DAILY":
+                    candidate += timedelta(days=1)
+                else:
+                    year = candidate.year + (1 if candidate.month == 12 else 0)
+                    month = 1 if candidate.month == 12 else candidate.month + 1
+                    candidate = candidate.replace(year=year, month=month, day=day)
         return candidate.astimezone(timezone.utc)
 
     @staticmethod
@@ -495,6 +525,12 @@ class ReportJobRepository:
         local_date = schedule["next_run_at"].astimezone(zone).date()
         if schedule["report_type"] == "DAILY":
             return (local_date - timedelta(days=1)).isoformat()
+        if schedule["report_type"] == "WEEKLY":
+            previous_sunday = local_date - timedelta(
+                days=local_date.isoweekday()
+            )
+            iso_year, iso_week, _ = previous_sunday.isocalendar()
+            return f"{iso_year:04d}-W{iso_week:02d}"
         first = local_date.replace(day=1)
         previous_end = first - timedelta(days=1)
         return previous_end.strftime("%Y-%m")

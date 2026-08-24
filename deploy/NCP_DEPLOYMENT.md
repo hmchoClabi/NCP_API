@@ -158,12 +158,20 @@ helm upgrade --install ncp-report deploy/helm/ncp-report \
   --wait --wait-for-jobs --timeout 15m
 ```
 
-The app containers wait for schema version `190`. The migration Job is created
+The app containers wait for schema version `210`. The migration Job is created
 with the other resources, connects as the DB administrator, creates the
 application roles and applies all SQL files in filename order. This avoids a
 first-install deadlock between a post-install hook and `helm --wait`.
 For routine runtime-only releases, disable only `migration.enabled`; keep
 `migration.waitForSchema` enabled so incompatible application pods fail closed.
+
+Schema `200` adds WEEKLY schedules and schema `210` adds cleanup queue columns;
+both are additive and must not be rolled back by dropping data or columns. Before
+rolling application code back to a pre-WEEKLY version, disable every WEEKLY
+schedule, cancel or finish queued/retrying WEEKLY jobs, and confirm that no
+WEEKLY job is running. Only then run the Helm rollback. Otherwise an old
+scheduler can encounter a WEEKLY row it does not understand and roll back its
+whole scheduling transaction.
 
 ```sh
 kubectl -n ncp-report get pods,pvc,jobs

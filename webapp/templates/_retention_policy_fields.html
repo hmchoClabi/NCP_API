@@ -1,0 +1,21 @@
+{% set policies = retention_policies|default({}, true) %}
+{% set retention_types = [('DAILY', '일일'), ('WEEKLY', '주간'), ('MONTHLY', '월간')] %}
+<div class="retention-grid">
+  {% for report_type, label in retention_types %}
+  {% set policy = policies.get(report_type, {'mode': 'FOREVER', 'days': none}) %}
+  {% set field_name = report_type|lower %}
+  <div class="retention-policy" data-retention-policy>
+    <strong>{{ label }} 보고서</strong>
+    <label>보존 방식
+      <select name="retention_{{ field_name }}_mode" data-retention-mode>
+        <option value="DAYS"{% if policy.mode == 'DAYS' %} selected{% endif %}>기간 지정</option>
+        <option value="FOREVER"{% if policy.mode != 'DAYS' %} selected{% endif %}>영구 보존</option>
+      </select>
+    </label>
+    <label data-retention-days>보존 일수
+      <input type="number" name="retention_{{ field_name }}_days" min="1" max="3650" step="1" value="{{ policy.days if policy.mode == 'DAYS' and policy.days else '' }}">
+      <small>기존 보고서를 포함하며, 이미 만료된 보고서는 다음 정리 주기에 영구 삭제됩니다.</small>
+    </label>
+  </div>
+  {% endfor %}
+</div>

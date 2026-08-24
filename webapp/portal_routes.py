@@ -83,6 +83,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         try:
             report_type = request.form.get("report_type", "")
             monthly_day_value = request.form.get("monthly_day", "").strip()
+            weekly_day_value = request.form.get("weekly_day", "").strip()
             jobs.upsert_schedule(
                 account_id,
                 report_type,
@@ -90,6 +91,9 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 int(request.form.get("run_minute", "0")),
                 int(monthly_day_value) if monthly_day_value else None,
                 str(g.user["id"]),
+                weekly_day=(
+                    int(weekly_day_value) if weekly_day_value else None
+                ),
             )
             flash("자동 보고서 일정을 저장했습니다.", "success")
         except (TypeError, ValueError) as exc:

@@ -45,7 +45,7 @@ spec:
         - name: wait-schema
           image: "${registry_endpoint}/ncp-report-migrate:latest"
           imagePullPolicy: IfNotPresent
-          args: ["wait", "190"]
+          args: ["wait", "210"]
           env:
             - name: PGHOST
               value: "ncp-report-postgresql"
@@ -265,7 +265,7 @@ spec:
         - name: wait-schema
           image: "${registry_endpoint}/ncp-report-migrate:latest"
           imagePullPolicy: IfNotPresent
-          args: ["wait", "190"]
+          args: ["wait", "210"]
           env:
             - name: PGHOST
               value: "ncp-report-postgresql"
@@ -449,7 +449,7 @@ spec:
         - name: wait-schema
           image: "${registry_endpoint}/ncp-report-migrate:latest"
           imagePullPolicy: IfNotPresent
-          args: ["wait", "190"]
+          args: ["wait", "210"]
           env:
             - name: PGHOST
               value: "ncp-report-postgresql"
@@ -651,7 +651,7 @@ spec:
         - name: wait-schema
           image: "${registry_endpoint}/ncp-report-migrate:latest"
           imagePullPolicy: IfNotPresent
-          args: ["wait", "190"]
+          args: ["wait", "210"]
           env:
             - name: PGHOST
               value: "ncp-report-postgresql"

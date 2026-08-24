@@ -42,7 +42,7 @@ from collectors import (
 from collectors.insighteventcollector import InsightEventCollector
 from normalizers.billingnormalizer import BillingNormalizer
 from utils.common_rest import safe_exception_message
-from utils.data_utils import get_unix_time_stamp
+from utils.data_utils import get_unix_time_stamp, parse_iso_week
 from utils.event_sort import event_timestamp_millis, sort_event_records
 
 import json
@@ -112,6 +112,7 @@ class ReportRunner:
         end_date: Optional[str] = None,
         start_datetime: Optional[str] = None,
         end_datetime: Optional[str] = None,
+        target_week: Optional[str] = None,
     ) -> Dict[str, Any]:
         if start_datetime and end_datetime:
             start_dt = self._parse_kst_datetime(start_datetime)
@@ -137,6 +138,10 @@ class ReportRunner:
             start = datetime.strptime(target_day, "%Y-%m-%d").date()
             end = start
             period_type = "day"
+
+        elif target_week:
+            start, end, _ = parse_iso_week(target_week)
+            period_type = "week"
 
         elif target_month:
             start = datetime.strptime(target_month, "%Y-%m").date().replace(day=1)
@@ -242,7 +247,9 @@ class ReportRunner:
             "end_time": int(end_exclusive.timestamp() * 1000) - 1,
             "use_start_date": f"{start:%Y%m%d}",
             "use_end_date": f"{end:%Y%m%d}",
-            "billing_month": f"{start:%Y%m}",
+            "billing_month": (
+                f"{(end if period_type == 'week' else start):%Y%m}"
+            ),
             "file_suffix": f"{start:%Y%m%d}_{end:%Y%m%d}",
             "is_full_month": is_full_month,
             "is_closed_month": is_closed_month,
@@ -313,7 +320,14 @@ class ReportRunner:
         ).date()
         usage_end = min(requested_end, self._today_kst())
         month_to_date_start = target_month
-        month_to_date_end = usage_end if usage_end >= target_month else None
+        target_month_end = target_month.replace(
+            day=calendar.monthrange(target_month.year, target_month.month)[1]
+        )
+        month_to_date_end = (
+            min(usage_end, target_month_end)
+            if usage_end >= target_month
+            else None
+        )
 
         return {
             "confirmed_demand_month": confirmed_month.strftime("%Y%m"),
@@ -2188,10 +2202,12 @@ class ReportRunner:
         end_date: Optional[str] = None,
         start_datetime: Optional[str] = None,
         end_datetime: Optional[str] = None,
+        target_week: Optional[str] = None,
     ) -> ReportResult:
         period = self.get_period(
             target_month=target_month,
             target_day=target_day,
+            target_week=target_week,
             start_date=start_date,
             end_date=end_date,
             start_datetime=start_datetime,
@@ -2512,6 +2528,15 @@ class ReportRunner:
         }
         if period.get("is_full_month"):
             collect_kwargs["interval"] = "Day1"
+        elif period.get("period_type") == "week":
+            retained_interval = insight_collector._select_metric_interval(
+                period["start_time"], period["end_time"]
+            )
+            collect_kwargs["interval"] = (
+                "Min30"
+                if retained_interval in {"Min1", "Min5"}
+                else retained_interval
+            )
 
         insight_result = insight_collector.collect(
             server_data,

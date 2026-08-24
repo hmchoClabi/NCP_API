@@ -579,6 +579,7 @@ table:not(.table-with-details) tbody tr:hover,
 }
 .chart-toolbar button:hover, .chart-toolbar select:hover { background: #dbeafe; }
 .chart-toolbar button:disabled { cursor: wait; opacity: .55; }
+.chart { position: relative; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart-grid-line { stroke: #e2e8f0; stroke-width: 1; }
 .chart-axis-label { fill: #64748b; font-size: 13px; }
@@ -588,6 +589,29 @@ table:not(.table-with-details) tbody tr:hover,
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.chart-hit-line {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18;
+  stroke-linecap: round;
+  pointer-events: stroke;
+}
+.chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  max-width: calc(100% - 24px);
+  padding: 7px 10px;
+  color: #fff;
+  background: rgba(15, 23, 42, .94);
+  border-radius: 7px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .2);
+  font-size: .76rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translate(10px, calc(-100% - 10px));
+}
+.chart-tooltip[hidden] { display: none; }
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -684,7 +708,8 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .summary-grid, .report-section { break-inside: avoid; }
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
-  .chart-toolbar, .chart-legend, .chart-order-controls { display: none; }
+  .chart-toolbar, .chart-legend, .chart-order-controls,
+  .chart-tooltip { display: none; }
   .chart-heading { padding-right: 0; cursor: default; }
   .chart-series-hidden { display: inline !important; }
   .report-section { padding: 18px; }

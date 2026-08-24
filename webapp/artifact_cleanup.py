@@ -21,9 +21,19 @@ def main() -> None:
 
     repository = PortalRepository(DatabaseSettings.from_env())
     while True:
+        retention_queued = repository.enqueue_expired_report_cleanup(
+            limit=args.limit
+        )
+        reports = repository.process_requested_report_cleanup(limit=args.limit)
         removed, pending = repository.retry_artifact_cleanup(limit=args.limit)
         print(
-            f"Removed artifact files: {removed}; pending cleanup rows: {pending}",
+            f"Retention requests queued: {retention_queued}; "
+            f"reports deleted: {reports['deleted_count']}; "
+            f"report requests protected: {reports['protected_count']}; "
+            f"report requests failed: {reports['failed_count']}; "
+            f"removed artifact files: "
+            f"{reports['removed_artifact_files'] + removed}; "
+            f"pending artifact rows: {pending}",
             flush=True,
         )
         if not args.interval_seconds:

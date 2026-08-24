@@ -116,6 +116,7 @@ class ReportAnalysisTests(unittest.TestCase):
         aliases = {
             "today": "DAILY",
             "yesterday": "DAILY",
+            "week": "WEEKLY",
             "prev_month": "MONTHLY",
             "datetime_range": "RANGE",
         }

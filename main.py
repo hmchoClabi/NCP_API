@@ -30,6 +30,7 @@ from config.settings import (
 )
 from utils.credential_provider import EnvironmentCredentialProvider
 from utils.credentials import NCPCredentials
+from utils.data_utils import parse_iso_week
 
 DAY_ALIASES = {
     "today": 0,
@@ -166,6 +167,16 @@ def resolve_target_month(
     return f"{parsed.year:04d}-{parsed.month:02d}"
 
 
+def resolve_target_week(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        _, _, normalized = parse_iso_week(value)
+    except ValueError as exc:
+        raise ValueError("--target-week는 YYYY-Www 형식이어야 합니다.") from exc
+    return normalized
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="NCP 사용량·이벤트·청구 보고서를 생성합니다.",
@@ -186,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
         "지정한 하루를 조회합니다. "
         "today/오늘, yesterday/어제도 사용할 수 있습니다."
         ),
+    )
+    period_group.add_argument(
+        "--target-week",
+        metavar="YYYY-Www",
+        help="ISO 주간(월요일~일요일)을 조회합니다.",
     )
     period_group.add_argument(
         "--start-date",
@@ -361,7 +377,9 @@ def send_report_email(
     end_dt = str(period.get("end_dt", "")).split(" ", 1)[0]
     period_type = str(period.get("period_type", "report"))
     report_label = "월간" if period.get("is_full_month") else "일간"
-    if period_type == "range":
+    if period_type == "week":
+        report_label = "주간"
+    elif period_type == "range":
         report_label = "기간"
     customer_name = str(report.customer.get("name") or "").strip()
     customer_prefix = f"{customer_name} " if customer_name else ""
@@ -418,6 +436,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         target_day = resolve_target_day(
             args.target_day
         )
+        target_week = resolve_target_week(args.target_week)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -463,6 +482,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "start_date": args.start_date,
         "end_date": args.end_date,
     }
+    if target_week:
+        period_arguments["target_week"] = target_week
     if args.start_datetime or args.end_datetime:
         period_arguments.update(
             start_datetime=args.start_datetime,

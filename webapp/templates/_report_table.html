@@ -6,7 +6,7 @@
       {% if show_customer|default(false) %}<td><strong>{{ item.customer_name }}</strong></td>{% endif %}
       <td><strong>{{ item.period_start|kst('%Y-%m-%d') }}</strong><small>{{ item.period_start|kst('%H:%M') }}–{{ item.period_end|inclusive_end(item.end_exclusive)|kst('%m-%d %H:%M') }}</small></td>
       <td>{{ item.account_name or '기본 계정' }}</td>
-      <td>{{ '일일' if item.report_type == 'DAILY' else ('월간' if item.report_type == 'MONTHLY' else item.report_type) }}</td>
+      <td>{{ '일일' if item.report_type == 'DAILY' else ('주간' if item.report_type == 'WEEKLY' else ('월간' if item.report_type == 'MONTHLY' else item.report_type)) }}</td>
       <td>{{ item.created_at|kst('%Y-%m-%d %H:%M:%S') }}</td>
       <td>{{ item.execution_seconds|duration }}</td>
       <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}">{{ item.status }}</span></td>

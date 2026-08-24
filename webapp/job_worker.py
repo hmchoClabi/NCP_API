@@ -84,6 +84,7 @@ def _process_job(job, settings, portal, cipher, jobs) -> None:
         target = job["target_value"]
         runner.run(
             target_day=target if job["report_type"] == "DAILY" else None,
+            target_week=target if job["report_type"] == "WEEKLY" else None,
             target_month=target if job["report_type"] == "MONTHLY" else None,
             start_datetime=(
                 job["period_start"].astimezone(ReportRunner.KST).isoformat()

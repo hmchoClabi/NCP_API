@@ -52,6 +52,12 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertEqual(start.hour, 0)
         self.assertEqual(end, datetime(2026, 7, 2, tzinfo=self.repository.KST))
 
+    def test_week_period_is_persisted_as_weekly(self):
+        self.assertEqual(
+            self.repository._report_type({"period_type": "week"}),
+            "WEEKLY",
+        )
+
     def test_invalid_source_ip_is_not_sent_to_inet_column(self):
         self.assertIsNone(self.repository._ip_address("not-an-ip"))
         self.assertEqual(self.repository._ip_address("218.38.161.126"), "218.38.161.126")

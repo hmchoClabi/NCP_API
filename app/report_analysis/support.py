@@ -176,6 +176,8 @@ def normalize_period_type(value: Any) -> str:
         "어제",
     }:
         return "DAILY"
+    if normalized in {"week", "weekly", "주", "주간"}:
+        return "WEEKLY"
     if normalized in {"month", "monthly", "prev_month", "월", "월간"}:
         return "MONTHLY"
     if normalized in {"range", "period", "datetime_range", "기간"}:

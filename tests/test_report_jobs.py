@@ -15,6 +15,16 @@ class ReportJobTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ReportJobRepository._validate_target("MONTHLY", "2026-13")
 
+    def test_weekly_target_is_a_valid_iso_week(self):
+        self.assertEqual(
+            ReportJobRepository._validate_target("weekly", "2026-w31"),
+            ("WEEKLY", "2026-W31", "2026-W31", None, None),
+        )
+        with self.assertRaises(ValueError):
+            ReportJobRepository._validate_target("WEEKLY", "2026-W54")
+        with self.assertRaises(ValueError):
+            ReportJobRepository._validate_target("WEEKLY", "9999-W52")
+
     def test_next_daily_run_uses_seoul_clock(self):
         now = datetime(2026, 8, 3, 0, 30, tzinfo=timezone.utc)
         next_run = ReportJobRepository.next_run_at(
@@ -49,22 +59,52 @@ class ReportJobTests(unittest.TestCase):
 
         self.assertEqual(ReportJobRepository.scheduled_target(schedule), "2026-07")
 
+    def test_weekly_schedule_targets_previous_completed_iso_week(self):
+        schedule = {
+            "timezone": "Asia/Seoul",
+            "next_run_at": datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc),
+            "report_type": "WEEKLY",
+        }
+
+        self.assertEqual(
+            ReportJobRepository.scheduled_target(schedule), "2026-W31"
+        )
+
+    def test_next_weekly_run_uses_iso_weekday_and_seoul_clock(self):
+        now = datetime(2026, 8, 3, 0, 30, tzinfo=timezone.utc)
+
+        next_run = ReportJobRepository.next_run_at(
+            "WEEKLY", 9, 45, None, "Asia/Seoul", now=now, weekly_day=1
+        )
+
+        self.assertEqual(next_run, datetime(2026, 8, 3, 0, 45, tzinfo=timezone.utc))
+
     def test_bulk_schedule_values_are_validated(self):
         self.assertEqual(
             ReportJobRepository._validate_schedule_values(
                 "daily", 9, 0, 15
             ),
-            ("DAILY", None),
+            ("DAILY", None, None),
+        )
+        self.assertEqual(
+            ReportJobRepository._validate_schedule_values(
+                "weekly", 9, 0, 15, 3
+            ),
+            ("WEEKLY", None, 3),
         )
         self.assertEqual(
             ReportJobRepository._validate_schedule_values(
                 "monthly", 9, 30, 15
             ),
-            ("MONTHLY", 15),
+            ("MONTHLY", 15, None),
         )
         with self.assertRaises(ValueError):
             ReportJobRepository._validate_schedule_values(
                 "monthly", 9, 0, 29
+            )
+        with self.assertRaises(ValueError):
+            ReportJobRepository._validate_schedule_values(
+                "weekly", 9, 0, None, 8
             )
 
     def test_bulk_schedule_requires_valid_unique_accounts(self):

@@ -28,10 +28,13 @@ class FakePortalRepository:
         self.deleted_reports = []
         self.delete_report_protections = []
         self.cleanup_candidate_scopes = []
+        self.cleanup_requests = []
         self.created_msp_users = []
         self.updated_msp_users = []
         self.msp_status_error = None
         self.updated_report_settings = []
+        self.updated_retention_policies = []
+        self.bulk_retention_updates = []
         self.updated_logos = []
         self.deleted_logos = []
 
@@ -77,9 +80,20 @@ class FakePortalRepository:
     def account_tenant(self, account_id):
         return "tenant-1" if account_id == "account-1" else None
 
-    def update_tenant_report_settings(self, tenant_id, options, actor_id):
+    def update_tenant_report_settings(
+        self, tenant_id, options, actor_id, retention_policies=None,
+    ):
         self.updated_report_settings.append((tenant_id, options, actor_id))
+        self.updated_retention_policies.append(retention_policies)
         return options
+
+    def bulk_update_report_retention(
+        self, tenant_ids, policies, actor_id, *, allowed_environments=None,
+    ):
+        self.bulk_retention_updates.append((
+            tenant_ids, policies, actor_id, allowed_environments,
+        ))
+        return len(tenant_ids)
 
     def update_tenant_logo(self, tenant_id, logo, actor_id):
         self.updated_logos.append((tenant_id, logo, actor_id))
@@ -99,6 +113,11 @@ class FakePortalRepository:
             "status": "ACTIVE",
             "metadata": {},
             "branding": {},
+            "retention_policies": {
+                "DAILY": {"mode": "DAYS", "days": 30},
+                "WEEKLY": {"mode": "DAYS", "days": 180},
+                "MONTHLY": {"mode": "FOREVER", "days": None},
+            },
             "accounts": [{
                 "id": "account-1",
                 "account_code": "primary",
@@ -280,6 +299,26 @@ class FakePortalRepository:
             "eligible": False,
         }]
 
+    def request_report_cleanup(
+        self, report_ids, actor_id, *, allowed_environments=None,
+        all_eligible=False,
+    ):
+        self.cleanup_requests.append((
+            report_ids, actor_id, allowed_environments, all_eligible,
+        ))
+        if all_eligible:
+            return {
+                "queued_count": 1,
+                "already_queued_count": 0,
+                "protected_count": 1,
+            }
+        queued = sum(report_id == "report-old" for report_id in report_ids or [])
+        return {
+            "queued_count": queued,
+            "already_queued_count": 0,
+            "protected_count": len(report_ids or []) - queued,
+        }
+
     def schedule_environment(self, schedule_id):
         return "public" if schedule_id == "schedule-1" else None
 
@@ -323,6 +362,13 @@ class FakePortalRepository:
                 "gov_count": 0,
                 "issue_count": 0,
             },
+            "artifact_storage": {
+                "status": "CRITICAL",
+                "total_bytes": 10 * 1024**3,
+                "used_bytes": int(9.2 * 1024**3),
+                "free_bytes": int(0.8 * 1024**3),
+                "used_percent": 92.0,
+            },
             "issue_customers": [],
         }
 
@@ -340,6 +386,7 @@ class FakePortalRepository:
 class FakeReportJobRepository:
     def __init__(self):
         self.enqueued = []
+        self.schedule_upserts = []
         self.bulk_upserts = []
         self.bulk_deletes = []
 
@@ -356,13 +403,23 @@ class FakeReportJobRepository:
     def set_schedule_enabled(self, schedule_id, enabled):
         return schedule_id == "schedule-1"
 
+    def upsert_schedule(
+        self, account_id, report_type, run_hour, run_minute, monthly_day,
+        actor_id, timezone_name="Asia/Seoul", weekly_day=None,
+    ):
+        self.schedule_upserts.append((
+            account_id, report_type, run_hour, run_minute, monthly_day,
+            actor_id, timezone_name, weekly_day,
+        ))
+        return "schedule-1"
+
     def bulk_upsert_schedules(
         self, account_ids, report_type, run_hour, run_minute,
-        monthly_day, actor_id,
+        monthly_day, actor_id, timezone_name="Asia/Seoul", weekly_day=None,
     ):
         self.bulk_upserts.append((
             account_ids, report_type, run_hour, run_minute,
-            monthly_day, actor_id,
+            monthly_day, actor_id, weekly_day,
         ))
         return len(account_ids)
 
@@ -429,6 +486,7 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'name="csrf_token"', response.data)
+        self.assertIn("일일·주간·월간 보고서".encode("utf-8"), response.data)
         self.assertIn(CSRF_COOKIE, response.headers.get("Set-Cookie", ""))
         self.assertIn("버전 build-5 · 1234567".encode("utf-8"), response.data)
 
@@ -478,6 +536,10 @@ class WebAppTests(unittest.TestCase):
                     ("POST",),
                 ),
                 "bulk_schedules": ("/msp/schedules/bulk", ("POST",)),
+                "bulk_report_retention": (
+                    "/msp/report-retention/bulk",
+                    ("POST",),
+                ),
                 "create_customer": ("/msp/customers/<environment>", ("POST",)),
                 "msp_customer": ("/msp/customer/<tenant_id>", ("GET",)),
                 "update_customer_report_settings": (
@@ -577,6 +639,22 @@ class WebAppTests(unittest.TestCase):
             [("account-1", "DAILY", "2026-08-02", "user-1", None, None)],
         )
 
+    def test_customer_viewer_can_enqueue_weekly_report(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/accounts/account-1/report-jobs",
+            data={
+                "csrf_token": "csrf-token",
+                "report_type": "WEEKLY",
+                "target_value": "2026-W31",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.jobs.enqueued[0][1:3], ("WEEKLY", "2026-W31"))
+
     def test_customer_can_enqueue_custom_time_range(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -631,10 +709,15 @@ class WebAppTests(unittest.TestCase):
             "/msp/schedules/bulk",
             data={"csrf_token": "csrf-token"},
         )
+        retention_response = self.client.post(
+            "/msp/report-retention/bulk",
+            data={"csrf_token": "csrf-token"},
+        )
 
         self.assertEqual(msp_response.status_code, 403)
         self.assertEqual(status_response.status_code, 403)
         self.assertEqual(schedule_response.status_code, 403)
+        self.assertEqual(retention_response.status_code, 403)
         self.assertEqual(self.repository.created_msp_users, [])
         self.assertEqual(self.repository.updated_msp_users, [])
         self.assertEqual(self.jobs.bulk_upserts, [])
@@ -846,7 +929,53 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("보고서 구성 및 순서".encode("utf-8"), response.data)
         self.assertIn(b'class="report-settings-details"', response.data)
         self.assertIn(b'data-move-section="up"', response.data)
+        self.assertIn(b'name="report_type" value="WEEKLY"', response.data)
+        self.assertIn(b'type="week"', response.data)
+        self.assertIn(b'name="weekly_day"', response.data)
+        self.assertIn(b'name="retention_daily_mode"', response.data)
+        self.assertIn(b'name="retention_daily_days"', response.data)
+        self.assertIn(b'value="30"', response.data)
         self.assertNotIn(b'name="resource_categories" value="SECRET', response.data)
+
+    def test_msp_admin_can_save_weekly_account_schedule(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/accounts/account-1/schedules",
+            data={
+                "csrf_token": "csrf-token",
+                "report_type": "WEEKLY",
+                "weekly_day": "3",
+                "run_hour": "9",
+                "run_minute": "30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.jobs.schedule_upserts,
+            [("account-1", "WEEKLY", 9, 30, None, "user-1", "Asia/Seoul", 3)],
+        )
+
+    def test_msp_dashboard_shows_storage_and_admin_actions(self):
+        response = self.client.get("/msp")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("보고서 저장공간".encode("utf-8"), response.data)
+        self.assertIn(b'value="92.0"', response.data)
+        self.assertIn("0.80 GiB".encode("utf-8"), response.data)
+        self.assertIn("보고서 정리".encode("utf-8"), response.data)
+        self.assertIn("증설 안내".encode("utf-8"), response.data)
+
+    def test_msp_operator_sees_storage_without_cleanup_action(self):
+        self.use_scoped_msp("MSP_OPERATOR", "public")
+
+        response = self.client.get("/msp")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("보고서 저장공간".encode("utf-8"), response.data)
+        self.assertIn("증설 안내".encode("utf-8"), response.data)
+        self.assertNotIn("보고서 정리".encode("utf-8"), response.data)
 
     def test_customer_detail_limits_recent_reports_and_jobs_to_ten(self):
         original_tenant_detail = self.repository.tenant_detail
@@ -856,7 +985,7 @@ class MspCustomerDetailTests(unittest.TestCase):
             tenant["reports"] = [
                 {
                     "id": f"recent-report-{index:02d}",
-                    "report_type": "DAILY",
+                    "report_type": "WEEKLY" if index == 1 else "DAILY",
                     "period_start": datetime(2026, 8, 12 - index),
                     "period_end": datetime(2026, 8, 13 - index),
                     "end_exclusive": True,
@@ -881,7 +1010,7 @@ class MspCustomerDetailTests(unittest.TestCase):
                 "id": f"recent-job-{index:02d}",
                 "customer_name": "Customer",
                 "account_name": "Primary",
-                "report_type": "DAILY",
+                "report_type": "WEEKLY" if index == 1 else "DAILY",
                 "target_value": f"recent-job-{index:02d}",
                 "trigger_type": "MANUAL",
                 "status": "SUCCESS",
@@ -903,6 +1032,8 @@ class MspCustomerDetailTests(unittest.TestCase):
         for index in range(1, 11):
             self.assertIn(f"recent-job-{index:02d}", response_text)
         self.assertNotIn("recent-job-11", response_text)
+        self.assertIn("주간 · recent-job-01", response_text)
+        self.assertIn("<td>주간</td>", response_text)
         self.assertIn("최신 10건".encode("utf-8"), response.data)
 
     def test_msp_admin_can_update_customer_report_settings(self):
@@ -916,6 +1047,11 @@ class MspCustomerDetailTests(unittest.TestCase):
                 "section_order": ["infrastructure_inventory", "billing"],
                 "resource_categories": ["SERVER", "VPC"],
                 "monitoring_categories": ["SERVER"],
+                "retention_daily_mode": "DAYS",
+                "retention_daily_days": "45",
+                "retention_weekly_mode": "DAYS",
+                "retention_weekly_days": "180",
+                "retention_monthly_mode": "FOREVER",
             },
         )
 
@@ -931,6 +1067,11 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
+        self.assertEqual(self.repository.updated_retention_policies[-1], {
+            "DAILY": {"mode": "DAYS", "days": "45"},
+            "WEEKLY": {"mode": "DAYS", "days": "180"},
+            "MONTHLY": {"mode": "FOREVER", "days": None},
+        })
 
     def test_customer_detail_omits_action_cases_and_policy_exceptions(self):
         detail = self.client.get("/msp/customer/tenant-1")
@@ -1142,6 +1283,45 @@ class MspCustomerDetailTests(unittest.TestCase):
             r'value="report-1"[^>]+disabled',
         )
         self.assertIn(b"1.5 MiB", response.data)
+        self.assertIn(b'id="select-all-cleanup-reports"', response.data)
+        self.assertIn(b'name="selection_scope" value="selected"', response.data)
+        self.assertIn(b'name="selection_scope" value="all"', response.data)
+        self.assertIn("표시 항목 전체 정리 요청".encode("utf-8"), response.data)
+        self.assertIn("현재 표시된 정리 가능 항목".encode("utf-8"), response.data)
+        self.assertIn("백그라운드".encode("utf-8"), response.data)
+
+    def test_cleanup_preview_shows_safe_retry_status(self):
+        self.repository.report_cleanup_candidates = lambda _scope=None: [{
+            "id": "report-queued",
+            "tenant_id": "tenant-1",
+            "customer_name": "Customer",
+            "environment": "public",
+            "account_name": "Primary",
+            "report_type": "WEEKLY",
+            "status": "SUCCESS",
+            "period_start": datetime(2026, 8, 10, tzinfo=timezone.utc),
+            "period_end": datetime(2026, 8, 17, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 8, 17, tzinfo=timezone.utc),
+            "artifact_count": 1,
+            "artifact_bytes": 1024,
+            "retention_until": None,
+            "protection_reason": "CLEANUP_QUEUED",
+            "cleanup_attempt_count": 2,
+            "cleanup_next_attempt_at": datetime(
+                2026, 8, 24, 0, 30, tzinfo=timezone.utc
+            ),
+            "cleanup_last_error_code": "DELETE_FAILED",
+            "eligible": False,
+        }]
+
+        response = self.client.get("/msp/data-cleanup")
+        page = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("2회 시도", page)
+        self.assertIn("2026-08-24 09:30:00 KST", page)
+        self.assertIn("이전 요청 결과", page)
+        self.assertIn("정리 처리 실패 (DELETE_FAILED)", page)
 
     def test_msp_admin_cleanup_requires_phrase_and_eligible_selection(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1166,6 +1346,10 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(wrong_phrase.status_code, 302)
         self.assertEqual(protected.status_code, 302)
         self.assertEqual(self.repository.deleted_reports, [])
+        self.assertEqual(
+            self.repository.cleanup_requests,
+            [(["report-1"], "user-1", None, False)],
+        )
 
     def test_msp_admin_can_cleanup_an_explicitly_selected_report(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1181,10 +1365,28 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
-            self.repository.deleted_reports,
-            [("report-old", "user-1")],
+            self.repository.cleanup_requests,
+            [(["report-old"], "user-1", None, False)],
         )
-        self.assertEqual(self.repository.delete_report_protections, [True])
+        self.assertEqual(self.repository.deleted_reports, [])
+
+    def test_msp_admin_can_request_all_eligible_cleanup(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/data-cleanup",
+            data={
+                "csrf_token": "csrf-token",
+                "selection_scope": "all",
+                "confirm_phrase": "선택 보고서 삭제",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.cleanup_requests,
+            [(None, "user-1", None, True)],
+        )
 
     def test_scoped_admin_cleanup_preview_uses_its_environment_scope(self):
         self.use_scoped_msp("MSP_ADMIN", "public")
@@ -1399,7 +1601,13 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(self.repository.created_portal_users, [])
 
     def test_msp_can_open_global_schedule_and_history_pages(self):
-        self.assertEqual(self.client.get("/msp/schedules").status_code, 200)
+        schedules = self.client.get("/msp/schedules")
+
+        self.assertEqual(schedules.status_code, 200)
+        self.assertIn(b'<option value="WEEKLY">', schedules.data)
+        self.assertIn(b'name="weekly_day"', schedules.data)
+        self.assertIn("보존 정책 일괄 적용".encode("utf-8"), schedules.data)
+        self.assertIn(b'name="tenant_id" value="tenant-1"', schedules.data)
         self.assertEqual(self.client.get("/history").status_code, 200)
 
     def test_msp_admin_can_bulk_create_schedules(self):
@@ -1421,7 +1629,29 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.jobs.bulk_upserts, [(
-            [account_id], "DAILY", 9, 0, 1, "user-1",
+            [account_id], "DAILY", 9, 0, 1, "user-1", None,
+        )])
+
+    def test_msp_admin_can_bulk_create_weekly_schedules(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+        account_id = "11111111-1111-1111-1111-111111111111"
+
+        response = self.client.post(
+            "/msp/schedules/bulk",
+            data={
+                "csrf_token": "csrf-token",
+                "action": "create",
+                "account_id": account_id,
+                "report_type": "WEEKLY",
+                "weekly_day": "5",
+                "run_hour": "18",
+                "run_minute": "30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.jobs.bulk_upserts, [(
+            [account_id], "WEEKLY", 18, 30, None, "user-1", 5,
         )])
 
     def test_msp_admin_can_bulk_delete_schedules(self):
@@ -1441,6 +1671,56 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             self.jobs.bulk_deletes, [([account_id], "MONTHLY")]
+        )
+
+    def test_msp_admin_can_bulk_apply_report_retention(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/report-retention/bulk",
+            data={
+                "csrf_token": "csrf-token",
+                "tenant_id": "tenant-1",
+                "retention_daily_mode": "DAYS",
+                "retention_daily_days": "30",
+                "retention_weekly_mode": "DAYS",
+                "retention_weekly_days": "180",
+                "retention_monthly_mode": "FOREVER",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.repository.bulk_retention_updates, [(
+            ["tenant-1"],
+            {
+                "DAILY": {"mode": "DAYS", "days": "30"},
+                "WEEKLY": {"mode": "DAYS", "days": "180"},
+                "MONTHLY": {"mode": "FOREVER", "days": None},
+            },
+            "user-1",
+            None,
+        )])
+
+    def test_scoped_msp_admin_bulk_retention_rechecks_environment_scope(self):
+        self.use_scoped_msp("MSP_ADMIN", "public")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/report-retention/bulk",
+            data={
+                "csrf_token": "csrf-token",
+                "tenant_id": "tenant-1",
+                "retention_daily_mode": "DAYS",
+                "retention_daily_days": "30",
+                "retention_weekly_mode": "DAYS",
+                "retention_weekly_days": "180",
+                "retention_monthly_mode": "FOREVER",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.repository.bulk_retention_updates[0][-1], {"public"}
         )
 
     def test_msp_admin_can_delete_an_account_credential(self):
