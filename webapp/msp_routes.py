@@ -306,6 +306,32 @@ def register_msp_routes(app: Flask, repository: Any, jobs: Any) -> None:
             flash(str(exc), "error")
         return redirect(url_for("msp_users"))
 
+    @app.post("/msp/users/<user_id>/delete")
+    @_msp_admin_required
+    def delete_user_account(user_id: str):
+        try:
+            if user_id == str(g.user["id"]):
+                raise ValueError(
+                    "현재 로그인한 자신의 계정은 삭제할 수 없습니다."
+                )
+            display_name, account_type = repository.delete_user_account(
+                user_id,
+                str(g.user["id"]),
+                request.form.get("confirm_email", ""),
+                allowed_environments=_msp_admin_environment_scopes(g.user),
+            )
+            label = "MSP" if account_type == "MSP" else "고객"
+            flash(
+                f"{display_name} {label} 계정을 삭제했습니다. "
+                "모든 세션과 권한을 제거하고 개인정보를 익명화했습니다.",
+                "success",
+            )
+        except PermissionError:
+            abort(404)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("msp_users"))
+
     @app.post("/msp/users/memberships")
     @_msp_admin_required
     def assign_portal_user():

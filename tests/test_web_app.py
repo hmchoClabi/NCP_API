@@ -31,6 +31,8 @@ class FakePortalRepository:
         self.cleanup_requests = []
         self.created_msp_users = []
         self.updated_msp_users = []
+        self.deleted_users = []
+        self.delete_user_error = None
         self.msp_status_error = None
         self.updated_report_settings = []
         self.updated_retention_policies = []
@@ -208,6 +210,7 @@ class FakePortalRepository:
             "user_status": "ACTIVE",
             "last_login_at": None,
             "created_at": datetime(2026, 8, 1),
+            "can_delete": True,
             "memberships": [{
                 "tenant_id": "tenant-1",
                 "customer_name": "Customer",
@@ -235,6 +238,19 @@ class FakePortalRepository:
             raise ValueError(self.msp_status_error)
         self.updated_msp_users.append((user_id, actor_id, enabled))
         return "MSP Operator"
+
+    def delete_user_account(
+        self, user_id, actor_id, confirmation_email,
+        allowed_environments=None,
+    ):
+        if self.delete_user_error:
+            raise self.delete_user_error
+        self.deleted_users.append((
+            user_id, actor_id, confirmation_email, allowed_environments,
+        ))
+        if user_id.startswith("msp-"):
+            return "MSP User", "MSP"
+        return "Customer User", "CUSTOMER"
 
     def msp_users(self, allowed_environments=None):
         return [{
@@ -577,6 +593,10 @@ class WebAppTests(unittest.TestCase):
                     "/msp/users/platform/<user_id>/enabled",
                     ("POST",),
                 ),
+                "delete_user_account": (
+                    "/msp/users/<user_id>/delete",
+                    ("POST",),
+                ),
                 "assign_portal_user": ("/msp/users/memberships", ("POST",)),
                 "set_schedule_enabled": (
                     "/msp/schedules/<schedule_id>/enabled",
@@ -752,6 +772,13 @@ class WebAppTests(unittest.TestCase):
             "/msp/users/platform/msp-user-1/enabled",
             data={"csrf_token": "csrf-token", "enabled": "false"},
         )
+        delete_response = self.client.post(
+            "/msp/users/msp-user-1/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "admin@example.com",
+            },
+        )
         schedule_response = self.client.post(
             "/msp/schedules/bulk",
             data={"csrf_token": "csrf-token"},
@@ -763,10 +790,12 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(msp_response.status_code, 403)
         self.assertEqual(status_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
         self.assertEqual(schedule_response.status_code, 403)
         self.assertEqual(retention_response.status_code, 403)
         self.assertEqual(self.repository.created_msp_users, [])
         self.assertEqual(self.repository.updated_msp_users, [])
+        self.assertEqual(self.repository.deleted_users, [])
         self.assertEqual(self.jobs.bulk_upserts, [])
 
     def test_customer_viewer_cannot_delete_report(self):
@@ -827,12 +856,21 @@ class WebAppTests(unittest.TestCase):
             "/msp/users/platform/msp-user-2/enabled",
             data={"csrf_token": "csrf-token", "enabled": "false"},
         )
+        deletion = self.client.post(
+            "/msp/users/msp-user-2/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "operator@example.com",
+            },
+        )
 
         self.assertEqual(listing.status_code, 403)
         self.assertEqual(creation.status_code, 403)
         self.assertEqual(status_change.status_code, 403)
+        self.assertEqual(deletion.status_code, 403)
         self.assertEqual(self.repository.created_msp_users, [])
         self.assertEqual(self.repository.updated_msp_users, [])
+        self.assertEqual(self.repository.deleted_users, [])
 
     def test_customer_viewer_cannot_delete_credentials_or_customer(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -1358,6 +1396,123 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn(b'<option value="MSP_ADMIN">', response.data)
         self.assertNotIn(b'name="environment_scope" required', response.data)
         self.assertIn(b"customer@example.com", response.data)
+        self.assertIn(
+            b'action="/msp/users/msp-user-1/delete"',
+            response.data,
+        )
+        self.assertIn(
+            b'action="/msp/users/customer-user-1/delete"',
+            response.data,
+        )
+        self.assertIn(b'name="confirm_email"', response.data)
+        self.assertIn(
+            b'aria-label="Customer User',
+            response.data,
+        )
+
+    def test_user_management_hides_current_and_cross_environment_deletion(self):
+        self.repository.msp_users = lambda _scope=None: [{
+            "id": "user-1",
+            "email": "viewer@example.com",
+            "display_name": "Current Admin",
+            "user_status": "ACTIVE",
+            "role": "MSP_ADMIN",
+            "environment_scope": None,
+            "last_login_at": None,
+            "created_at": datetime(2026, 8, 1),
+        }]
+        users = self.repository.customer_users()
+        users[0]["can_delete"] = False
+        self.repository.customer_users = lambda _scope=None: users
+
+        response = self.client.get("/msp/users")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("현재 계정".encode("utf-8"), response.data)
+        self.assertNotIn(b'action="/msp/users/user-1/delete"', response.data)
+        self.assertNotIn(
+            b'action="/msp/users/customer-user-1/delete"',
+            response.data,
+        )
+        self.assertIn("다른 환경 연결 포함".encode("utf-8"), response.data)
+
+    def test_msp_admin_can_delete_msp_and_customer_users(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        msp_response = self.client.post(
+            "/msp/users/msp-user-2/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "operator@example.com",
+            },
+        )
+        customer_response = self.client.post(
+            "/msp/users/customer-user-1/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "customer@example.com",
+            },
+        )
+
+        self.assertEqual(msp_response.status_code, 302)
+        self.assertEqual(customer_response.status_code, 302)
+        self.assertEqual(self.repository.deleted_users, [
+            ("msp-user-2", "user-1", "operator@example.com", None),
+            (
+                "customer-user-1",
+                "user-1",
+                "customer@example.com",
+                None,
+            ),
+        ])
+
+    def test_msp_admin_cannot_delete_current_account(self):
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/users/user-1/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "viewer@example.com",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "현재 로그인한 자신의 계정은 삭제할 수 없습니다.".encode("utf-8"),
+            response.data,
+        )
+        self.assertEqual(self.repository.deleted_users, [])
+
+    def test_scoped_msp_admin_deletion_passes_scope_and_hides_denial(self):
+        self.use_scoped_msp("MSP_ADMIN", "public")
+        self.client.set_cookie(CSRF_COOKIE, "csrf-token")
+
+        response = self.client.post(
+            "/msp/users/customer-user-1/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "customer@example.com",
+            },
+        )
+        self.repository.delete_user_error = PermissionError()
+        denied = self.client.post(
+            "/msp/users/customer-user-2/delete",
+            data={
+                "csrf_token": "csrf-token",
+                "confirm_email": "other@example.com",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(self.repository.deleted_users, [(
+            "customer-user-1",
+            "user-1",
+            "customer@example.com",
+            {"public"},
+        )])
 
     def test_msp_admin_cleanup_preview_marks_current_report_as_protected(self):
         response = self.client.get("/msp/data-cleanup")

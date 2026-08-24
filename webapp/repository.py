@@ -631,6 +631,58 @@ def _validate_msp_status_change(
         raise ValueError("마지막 활성 MSP 관리자는 비활성화할 수 없습니다.")
 
 
+def _validate_user_deletion(
+    *,
+    target_user_id: str,
+    actor_id: str,
+    target_email: str,
+    confirmation_email: str,
+    target_status: str,
+    platform_roles: set[str],
+    platform_environment_scopes: set[str | None],
+    membership_environments: set[str],
+    allowed_environments: set[str] | None,
+    active_admin_count: int | None,
+    blocked_customer_names: tuple[str, ...] = (),
+) -> str:
+    """사용자 삭제가 관리 접근권한을 끊거나 범위를 넘지 않게 검증한다."""
+
+    if target_user_id == actor_id:
+        raise ValueError("현재 로그인한 자신의 계정은 삭제할 수 없습니다.")
+    unsupported_roles = platform_roles - {"MSP_ADMIN", "MSP_OPERATOR"}
+    if unsupported_roles:
+        raise PermissionError("시스템 권한 계정은 이 화면에서 삭제할 수 없습니다.")
+    target_environments = (
+        None
+        if platform_roles and None in platform_environment_scopes
+        else {
+            scope
+            for scope in platform_environment_scopes
+            if scope is not None
+        } | membership_environments
+    )
+    if allowed_environments is not None and (
+        target_environments is None
+        or not target_environments
+        or not target_environments.issubset(allowed_environments)
+    ):
+        raise PermissionError("관리 범위 밖의 사용자는 삭제할 수 없습니다.")
+    if confirmation_email.strip().casefold() != target_email.casefold():
+        raise ValueError("삭제 확인을 위해 사용자 이메일을 정확히 입력하세요.")
+    if (
+        target_status == "ACTIVE"
+        and "MSP_ADMIN" in platform_roles
+        and (active_admin_count or 0) <= 1
+    ):
+        raise ValueError("마지막 활성 MSP 관리자는 삭제할 수 없습니다.")
+    if blocked_customer_names:
+        customers = ", ".join(blocked_customer_names)
+        raise ValueError(
+            f"다른 활성 고객 관리자를 먼저 지정하세요: {customers}"
+        )
+    return "MSP" if platform_roles else "CUSTOMER"
+
+
 class PortalRepository:
     def __init__(self, settings: DatabaseSettings):
         self.settings = settings
@@ -787,6 +839,19 @@ class PortalRepository:
             user_id = cursor.fetchone()["id"]
             cursor.execute(
                 """
+                SELECT EXISTS (
+                    SELECT 1 FROM control.memberships
+                    WHERE user_id = %s
+                ) AS has_customer_membership
+                """,
+                (user_id,),
+            )
+            if cursor.fetchone()["has_customer_membership"]:
+                raise ValueError(
+                    "고객 사용자 이메일은 MSP 계정으로 등록할 수 없습니다."
+                )
+            cursor.execute(
+                """
                 INSERT INTO control.platform_roles (user_id, role)
                 VALUES (%s, 'MSP_ADMIN')
                 ON CONFLICT DO NOTHING
@@ -828,6 +893,19 @@ class PortalRepository:
                 (email, password_hash, display_name),
             )
             user_id = cursor.fetchone()["id"]
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM control.platform_roles
+                    WHERE user_id = %s
+                ) AS has_platform_role
+                """,
+                (user_id,),
+            )
+            if cursor.fetchone()["has_platform_role"]:
+                raise ValueError(
+                    "MSP 계정 이메일은 고객 사용자로 등록할 수 없습니다."
+                )
             cursor.execute(
                 """
                 INSERT INTO control.memberships (tenant_id, user_id, role, status)
@@ -1077,6 +1155,208 @@ class PortalRepository:
             )
             return str(target["display_name"])
 
+    def delete_user_account(
+        self,
+        user_id: str,
+        actor_id: str,
+        confirmation_email: str,
+        allowed_environments: Optional[set[str]] = None,
+    ) -> tuple[str, str]:
+        """접근권한을 제거하고 사용자 개인정보를 비가역적으로 익명화한다."""
+
+        try:
+            user_id = str(UUID(user_id))
+            actor_id = str(UUID(actor_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("사용자 식별자가 올바르지 않습니다.") from exc
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s::bigint)",
+                (_MSP_ACCOUNT_MANAGEMENT_LOCK_ID,),
+            )
+            cursor.execute(
+                """
+                SELECT role.environment_scope
+                FROM control.users users
+                JOIN control.platform_roles role ON role.user_id = users.id
+                WHERE users.id = %s
+                  AND users.status = 'ACTIVE'
+                  AND role.role = 'MSP_ADMIN'
+                """,
+                (actor_id,),
+            )
+            actor_bindings = cursor.fetchall()
+            if not actor_bindings:
+                raise PermissionError("사용자 관리 권한이 없습니다.")
+            current_actor_environments = (
+                None
+                if any(
+                    item["environment_scope"] is None
+                    for item in actor_bindings
+                )
+                else {
+                    str(item["environment_scope"])
+                    for item in actor_bindings
+                }
+            )
+            if allowed_environments is None:
+                effective_allowed_environments = current_actor_environments
+            elif current_actor_environments is None:
+                effective_allowed_environments = allowed_environments
+            else:
+                effective_allowed_environments = (
+                    allowed_environments & current_actor_environments
+                )
+            cursor.execute(
+                """
+                SELECT id, email, password_hash, display_name, status
+                FROM control.users
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (user_id,),
+            )
+            target = cursor.fetchone()
+            if not target or target["password_hash"] == "!anonymized!":
+                raise PermissionError("삭제할 사용자를 찾을 수 없습니다.")
+
+            cursor.execute(
+                """
+                SELECT role, environment_scope
+                FROM control.platform_roles
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            role_bindings = cursor.fetchall()
+            platform_roles = {str(item["role"]) for item in role_bindings}
+            cursor.execute(
+                """
+                SELECT membership.tenant_id, membership.role,
+                       membership.status, tenant.customer_name,
+                       tenant.environment, tenant.status AS tenant_status,
+                       EXISTS (
+                           SELECT 1
+                           FROM control.memberships other_membership
+                           JOIN control.users other_user
+                             ON other_user.id = other_membership.user_id
+                           WHERE other_membership.tenant_id = membership.tenant_id
+                             AND other_membership.user_id <> membership.user_id
+                             AND other_membership.role = 'CUSTOMER_ADMIN'
+                             AND other_membership.status = 'ACTIVE'
+                             AND other_user.status = 'ACTIVE'
+                       ) AS has_other_active_admin
+                FROM control.memberships membership
+                JOIN control.tenants tenant ON tenant.id = membership.tenant_id
+                WHERE membership.user_id = %s
+                """,
+                (user_id,),
+            )
+            memberships = cursor.fetchall()
+            membership_environments = {
+                str(item["environment"]) for item in memberships
+            }
+            platform_environment_scopes = {
+                (
+                    str(item["environment_scope"])
+                    if item["environment_scope"] is not None
+                    else None
+                )
+                for item in role_bindings
+            }
+
+            active_admin_count: int | None = None
+            if target["status"] == "ACTIVE" and "MSP_ADMIN" in platform_roles:
+                cursor.execute(
+                    """
+                    SELECT count(DISTINCT users.id) AS active_admin_count
+                    FROM control.users users
+                    JOIN control.platform_roles role ON role.user_id = users.id
+                    WHERE users.status = 'ACTIVE'
+                      AND role.role = 'MSP_ADMIN'
+                    """
+                )
+                active_admin_count = int(
+                    cursor.fetchone()["active_admin_count"]
+                )
+            blocked_customer_names = tuple(
+                str(item["customer_name"])
+                for item in memberships
+                if target["status"] == "ACTIVE"
+                and item["role"] == "CUSTOMER_ADMIN"
+                and item["status"] == "ACTIVE"
+                and item["tenant_status"] != "OFFBOARDED"
+                and not item["has_other_active_admin"]
+            )
+            account_type = _validate_user_deletion(
+                target_user_id=user_id,
+                actor_id=actor_id,
+                target_email=str(target["email"]),
+                confirmation_email=confirmation_email,
+                target_status=str(target["status"]),
+                platform_roles=platform_roles,
+                platform_environment_scopes=platform_environment_scopes,
+                membership_environments=membership_environments,
+                allowed_environments=effective_allowed_environments,
+                active_admin_count=active_admin_count,
+                blocked_customer_names=blocked_customer_names,
+            )
+            removed_platform_roles = sorted(
+                (
+                    {
+                        "role": str(item["role"]),
+                        "environment_scope": item["environment_scope"],
+                    }
+                    for item in role_bindings
+                ),
+                key=lambda item: (
+                    item["role"],
+                    str(item["environment_scope"] or ""),
+                ),
+            )
+            removed_memberships = sorted(
+                (
+                    {
+                        "tenant_id": str(item["tenant_id"]),
+                        "role": str(item["role"]),
+                        "status": str(item["status"]),
+                    }
+                    for item in memberships
+                ),
+                key=lambda item: (item["tenant_id"], item["role"]),
+            )
+            cursor.execute(
+                "DELETE FROM control.memberships WHERE user_id = %s",
+                (user_id,),
+            )
+            cursor.execute(
+                "DELETE FROM control.platform_roles WHERE user_id = %s",
+                (user_id,),
+            )
+            self._anonymize_orphan_users(cursor, [user_id])
+            cursor.execute(
+                """
+                INSERT INTO audit.data_change_logs (
+                    actor_id, table_name, record_id, operation, changed_fields
+                ) VALUES (%s, 'control.users', %s, 'DELETE', %s::jsonb)
+                """,
+                (
+                    actor_id,
+                    user_id,
+                    json.dumps(
+                        {
+                            "account_type": account_type,
+                            "access_removed": True,
+                            "anonymized": True,
+                            "removed_platform_roles": removed_platform_roles,
+                            "removed_memberships": removed_memberships,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+            return str(target["display_name"]), account_type
+
     def assign_customer_membership(
         self, user_id: str, tenant_id: str, role: str
     ) -> None:
@@ -1089,10 +1369,16 @@ class PortalRepository:
             raise ValueError("사용자 또는 고객 식별자가 올바르지 않습니다.") from exc
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s::bigint)",
+                (_MSP_ACCOUNT_MANAGEMENT_LOCK_ID,),
+            )
+            cursor.execute(
                 """
                 SELECT users.id
                 FROM control.users users
                 WHERE users.id = %s
+                  AND users.status IN ('INVITED', 'ACTIVE')
+                  AND users.password_hash IS DISTINCT FROM '!anonymized!'
                   AND NOT EXISTS (
                       SELECT 1 FROM control.platform_roles role
                       WHERE role.user_id = users.id
@@ -1102,6 +1388,41 @@ class PortalRepository:
             )
             if not cursor.fetchone():
                 raise ValueError("연결할 고객 사용자를 찾을 수 없습니다.")
+            cursor.execute(
+                """
+                SELECT role, status
+                FROM control.memberships
+                WHERE user_id = %s AND tenant_id = %s
+                FOR UPDATE
+                """,
+                (user_id, tenant_id),
+            )
+            existing_membership = cursor.fetchone()
+            if (
+                role == "CUSTOMER_VIEWER"
+                and existing_membership
+                and existing_membership["role"] == "CUSTOMER_ADMIN"
+                and existing_membership["status"] == "ACTIVE"
+            ):
+                cursor.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM control.memberships membership
+                        JOIN control.users users ON users.id = membership.user_id
+                        WHERE membership.tenant_id = %s
+                          AND membership.user_id <> %s
+                          AND membership.role = 'CUSTOMER_ADMIN'
+                          AND membership.status = 'ACTIVE'
+                          AND users.status = 'ACTIVE'
+                    ) AS has_other_active_admin
+                    """,
+                    (tenant_id, user_id),
+                )
+                if not cursor.fetchone()["has_other_active_admin"]:
+                    raise ValueError(
+                        "다른 활성 고객 관리자를 먼저 지정하세요."
+                    )
             cursor.execute(
                 "SELECT id FROM control.tenants WHERE id = %s AND status <> 'OFFBOARDED'",
                 (tenant_id,),
@@ -1142,7 +1463,15 @@ class PortalRepository:
                        users.status AS user_status, users.last_login_at,
                        users.created_at, membership.tenant_id, membership.role,
                        membership.status AS membership_status,
-                       tenant.customer_name, tenant.environment
+                       tenant.customer_name, tenant.environment,
+                       ARRAY(
+                           SELECT DISTINCT scoped_tenant.environment
+                           FROM control.memberships scoped_membership
+                           JOIN control.tenants scoped_tenant
+                             ON scoped_tenant.id = scoped_membership.tenant_id
+                           WHERE scoped_membership.user_id = users.id
+                           ORDER BY scoped_tenant.environment
+                       ) AS environment_scopes
                 FROM control.users users
                 LEFT JOIN control.memberships membership
                     ON membership.user_id = users.id
@@ -1152,6 +1481,7 @@ class PortalRepository:
                     SELECT 1 FROM control.platform_roles role
                     WHERE role.user_id = users.id
                 )
+                  AND users.password_hash IS DISTINCT FROM '!anonymized!'
                   {tenant_join_condition}
                 ORDER BY users.display_name, users.email, tenant.customer_name
                 """,
@@ -1167,6 +1497,12 @@ class PortalRepository:
                     "user_status": row["user_status"],
                     "last_login_at": row["last_login_at"],
                     "created_at": row["created_at"],
+                    "can_delete": allowed_environments is None or (
+                        bool(row["environment_scopes"])
+                        and set(row["environment_scopes"]).issubset(
+                            allowed_environments
+                        )
+                    ),
                     "memberships": [],
                 })
                 if row["tenant_id"]:
@@ -3507,6 +3843,12 @@ class PortalRepository:
     @staticmethod
     def _anonymize_orphan_users(cursor: Any, orphan_ids: list[str]) -> None:
         cursor.execute(
+            "SELECT lower(email) AS email FROM control.users "
+            "WHERE id = ANY(%s::uuid[])",
+            (orphan_ids,),
+        )
+        orphan_emails = [str(row["email"]) for row in cursor.fetchall()]
+        cursor.execute(
             "DELETE FROM control.user_sessions "
             "WHERE user_id = ANY(%s::uuid[])",
             (orphan_ids,),
@@ -3516,7 +3858,8 @@ class PortalRepository:
             UPDATE control.users
             SET email = 'anon-' || replace(id::text, '-', '') || '@deleted.invalid',
                 display_name = '익명 사용자', status = 'DISABLED',
-                password_hash = '!anonymized!', last_login_at = NULL,
+                password_hash = '!anonymized!', mfa_enabled = false,
+                last_login_at = NULL,
                 external_identity_provider = NULL,
                 external_subject = NULL
             WHERE id = ANY(%s::uuid[])
@@ -3530,8 +3873,9 @@ class PortalRepository:
                 source_ip = NULL, user_agent = NULL,
                 failure_reason = NULL
             WHERE user_id = ANY(%s::uuid[])
+               OR lower(email_attempted) = ANY(%s)
             """,
-            (orphan_ids,),
+            (orphan_ids, orphan_emails),
         )
         cursor.execute(
             """

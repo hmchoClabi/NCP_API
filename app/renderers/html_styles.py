@@ -524,33 +524,32 @@ table:not(.table-with-details) tbody tr:hover,
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-.chart-card.is-dragging { opacity: .55; border-color: #60a5fa; }
+.chart-card.is-dragging {
+  opacity: .55;
+  border-color: #60a5fa;
+  pointer-events: none;
+}
 .chart-heading {
-  padding-right: 105px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .chart-heading:active { cursor: grabbing; }
+.chart-heading-copy { min-width: 0; }
+.chart-drag-grip {
+  flex: none;
+  margin-top: 1px;
+  color: #64748b;
+  font-size: 1.15rem;
+  line-height: 1;
+}
 .chart-heading h3 { margin: 0; font-size: 1rem; }
 .chart-heading p { margin: 3px 0 12px; color: var(--muted); font-size: .82rem; }
-.chart-order-controls {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: flex;
-  gap: 4px;
-}
-.chart-order-controls button {
-  padding: 3px 7px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  cursor: pointer;
-  font: inherit;
-  font-size: .7rem;
-  font-weight: 750;
-}
-.chart-order-controls button:hover { color: #1d4ed8; background: #eff6ff; }
 .chart-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -635,7 +634,7 @@ table:not(.table-with-details) tbody tr:hover,
 .chart-legend-item[aria-pressed="true"] { color: #1d4ed8; background: #eff6ff; }
 .chart-legend-item.is-muted { opacity: .42; text-decoration: line-through; }
 .chart-legend-item:focus-visible,
-.chart-order-controls button:focus-visible,
+.chart-heading:focus-visible,
 .chart-toolbar button:focus-visible,
 .chart-toolbar select:focus-visible { outline: 3px solid rgba(37, 99, 235, .35); }
 [data-chart-series] { cursor: pointer; }
@@ -708,9 +707,14 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .summary-grid, .report-section { break-inside: avoid; }
   .metric-trends { break-inside: auto; }
   .chart-card { break-inside: avoid; }
-  .chart-toolbar, .chart-legend, .chart-order-controls,
+  .chart-toolbar, .chart-legend,
   .chart-tooltip { display: none; }
-  .chart-heading { padding-right: 0; cursor: default; }
+  .chart-heading {
+    cursor: default;
+    touch-action: auto;
+    user-select: auto;
+  }
+  .chart-drag-grip { display: none; }
   .chart-series-hidden { display: inline !important; }
   .report-section { padding: 18px; }
   .technical-appendix { border: 0; }

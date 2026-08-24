@@ -18,6 +18,7 @@ from webapp.repository import (
     _preserved_legacy_analysis_policies,
     _remove_queued_artifact,
     _validate_msp_status_change,
+    _validate_user_deletion,
     normalize_report_retention_policies,
     validate_report_retention_policies,
 )
@@ -1219,6 +1220,75 @@ class MspAccountStatusSafetyTests(unittest.TestCase):
                 active_admin_count=None,
             )
 
+
+class UserDeletionSafetyTests(unittest.TestCase):
+    BASE = {
+        "target_user_id": "user-2",
+        "actor_id": "admin-1",
+        "target_email": "user@example.com",
+        "confirmation_email": "user@example.com",
+        "target_status": "ACTIVE",
+        "platform_roles": set(),
+        "platform_environment_scopes": set(),
+        "membership_environments": {"public"},
+        "allowed_environments": {"public"},
+        "active_admin_count": None,
+    }
+
+    def test_accepts_customer_user_inside_actor_scope(self):
+        self.assertEqual(
+            _validate_user_deletion(**self.BASE),
+            "CUSTOMER",
+        )
+
+    def test_rejects_wrong_email_and_self_deletion(self):
+        with self.assertRaisesRegex(ValueError, "이메일"):
+            _validate_user_deletion(
+                **{**self.BASE, "confirmation_email": "other@example.com"}
+            )
+        with self.assertRaisesRegex(ValueError, "자신의 계정"):
+            _validate_user_deletion(
+                **{**self.BASE, "target_user_id": "admin-1"}
+            )
+
+    def test_rejects_last_msp_and_customer_admin(self):
+        with self.assertRaisesRegex(ValueError, "마지막 활성 MSP 관리자"):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "platform_roles": {"MSP_ADMIN"},
+                "active_admin_count": 1,
+            })
+        with self.assertRaisesRegex(ValueError, "다른 활성 고객 관리자"):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "blocked_customer_names": ("고객사 A",),
+            })
+
+    def test_rejects_mixed_or_global_scope_and_protected_roles(self):
+        with self.assertRaises(PermissionError):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "membership_environments": {"public", "gov"},
+            })
+        with self.assertRaises(PermissionError):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "platform_roles": {"MSP_OPERATOR"},
+                "platform_environment_scopes": {None},
+                "membership_environments": set(),
+            })
+        with self.assertRaises(PermissionError):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "platform_roles": {"MSP_OPERATOR"},
+                "platform_environment_scopes": {"public"},
+                "membership_environments": {"gov"},
+            })
+        with self.assertRaisesRegex(PermissionError, "시스템 권한"):
+            _validate_user_deletion(**{
+                **self.BASE,
+                "platform_roles": {"SYSTEM_ADMIN"},
+            })
 
 if __name__ == "__main__":
     unittest.main()

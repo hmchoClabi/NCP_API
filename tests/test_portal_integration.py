@@ -153,6 +153,162 @@ class PortalIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "자신의 MSP 계정"):
             self.repository.set_msp_user_enabled(admin_id, admin_id, False)
 
+    def test_msp_and_customer_user_deletion_revokes_access_and_reuses_email(self):
+        tenant_id = self.repository.create_tenant(
+            self.TENANT_CODE, "Portal Integration", "public", "KR"
+        )
+        admin_id = self.repository.bootstrap_msp_admin(
+            self.ADMIN_EMAIL,
+            "integration admin password",
+            "Portal Admin",
+        )
+        second_admin_id = self.repository.create_msp_user(
+            self.SECOND_ADMIN_EMAIL,
+            "integration second admin password",
+            "Second Admin",
+            "MSP_ADMIN",
+            actor_id=admin_id,
+        )
+        operator_id = self.repository.create_msp_user(
+            self.OPERATOR_EMAIL,
+            "integration operator password",
+            "Portal Operator",
+            "MSP_OPERATOR",
+            actor_id=admin_id,
+        )
+        customer_user_id = self.repository.create_customer_user(
+            self.USER_EMAIL,
+            "integration customer password",
+            "Portal Customer",
+            self.TENANT_CODE,
+        )
+        self.created_user_ids.extend([
+            admin_id, second_admin_id, operator_id, customer_user_id,
+        ])
+        operator_session, _ = self.repository.create_session(operator_id)
+        customer_session, _ = self.repository.create_session(customer_user_id)
+        self.repository.log_authentication(
+            self.USER_EMAIL,
+            "DENIED",
+            failure_reason="INVALID_CREDENTIALS",
+        )
+        self.repository.set_msp_user_enabled(
+            admin_id, second_admin_id, False
+        )
+        with self.assertRaises(PermissionError):
+            self.repository.delete_user_account(
+                operator_id, admin_id, self.OPERATOR_EMAIL
+            )
+        self.repository.set_msp_user_enabled(
+            admin_id, second_admin_id, True
+        )
+
+        self.assertEqual(
+            self.repository.delete_user_account(
+                operator_id, admin_id, self.OPERATOR_EMAIL
+            ),
+            ("Portal Operator", "MSP"),
+        )
+        self.assertEqual(
+            self.repository.delete_user_account(
+                customer_user_id, admin_id, self.USER_EMAIL
+            ),
+            ("Portal Customer", "CUSTOMER"),
+        )
+
+        self.assertIsNone(self.repository.session_user(operator_session))
+        self.assertIsNone(self.repository.session_user(customer_session))
+        self.assertIsNone(self.repository.authenticate(self.OPERATOR_EMAIL))
+        self.assertIsNone(self.repository.authenticate(self.USER_EMAIL))
+        self.assertNotIn(
+            operator_id,
+            {str(item["id"]) for item in self.repository.msp_users()},
+        )
+        self.assertNotIn(
+            customer_user_id,
+            {str(item["id"]) for item in self.repository.customer_users()},
+        )
+
+        with self.repository._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, email, display_name, status, password_hash,
+                       mfa_enabled
+                FROM control.users
+                WHERE id = ANY(%s::uuid[])
+                ORDER BY id
+                """,
+                ([operator_id, customer_user_id],),
+            )
+            deleted_users = cursor.fetchall()
+            self.assertEqual(len(deleted_users), 2)
+            for user in deleted_users:
+                self.assertTrue(user["email"].endswith("@deleted.invalid"))
+                self.assertEqual(user["display_name"], "익명 사용자")
+                self.assertEqual(user["status"], "DISABLED")
+                self.assertEqual(user["password_hash"], "!anonymized!")
+                self.assertFalse(user["mfa_enabled"])
+            cursor.execute(
+                """
+                SELECT count(*) AS access_count
+                FROM (
+                    SELECT user_id FROM control.platform_roles
+                    WHERE user_id = ANY(%s::uuid[])
+                    UNION ALL
+                    SELECT user_id FROM control.memberships
+                    WHERE user_id = ANY(%s::uuid[])
+                    UNION ALL
+                    SELECT user_id FROM control.user_sessions
+                    WHERE user_id = ANY(%s::uuid[])
+                ) removed_access
+                """,
+                (
+                    [operator_id, customer_user_id],
+                    [operator_id, customer_user_id],
+                    [operator_id, customer_user_id],
+                ),
+            )
+            self.assertEqual(cursor.fetchone()["access_count"], 0)
+            cursor.execute(
+                """
+                SELECT count(*) AS deletion_count
+                FROM audit.data_change_logs
+                WHERE table_name = 'control.users'
+                  AND operation = 'DELETE'
+                  AND record_id = ANY(%s)
+                """,
+                ([operator_id, customer_user_id],),
+            )
+            self.assertEqual(cursor.fetchone()["deletion_count"], 2)
+            cursor.execute(
+                """
+                SELECT count(*) AS redacted_count
+                FROM audit.authentication_logs
+                WHERE email_attempted = 'redacted@deleted.invalid'
+                  AND failure_reason IS NULL
+                """
+            )
+            self.assertGreaterEqual(cursor.fetchone()["redacted_count"], 1)
+
+        replacement_operator_id = self.repository.create_msp_user(
+            self.OPERATOR_EMAIL,
+            "replacement operator password",
+            "Replacement Operator",
+            "MSP_OPERATOR",
+            actor_id=admin_id,
+        )
+        replacement_customer_id = self.repository.create_customer_user(
+            self.USER_EMAIL,
+            "replacement customer password",
+            "Replacement Customer",
+            self.TENANT_CODE,
+        )
+        self.created_user_ids.extend([
+            replacement_operator_id, replacement_customer_id,
+        ])
+        self.assertNotEqual(replacement_operator_id, operator_id)
+        self.assertNotEqual(replacement_customer_id, customer_user_id)
+
     def test_users_multi_account_and_encrypted_credentials(self):
         tenant_id = self.repository.create_tenant(
             self.TENANT_CODE, "Portal Integration", "public", "KR"
@@ -175,6 +331,10 @@ class PortalIntegrationTests(unittest.TestCase):
         )
         tenant_users = self.repository.users_for_tenant(tenant_id)
         self.assertEqual(tenant_users[0]["role"], "CUSTOMER_ADMIN")
+        with self.assertRaisesRegex(ValueError, "다른 활성 고객 관리자"):
+            self.repository.assign_customer_membership(
+                customer_user_id, tenant_id, "CUSTOMER_VIEWER"
+            )
         global_users = self.repository.customer_users()
         customer_user = next(
             item for item in global_users if str(item["id"]) == customer_user_id

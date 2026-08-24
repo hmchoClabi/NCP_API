@@ -230,14 +230,22 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertEqual(
             metric_charts.count(
                 '<div class="chart-heading" data-chart-drag-handle '
-                'draggable="true"'
+                'tabindex="0"'
+            ),
+            4,
+        )
+        self.assertNotIn('draggable="true"', metric_charts)
+        self.assertEqual(
+            metric_charts.count(
+                '<span class="chart-drag-grip" aria-hidden="true">⠿</span>'
             ),
             4,
         )
         self.assertIn(
-            'aria-label="Memory Utilization Average 그래프를 앞 순서로 이동"',
+            'aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"',
             metric_charts,
         )
+        self.assertNotIn("data-chart-move", metric_charts)
         self.assertIn('<option value="1000">1000 × 300</option>', html)
         self.assertIn('<option value="2000" selected>2000 × 600</option>', html)
         self.assertIn('<option value="3000">3000 × 900</option>', html)
@@ -274,7 +282,7 @@ class HtmlReportRendererTests(unittest.TestCase):
             html,
         )
         self.assertIn(
-            ".chart-toolbar, .chart-legend, .chart-order-controls",
+            ".chart-toolbar, .chart-legend,",
             html,
         )
         self.assertIn(".chart-tooltip {", html)
@@ -284,7 +292,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn('document.addEventListener("focusin"', html)
         self.assertNotIn('data-chart-series tabindex=', html)
         self.assertNotIn('series.setAttribute("aria-pressed"', html)
-        self.assertNotIn('document.addEventListener("keydown"', html)
+        self.assertIn('document.addEventListener("keydown"', html)
         self.assertEqual(
             HtmlReportRenderer.CHART_COLORS[:3],
             ("#15803d", "#2563eb", "#c2410c"),
@@ -906,7 +914,7 @@ assert.strictEqual(tooltip.hidden, true);
         )
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
-    def test_chart_cards_reorder_with_buttons_and_native_drag(self):
+    def test_chart_cards_reorder_with_pointer_and_keyboard(self):
         html = HtmlReportRenderer().render(self._sample_report())
         script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
         harness = r"""
@@ -939,9 +947,6 @@ class ChartNode {
     if (selector === "[data-chart-drag-handle]") {
       return this.kind === "heading" ? this : null;
     }
-    if (selector === "[data-chart-move]") {
-      return this.kind === "move" ? this : null;
-    }
     return null;
   }
   getBoundingClientRect() { return this.rect; }
@@ -951,10 +956,12 @@ class ChartGrid {
   constructor(...cards) {
     this.classList = new ClassList("chart-grid");
     this.children = cards;
+    this.capturedPointers = new Set();
     cards.forEach((card) => { card.parentElement = this; });
     this.sync();
   }
   insertBefore(node, reference) {
+    if (node === reference) return;
     const currentIndex = this.children.indexOf(node);
     if (currentIndex >= 0) this.children.splice(currentIndex, 1);
     let nextIndex = reference ? this.children.indexOf(reference) : -1;
@@ -962,6 +969,13 @@ class ChartGrid {
     this.children.splice(nextIndex, 0, node);
     node.parentElement = this;
     this.sync();
+  }
+  setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
+  hasPointerCapture(pointerId) {
+    return this.capturedPointers.has(pointerId);
+  }
+  releasePointerCapture(pointerId) {
+    this.capturedPointers.delete(pointerId);
   }
   sync() {
     this.children.forEach((card, index) => {
@@ -981,12 +995,6 @@ const makeCard = (name) => {
   const card = new ChartNode("card", name);
   card.heading = new ChartNode("heading");
   card.heading.card = card;
-  card.previousButton = new ChartNode("move");
-  card.previousButton.card = card;
-  card.previousButton.dataset.chartMove = "previous";
-  card.nextButton = new ChartNode("move");
-  card.nextButton.card = card;
-  card.nextButton.dataset.chartMove = "next";
   return card;
 };
 
@@ -997,74 +1005,136 @@ const outside = makeCard("outside");
 const grid = new ChartGrid(a, b, c);
 new ChartGrid(outside);
 const names = () => grid.children.map((card) => card.name);
+let pointedNode = null;
 
 global.document = {
   addEventListener(name, handler) { handlers[name] = handler; },
+  elementFromPoint() { return pointedNode; },
 };
 eval(__REPORT_SCRIPT__);
 
-handlers.click({target: a.nextButton});
+let keyboardPrevented = false;
+handlers.keydown({
+  target: a.heading,
+  key: "ArrowRight",
+  preventDefault() { keyboardPrevented = true; },
+});
+assert.strictEqual(keyboardPrevented, true);
 assert.deepStrictEqual(names(), ["b", "a", "c"]);
-handlers.click({target: a.previousButton});
+handlers.keydown({
+  target: a.heading,
+  key: "ArrowLeft",
+  preventDefault() {},
+});
 assert.deepStrictEqual(names(), ["a", "b", "c"]);
 
-const transfer = {setData() {}, effectAllowed: "", dropEffect: ""};
-handlers.dragstart({
+handlers.pointerdown({
   target: a.heading,
-  dataTransfer: transfer,
-  preventDefault() { throw new Error("valid heading drag was blocked"); },
+  pointerId: 1,
+  pointerType: "touch",
+  button: 0,
+  isPrimary: true,
+  clientX: 50,
+  clientY: 50,
 });
-assert(a.classList.contains("is-dragging"));
-let dragOverPrevented = false;
-handlers.dragover({
-  target: b,
+assert(grid.hasPointerCapture(1));
+assert(!a.classList.contains("is-dragging"));
+pointedNode = b;
+let pointerMovePrevented = false;
+handlers.pointermove({
+  pointerId: 1,
   clientX: 350,
   clientY: 50,
-  dataTransfer: transfer,
-  preventDefault() { dragOverPrevented = true; },
+  preventDefault() { pointerMovePrevented = true; },
 });
-assert.strictEqual(dragOverPrevented, true);
+assert.strictEqual(pointerMovePrevented, true);
+assert(a.classList.contains("is-dragging"));
 assert.deepStrictEqual(names(), ["b", "a", "c"]);
-let dropPrevented = false;
-handlers.drop({
-  target: c,
-  preventDefault() { dropPrevented = true; },
-});
-assert.strictEqual(dropPrevented, true);
-handlers.dragend({target: a});
-assert(!a.classList.contains("is-dragging"));
-
-handlers.dragstart({
-  target: b.heading,
-  dataTransfer: transfer,
-  preventDefault() { throw new Error("valid heading drag was blocked"); },
-});
-handlers.dragover({
-  target: c,
+assert(grid.hasPointerCapture(1));
+pointedNode = c;
+handlers.pointermove({
+  pointerId: 1,
   clientX: 50,
   clientY: 190,
-  dataTransfer: transfer,
+  preventDefault() {},
+});
+assert.deepStrictEqual(names(), ["b", "c", "a"]);
+assert(grid.hasPointerCapture(1));
+handlers.pointerup({pointerId: 1});
+assert(!a.classList.contains("is-dragging"));
+assert(!grid.hasPointerCapture(1));
+
+handlers.keydown({
+  target: a.heading,
+  key: "ArrowLeft",
+  preventDefault() {},
+});
+handlers.keydown({
+  target: a.heading,
+  key: "ArrowLeft",
+  preventDefault() {},
+});
+assert.deepStrictEqual(names(), ["a", "b", "c"]);
+
+handlers.pointerdown({
+  target: b.heading,
+  pointerId: 2,
+  pointerType: "mouse",
+  button: 0,
+  isPrimary: true,
+  clientX: 50,
+  clientY: 50,
+});
+pointedNode = c;
+handlers.pointermove({
+  pointerId: 2,
+  clientX: 50,
+  clientY: 190,
   preventDefault() {},
 });
 assert.deepStrictEqual(names(), ["a", "c", "b"]);
-handlers.dragend({target: b});
+handlers.pointercancel({pointerId: 2});
+assert(!b.classList.contains("is-dragging"));
 
-handlers.dragstart({
+handlers.pointerdown({
   target: a.heading,
-  dataTransfer: transfer,
-  preventDefault() { throw new Error("valid heading drag was blocked"); },
+  pointerId: 3,
+  pointerType: "touch",
+  button: 0,
+  isPrimary: true,
+  clientX: 10,
+  clientY: 10,
 });
-let crossGridPrevented = false;
-handlers.dragover({
-  target: outside,
+pointedNode = outside;
+handlers.pointermove({
+  pointerId: 3,
+  clientX: 30,
+  clientY: 30,
+  preventDefault() {},
+});
+assert.deepStrictEqual(names(), ["a", "c", "b"]);
+handlers.pointercancel({pointerId: 3});
+
+handlers.pointerdown({
+  target: c.heading,
+  pointerId: 4,
+  pointerType: "touch",
+  button: 0,
+  isPrimary: true,
   clientX: 0,
   clientY: 0,
-  dataTransfer: transfer,
-  preventDefault() { crossGridPrevented = true; },
 });
-assert.strictEqual(crossGridPrevented, false);
+pointedNode = a;
+let thresholdPrevented = false;
+handlers.pointermove({
+  pointerId: 4,
+  clientX: 4,
+  clientY: 3,
+  preventDefault() { thresholdPrevented = true; },
+});
+assert.strictEqual(thresholdPrevented, false);
 assert.deepStrictEqual(names(), ["a", "c", "b"]);
-handlers.dragend({target: a});
+handlers.pointerup({pointerId: 4});
 """.replace("__REPORT_SCRIPT__", json.dumps(script))
 
         completed = subprocess.run(

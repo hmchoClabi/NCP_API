@@ -333,20 +333,20 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     image.src = sourceUrl;
   };
 
-  const moveChartCard = (button) => {
-    const card = button.closest(".chart-card");
+  const moveChartCard = (card, direction) => {
     const grid = card && card.parentElement;
-    if (!grid || !grid.classList.contains("chart-grid")) return;
-    const sibling = button.dataset.chartMove === "previous"
+    if (!grid || !grid.classList.contains("chart-grid")) return false;
+    const sibling = direction === "previous"
       ? card.previousElementSibling
       : card.nextElementSibling;
-    if (!sibling || !sibling.classList.contains("chart-card")) return;
+    if (!sibling || !sibling.classList.contains("chart-card")) return false;
     grid.insertBefore(
       card,
-      button.dataset.chartMove === "previous"
+      direction === "previous"
         ? sibling
         : sibling.nextElementSibling
     );
+    return true;
   };
 
   const filterResourceRows = (button) => {
@@ -383,32 +383,73 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
       : `전체 ${visibleCount}건 표시 중`;
   };
 
+  let pendingChartDrag = null;
   let draggedChartCard = null;
 
-  document.addEventListener("dragstart", (event) => {
+  const finishChartDrag = (event) => {
+    if (
+      !pendingChartDrag
+      || (
+        typeof event.pointerId === "number"
+        && event.pointerId !== pendingChartDrag.pointerId
+      )
+    ) return;
+    const {captureTarget, pointerId} = pendingChartDrag;
+    pendingChartDrag = null;
+    if (draggedChartCard) draggedChartCard.classList.remove("is-dragging");
+    draggedChartCard = null;
+    if (
+      captureTarget.hasPointerCapture
+      && captureTarget.hasPointerCapture(pointerId)
+    ) captureTarget.releasePointerCapture(pointerId);
+  };
+
+  document.addEventListener("pointerdown", (event) => {
     const handle = event.target.closest("[data-chart-drag-handle]");
     const card = handle && handle.closest(".chart-card");
     if (
-      !card
+      pendingChartDrag
+      || !card
       || !card.parentElement.classList.contains("chart-grid")
+      || event.isPrimary === false
+      || (typeof event.button === "number" && event.button !== 0)
     ) return;
-    draggedChartCard = card;
-    card.classList.add("is-dragging");
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", "chart-card");
+    pendingChartDrag = {
+      card,
+      captureTarget: card.parentElement,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    if (card.parentElement.setPointerCapture) {
+      card.parentElement.setPointerCapture(event.pointerId);
     }
   });
 
-  document.addEventListener("dragover", (event) => {
-    const target = event.target.closest(".chart-card");
+  document.addEventListener("pointermove", (event) => {
     if (
-      !draggedChartCard
-      || !target
+      !pendingChartDrag
+      || event.pointerId !== pendingChartDrag.pointerId
+    ) return;
+    if (!draggedChartCard) {
+      const distance = Math.hypot(
+        event.clientX - pendingChartDrag.startX,
+        event.clientY - pendingChartDrag.startY
+      );
+      if (distance < 8) return;
+      draggedChartCard = pendingChartDrag.card;
+      draggedChartCard.classList.add("is-dragging");
+    }
+    event.preventDefault();
+    const pointed = document.elementFromPoint
+      ? document.elementFromPoint(event.clientX, event.clientY)
+      : event.target;
+    const target = pointed && pointed.closest(".chart-card");
+    if (
+      !target
       || target === draggedChartCard
       || target.parentElement !== draggedChartCard.parentElement
     ) return;
-    event.preventDefault();
     const bounds = target.getBoundingClientRect();
     const draggedBounds = draggedChartCard.getBoundingClientRect();
     const sameRow = Math.abs(draggedBounds.top - bounds.top)
@@ -419,22 +460,26 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     const reference = insertBefore
       ? target
       : target.nextElementSibling;
+    if (reference === draggedChartCard) return;
     target.parentElement.insertBefore(draggedChartCard, reference);
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   });
 
-  document.addEventListener("drop", (event) => {
-    const target = event.target.closest(".chart-card");
+  document.addEventListener("pointerup", finishChartDrag);
+  document.addEventListener("pointercancel", finishChartDrag);
+  document.addEventListener("lostpointercapture", finishChartDrag);
+
+  document.addEventListener("keydown", (event) => {
+    const handle = event.target.closest("[data-chart-drag-handle]");
+    if (!handle) return;
+    const direction = ["ArrowLeft", "ArrowUp"].includes(event.key)
+      ? "previous"
+      : ["ArrowRight", "ArrowDown"].includes(event.key)
+        ? "next"
+        : "";
     if (
-      draggedChartCard
-      && target
-      && target.parentElement === draggedChartCard.parentElement
+      direction
+      && moveChartCard(handle.closest(".chart-card"), direction)
     ) event.preventDefault();
-  });
-
-  document.addEventListener("dragend", () => {
-    if (draggedChartCard) draggedChartCard.classList.remove("is-dragging");
-    draggedChartCard = null;
   });
 
   if (document.querySelectorAll) {
@@ -463,11 +508,6 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
   });
 
   document.addEventListener("click", (event) => {
-    const move = event.target.closest("[data-chart-move]");
-    if (move) {
-      moveChartCard(move);
-      return;
-    }
     const toggle = event.target.closest("[data-chart-toggle]");
     if (toggle) {
       toggleSeries(toggle);
@@ -3405,7 +3445,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>주요 인프라 모니터링</h2>
-          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 눌러 비교할 자원을 여러 개 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 제목을 끌거나 앞·뒤 버튼으로 순서를 바꿀 수 있습니다.</p>
+          <p>선택한 자원의 보고 기간 Cloud Insight 시계열입니다. 범례나 선을 눌러 비교할 자원을 여러 개 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 상단의 ⠿ 영역을 누른 채 원하는 위치로 끌어 놓으면 순서가 자동 배치되며, 키보드에서는 방향키로 이동할 수 있습니다.</p>
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
@@ -3558,7 +3598,7 @@ class HtmlReportRenderer:
       <div class="section-heading">
         <div>
           <h2>All Server 사용률 추이</h2>
-          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 눌러 비교할 서버를 여러 대 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 제목을 끌거나 앞·뒤 버튼으로 순서를 바꿀 수 있습니다.</p>
+          <p>Cloud Insight 원시 지표로 보고서에서 재구성한 KST {aggregation_label} 그래프입니다. 서버 이름이나 선을 눌러 비교할 서버를 여러 대 선택할 수 있으며, 선택이 없으면 전체를 표시합니다. 그래프 상단의 ⠿ 영역을 누른 채 원하는 위치로 끌어 놓으면 순서가 자동 배치되며, 키보드에서는 방향키로 이동할 수 있습니다.</p>
         </div>
         <span class="count">{len(charts):,}개 그룹</span>
       </div>
@@ -3568,17 +3608,16 @@ class HtmlReportRenderer:
     def _chart_heading(self, title: str, description: str) -> str:
         safe_title = self._text(title)
         return f"""
-        <div class="chart-heading" data-chart-drag-handle draggable="true"
-             title="끌어서 그래프 순서 변경">
-          <h3>{safe_title}</h3>
-          <p>{self._text(description)}</p>
-        </div>
-        <div class="chart-order-controls" role="group"
-             aria-label="그래프 순서 변경">
-          <button type="button" data-chart-move="previous"
-                  aria-label="{safe_title} 그래프를 앞 순서로 이동">앞으로</button>
-          <button type="button" data-chart-move="next"
-                  aria-label="{safe_title} 그래프를 뒤 순서로 이동">뒤로</button>
+        <div class="chart-heading" data-chart-drag-handle tabindex="0"
+             role="group"
+             aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+             aria-label="{safe_title} 그래프 순서 변경. 끌어 놓거나 방향키를 사용하세요"
+             title="누른 채 끌어서 그래프 순서 변경">
+          <span class="chart-drag-grip" aria-hidden="true">⠿</span>
+          <div class="chart-heading-copy">
+            <h3>{safe_title}</h3>
+            <p>{self._text(description)}</p>
+          </div>
         </div>"""
 
     def _metric_series(
