@@ -183,22 +183,31 @@ tag and the full SourceCommit SHA. This command performs no Docker build:
 
 ```powershell
 $env:Path = "C:\Tools\ncp;C:\Tools\helm;$env:Path"
+$helm = "C:\Tools\helm\helm.exe"
 $sourceRevision = (git rev-parse HEAD).Trim().ToLowerInvariant()
+$deployedValues = (
+  & $helm get values ncp-report --namespace ncp-report -o json
+) | ConvertFrom-Json
+$migrationTag = [string]$deployedValues.migration.image.tag
 .\deploy\scripts\deploy-sourcebuild-images.ps1 `
   -RuntimeTag $runtimeBuild.Tag `
+  -MigrationTag $migrationTag `
   -SourceRevision $sourceRevision `
-  -Helm "C:\Tools\helm\helm.exe"
+  -Helm $helm
 ```
 
-For a schema release, build the migration image from the same commit and add:
+For a schema release, build the migration image from the same commit, replace
+`-MigrationTag $migrationTag` with the new tag, and add `-EnableMigration`:
 
 ```powershell
-  -EnableMigration -MigrationTag $migrationBuild.Tag
+  -MigrationTag $migrationBuild.Tag -EnableMigration
 ```
 
-The script rejects a revision that does not equal SourceCommit `master`, then
-performs an atomic Helm rollout. Kubernetes pulls through the authenticated
-registry private endpoint. Local Docker is not used.
+The script requires both immutable image tags so a runtime-only release cannot
+reset the schema-wait image to a stale values-file default. It rejects a
+revision that does not equal SourceCommit `master`, then performs an atomic
+Helm rollout. Kubernetes pulls through the authenticated registry private
+endpoint. Local Docker is not used.
 
 ## Pipeline stage after the first cloud build
 

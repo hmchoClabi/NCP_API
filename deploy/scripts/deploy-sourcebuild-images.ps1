@@ -3,7 +3,8 @@ param(
     [string]$RuntimeTag,
     [Parameter(Mandatory = $true)]
     [string]$SourceRevision,
-    [string]$MigrationTag = "",
+    [Parameter(Mandatory = $true)]
+    [string]$MigrationTag,
     [switch]$EnableMigration,
     [string]$RuntimeRepository =
         "qoyw4pih.kr.private-ncr.ntruss.com/ncp-report",
@@ -21,9 +22,6 @@ foreach ($tag in @($RuntimeTag, $MigrationTag) | Where-Object { $_ }) {
     if ($tag -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,79}$') {
         throw "SourceBuild image tag is invalid."
     }
-}
-if ($EnableMigration -and [string]::IsNullOrWhiteSpace($MigrationTag)) {
-    throw "MigrationTag is required when EnableMigration is set."
 }
 foreach ($repository in @($RuntimeRepository, $MigrationRepository)) {
     if ($repository -notmatch '^[a-z0-9.-]+/[a-z0-9._-]+$') {
@@ -53,17 +51,12 @@ $helmArguments = @(
     "--set-string", "image.repository=$RuntimeRepository",
     "--set-string", "image.tag=$RuntimeTag",
     "--set-string", "sourceRevision=$SourceRevision",
+    "--set-string", "migration.image.repository=$MigrationRepository",
+    "--set-string", "migration.image.tag=$MigrationTag",
     "--set", "migration.enabled=$($EnableMigration.IsPresent.ToString().ToLowerInvariant())",
     "--set", "migration.waitForSchema=true",
     "--atomic", "--wait", "--wait-for-jobs", "--timeout", "10m"
 )
-if ($EnableMigration) {
-    $helmArguments += @(
-        "--set-string", "migration.image.repository=$MigrationRepository",
-        "--set-string", "migration.image.tag=$MigrationTag"
-    )
-}
-
 & $Helm @helmArguments
 if ($LASTEXITCODE -ne 0) { throw "Helm deployment failed." }
 

@@ -566,4 +566,6 @@ def test_normal_release_does_not_build_images_locally():
     assert "docker build" not in deployment.lower()
     assert "git ls-remote sourcecommit refs/heads/master" in deployment
     assert '"--atomic", "--wait"' in deployment
-    assert "MigrationTag is required when EnableMigration is set" in deployment
+    assert '[Parameter(Mandatory = $true)]\n    [string]$MigrationTag' in deployment
+    assert '"migration.image.tag=$MigrationTag"' in deployment
+    assert "if ($EnableMigration)" not in deployment
