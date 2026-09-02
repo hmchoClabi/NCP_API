@@ -202,6 +202,9 @@ details.operational-status > summary:focus-visible,
   font-size: .72rem !important;
   font-weight: 750;
 }
+details > summary .disclosure-action-close { display: none; }
+details[open] > summary .disclosure-action-open { display: none; }
+details[open] > summary .disclosure-action-close { display: inline; }
 .status-card-detail {
   padding: 14px 18px 18px;
   overflow-x: auto;
@@ -212,9 +215,49 @@ details.operational-status > summary:focus-visible,
 .status-evidence-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .status-evidence-list li { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .status-evidence-list li:last-child { padding-bottom: 0; border-bottom: 0; }
-.status-evidence-list li div { display: flex; justify-content: space-between; gap: 12px; }
+.status-evidence-list .collection-status-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
 .status-evidence-list li span { color: var(--brand-dark); font-size: .78rem; font-weight: 750; }
 .status-evidence-list li small { display: block; margin-top: 3px; color: var(--muted); }
+.collection-status-item > summary {
+  position: relative;
+  padding-right: 26px;
+  cursor: pointer;
+  list-style: none;
+}
+.collection-status-item > summary::-webkit-details-marker { display: none; }
+.collection-status-item > summary::after {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  color: var(--brand-dark);
+  content: "+";
+  font-weight: 850;
+}
+.collection-status-item[open] > summary::after { content: "−"; }
+.collection-status-item > summary:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+.collection-detail-action {
+  display: block !important;
+  margin-top: 4px;
+  color: var(--brand-dark) !important;
+  font-size: .72rem !important;
+  font-weight: 750;
+}
+.collection-status-reason {
+  margin: 8px 0 0;
+  padding: 9px 11px;
+  color: #475569;
+  background: #f8fafc;
+  border-radius: 8px;
+  font-size: .78rem;
+  line-height: 1.5;
+}
 .status-evidence-dl { display: grid; gap: 6px; margin: 0 0 10px; }
 .status-evidence-dl div { display: grid; grid-template-columns: minmax(90px, 140px) 1fr; gap: 10px; }
 .status-evidence-dl dt { color: var(--muted); }
@@ -525,9 +568,31 @@ table:not(.table-with-details) tbody tr:hover,
   border-radius: 12px;
 }
 .chart-card.is-dragging {
-  opacity: .55;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  margin: 0;
+  opacity: .98;
   border-color: #60a5fa;
+  box-shadow: 0 24px 54px rgba(15, 23, 42, .24);
   pointer-events: none;
+  transform-origin: center;
+  transition: box-shadow .16s ease, opacity .16s ease;
+  will-change: transform;
+}
+.chart-drop-placeholder {
+  min-width: 0;
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+  border: 2px dashed #60a5fa;
+  border-radius: 12px;
+}
+.chart-grid.is-chart-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.chart-grid.is-chart-dragging .chart-heading {
+  cursor: grabbing;
 }
 .chart-heading {
   display: flex;
@@ -698,6 +763,9 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .technical-appendix > summary,
   .report-disclosure > summary { align-items: flex-start; flex-direction: row; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .chart-card.is-dragging { transition: none; }
+}
 @media print {
   @page { size: A4 landscape; margin: 12mm; }
   body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -729,6 +797,12 @@ footer { padding: 24px 4px; color: var(--muted); font-size: .8rem; text-align: c
   .status-card-action { display: none; }
   details.operational-status:not([open]) > .status-card-detail,
   .summary-fact-disclosure:not([open]) > .status-card-detail { display: block !important; }
+  .collection-status-item > summary { cursor: default; }
+  .collection-status-item > summary::after,
+  .collection-detail-action { display: none !important; }
+  .collection-status-item:not([open]) > .collection-status-reason {
+    display: block !important;
+  }
   .report-disclosure > summary { padding: 18px; cursor: default; }
   .report-disclosure > summary::after { display: none; }
   .report-disclosure:not([open]) > .report-disclosure-body { display: block !important; }

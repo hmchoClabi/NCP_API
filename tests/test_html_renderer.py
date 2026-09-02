@@ -246,6 +246,13 @@ class HtmlReportRendererTests(unittest.TestCase):
             metric_charts,
         )
         self.assertNotIn("data-chart-move", metric_charts)
+        self.assertIn(".chart-drop-placeholder {", html)
+        self.assertIn(
+            ".chart-card.is-dragging {\n  position: fixed;",
+            html,
+        )
+        self.assertIn("card.animate(", html)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", html)
         self.assertIn('<option value="1000">1000 × 300</option>', html)
         self.assertIn('<option value="2000" selected>2000 × 600</option>', html)
         self.assertIn('<option value="3000">3000 × 900</option>', html)
@@ -928,11 +935,18 @@ class ClassList {
   contains(name) { return this.values.has(name); }
 }
 
+class Style {
+  removeProperty(name) { delete this[name]; }
+}
+
 class ChartNode {
   constructor(kind, name = "") {
     this.kind = kind;
     this.name = name;
     this.dataset = {};
+    this.attributes = new Map();
+    this.style = new Style();
+    this.animations = [];
     this.classList = new ClassList(
       ...(kind === "card" ? ["chart-card"] : [])
     );
@@ -942,6 +956,8 @@ class ChartNode {
     this.card = kind === "card" ? this : null;
     this.rect = {top: 0, left: 0, width: 180, height: 100};
   }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
   closest(selector) {
     if (selector === ".chart-card") return this.card;
     if (selector === "[data-chart-drag-handle]") {
@@ -950,6 +966,25 @@ class ChartNode {
     return null;
   }
   getBoundingClientRect() { return this.rect; }
+  animate(keyframes, options) {
+    const animation = {
+      keyframes,
+      options,
+      canceled: false,
+      cancel() { this.canceled = true; },
+      onfinish: null,
+    };
+    this.animations.push(animation);
+    return animation;
+  }
+  remove() {
+    if (!this.parentElement) return;
+    const grid = this.parentElement;
+    const index = grid.children.indexOf(this);
+    if (index >= 0) grid.children.splice(index, 1);
+    this.parentElement = null;
+    grid.sync();
+  }
 }
 
 class ChartGrid {
@@ -978,15 +1013,18 @@ class ChartGrid {
     this.capturedPointers.delete(pointerId);
   }
   sync() {
+    let layoutIndex = 0;
     this.children.forEach((card, index) => {
       card.previousElementSibling = this.children[index - 1] || null;
       card.nextElementSibling = this.children[index + 1] || null;
+      if (card.classList.contains("is-dragging")) return;
       card.rect = {
-        top: Math.floor(index / 2) * 120,
-        left: (index % 2) * 200,
+        top: Math.floor(layoutIndex / 2) * 120,
+        left: (layoutIndex % 2) * 200,
         width: 180,
         height: 100,
       };
+      layoutIndex += 1;
     });
   }
 }
@@ -1004,11 +1042,17 @@ const c = makeCard("c");
 const outside = makeCard("outside");
 const grid = new ChartGrid(a, b, c);
 new ChartGrid(outside);
-const names = () => grid.children.map((card) => card.name);
+const names = () => grid.children
+  .filter((card) => card.kind === "card")
+  .map((card) => card.name);
+const slots = () => grid.children
+  .filter((card) => !card.classList.contains("is-dragging"))
+  .map((card) => card.kind === "placeholder" ? "_" : card.name);
 let pointedNode = null;
 
 global.document = {
   addEventListener(name, handler) { handlers[name] = handler; },
+  createElement() { return new ChartNode("placeholder"); },
   elementFromPoint() { return pointedNode; },
 };
 eval(__REPORT_SCRIPT__);
@@ -1021,6 +1065,7 @@ handlers.keydown({
 });
 assert.strictEqual(keyboardPrevented, true);
 assert.deepStrictEqual(names(), ["b", "a", "c"]);
+assert(a.animations.length + b.animations.length + c.animations.length > 0);
 handlers.keydown({
   target: a.heading,
   key: "ArrowLeft",
@@ -1039,6 +1084,7 @@ handlers.pointerdown({
 });
 assert(grid.hasPointerCapture(1));
 assert(!a.classList.contains("is-dragging"));
+assert.deepStrictEqual(slots(), ["a", "b", "c"]);
 pointedNode = b;
 let pointerMovePrevented = false;
 handlers.pointermove({
@@ -1049,7 +1095,26 @@ handlers.pointermove({
 });
 assert.strictEqual(pointerMovePrevented, true);
 assert(a.classList.contains("is-dragging"));
-assert.deepStrictEqual(names(), ["b", "a", "c"]);
+assert(grid.classList.contains("is-chart-dragging"));
+assert.deepStrictEqual(names(), ["a", "b", "c"]);
+assert.deepStrictEqual(slots(), ["b", "_", "c"]);
+const placeholder = grid.children.find((node) => node.kind === "placeholder");
+assert(placeholder);
+assert.strictEqual(placeholder.getAttribute("aria-hidden"), "true");
+assert.strictEqual(a.style.width, "180px");
+assert.strictEqual(a.style.height, "100px");
+assert(a.style.transform.includes("translate3d(300px, 0px, 0)"));
+assert(b.animations.some((animation) => animation.options.duration === 220));
+const shiftAnimation = b.animations[b.animations.length - 1];
+pointedNode = c;
+handlers.pointermove({
+  pointerId: 1,
+  clientX: 50,
+  clientY: 130,
+  preventDefault() {},
+});
+assert.deepStrictEqual(slots(), ["b", "_", "c"]);
+assert.strictEqual(shiftAnimation.canceled, false);
 assert(grid.hasPointerCapture(1));
 pointedNode = c;
 handlers.pointermove({
@@ -1058,10 +1123,19 @@ handlers.pointermove({
   clientY: 190,
   preventDefault() {},
 });
-assert.deepStrictEqual(names(), ["b", "c", "a"]);
+assert.deepStrictEqual(names(), ["a", "b", "c"]);
+assert.deepStrictEqual(slots(), ["b", "c", "_"]);
+assert(a.style.transform.includes("translate3d(0px, 140px, 0)"));
 assert(grid.hasPointerCapture(1));
 handlers.pointerup({pointerId: 1});
+assert.deepStrictEqual(names(), ["b", "c", "a"]);
 assert(!a.classList.contains("is-dragging"));
+assert(!grid.classList.contains("is-chart-dragging"));
+assert(!grid.children.some((node) => node.kind === "placeholder"));
+assert.strictEqual(a.style.width, undefined);
+assert.strictEqual(a.style.height, undefined);
+assert.strictEqual(a.style.transform, undefined);
+assert(a.animations.some((animation) => animation.options.duration === 190));
 assert(!grid.hasPointerCapture(1));
 
 handlers.keydown({
@@ -1092,9 +1166,12 @@ handlers.pointermove({
   clientY: 190,
   preventDefault() {},
 });
-assert.deepStrictEqual(names(), ["a", "c", "b"]);
+assert.deepStrictEqual(names(), ["a", "b", "c"]);
+assert.deepStrictEqual(slots(), ["a", "c", "_"]);
 handlers.pointercancel({pointerId: 2});
+assert.deepStrictEqual(names(), ["a", "c", "b"]);
 assert(!b.classList.contains("is-dragging"));
+assert(!grid.children.some((node) => node.kind === "placeholder"));
 
 handlers.pointerdown({
   target: a.heading,
@@ -1134,6 +1211,7 @@ handlers.pointermove({
 });
 assert.strictEqual(thresholdPrevented, false);
 assert.deepStrictEqual(names(), ["a", "c", "b"]);
+assert(!grid.children.some((node) => node.kind === "placeholder"));
 handlers.pointerup({pointerId: 4});
 """.replace("__REPORT_SCRIPT__", json.dumps(script))
 
@@ -2399,6 +2477,23 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertIn('<details class="operational-status caution">', html)
         self.assertIn("즉시 확인 카드에서 대상·근거·조치를 확인", html)
         self.assertIn("API 호출 실패", html)
+        self.assertIn(
+            '<li><details class="collection-status-item"><summary>'
+            '<span class="collection-status-heading"><strong>보안 이벤트'
+            '</strong><span>수집 실패</span></span>',
+            html,
+        )
+        self.assertIn(
+            '<span class="collection-detail-action">'
+            '<span class="disclosure-action-open">상세 보기</span>'
+            '<span class="disclosure-action-close">접기</span>',
+            html,
+        )
+        self.assertIn(
+            '</summary><p class="collection-status-reason">API 호출 실패'
+            '</p></details></li>',
+            html,
+        )
         self.assertIn("homepage", html)
         self.assertIn('href="#billing-cost-basis"', html)
 

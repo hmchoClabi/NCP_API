@@ -333,6 +333,74 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     image.src = sourceUrl;
   };
 
+  const prefersReducedChartMotion = Boolean(
+    globalThis.matchMedia
+    && globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+  const chartShiftAnimations = new WeakMap();
+  const requestChartFrame = globalThis.requestAnimationFrame
+    ? globalThis.requestAnimationFrame.bind(globalThis)
+    : (callback) => callback();
+
+  const animateChartShift = (grid, mutation) => {
+    const cards = Array.from(grid.children).filter(
+      (card) => card.classList
+        && card.classList.contains("chart-card")
+        && card !== draggedChartCard
+    );
+    const before = new Map(
+      cards.map((card) => [card, card.getBoundingClientRect()])
+    );
+    cards.forEach((card) => {
+      const animation = chartShiftAnimations.get(card);
+      if (animation && animation.cancel) animation.cancel();
+    });
+    mutation();
+    if (prefersReducedChartMotion) return;
+    cards.forEach((card) => {
+      if (!card.animate) return;
+      const previous = before.get(card);
+      const current = card.getBoundingClientRect();
+      const x = previous.left - current.left;
+      const y = previous.top - current.top;
+      if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
+      const animation = card.animate(
+        [
+          {transform: `translate3d(${x}px, ${y}px, 0)`},
+          {transform: "translate3d(0, 0, 0)"},
+        ],
+        {duration: 220, easing: "cubic-bezier(.22, 1, .36, 1)"}
+      );
+      chartShiftAnimations.set(card, animation);
+      animation.onfinish = () => {
+        if (chartShiftAnimations.get(card) === animation) {
+          chartShiftAnimations.delete(card);
+        }
+      };
+    });
+  };
+
+  const animateChartDrop = (card, previous, current) => {
+    if (prefersReducedChartMotion || !card.animate) return;
+    const x = previous.left - current.left;
+    const y = previous.top - current.top;
+    card.animate(
+      [
+        {
+          transform: `translate3d(${x}px, ${y}px, 0) scale(1.012)`,
+          opacity: .98,
+          boxShadow: "0 24px 54px rgba(15, 23, 42, .24)",
+        },
+        {
+          transform: "translate3d(0, 0, 0) scale(1)",
+          opacity: 1,
+          boxShadow: "0 0 0 rgba(15, 23, 42, 0)",
+        },
+      ],
+      {duration: 190, easing: "cubic-bezier(.22, 1, .36, 1)"}
+    );
+  };
+
   const moveChartCard = (card, direction) => {
     const grid = card && card.parentElement;
     if (!grid || !grid.classList.contains("chart-grid")) return false;
@@ -340,12 +408,10 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
       ? card.previousElementSibling
       : card.nextElementSibling;
     if (!sibling || !sibling.classList.contains("chart-card")) return false;
-    grid.insertBefore(
+    animateChartShift(grid, () => grid.insertBefore(
       card,
-      direction === "previous"
-        ? sibling
-        : sibling.nextElementSibling
-    );
+      direction === "previous" ? sibling : sibling.nextElementSibling
+    ));
     return true;
   };
 
@@ -385,6 +451,50 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
 
   let pendingChartDrag = null;
   let draggedChartCard = null;
+  let chartDropPlaceholder = null;
+
+  const positionDraggedChart = (event) => {
+    const state = pendingChartDrag;
+    if (!state || !draggedChartCard) return;
+    state.latestX = event.clientX;
+    state.latestY = event.clientY;
+    if (state.framePending) return;
+    state.framePending = true;
+    requestChartFrame(() => {
+      state.framePending = false;
+      if (pendingChartDrag !== state || draggedChartCard !== state.card) return;
+      const left = state.latestX - state.pointerOffsetX;
+      const top = state.latestY - state.pointerOffsetY;
+      state.card.style.transform = (
+        `translate3d(${left}px, ${top}px, 0) scale(1.012)`
+      );
+    });
+  };
+
+  const beginChartDrag = (event) => {
+    const state = pendingChartDrag;
+    const card = state.card;
+    const bounds = card.getBoundingClientRect();
+    const placeholder = document.createElement("div");
+    placeholder.classList.add("chart-drop-placeholder");
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.style.height = `${bounds.height}px`;
+    state.pointerOffsetX = state.startX - bounds.left;
+    state.pointerOffsetY = state.startY - bounds.top;
+    state.latestX = event.clientX;
+    state.latestY = event.clientY;
+    card.style.width = `${bounds.width}px`;
+    card.style.height = `${bounds.height}px`;
+    card.style.transform = (
+      `translate3d(${bounds.left}px, ${bounds.top}px, 0) scale(1.012)`
+    );
+    card.classList.add("is-dragging");
+    state.captureTarget.classList.add("is-chart-dragging");
+    state.captureTarget.insertBefore(placeholder, card);
+    draggedChartCard = card;
+    chartDropPlaceholder = placeholder;
+    positionDraggedChart(event);
+  };
 
   const finishChartDrag = (event) => {
     if (
@@ -396,8 +506,30 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     ) return;
     const {captureTarget, pointerId} = pendingChartDrag;
     pendingChartDrag = null;
-    if (draggedChartCard) draggedChartCard.classList.remove("is-dragging");
+    if (
+      draggedChartCard
+      && chartDropPlaceholder
+      && chartDropPlaceholder.parentElement === captureTarget
+    ) {
+      const previous = draggedChartCard.getBoundingClientRect();
+      captureTarget.insertBefore(draggedChartCard, chartDropPlaceholder);
+      chartDropPlaceholder.remove();
+      draggedChartCard.classList.remove("is-dragging");
+      draggedChartCard.style.removeProperty("width");
+      draggedChartCard.style.removeProperty("height");
+      draggedChartCard.style.removeProperty("transform");
+      const current = draggedChartCard.getBoundingClientRect();
+      animateChartDrop(draggedChartCard, previous, current);
+    } else if (draggedChartCard) {
+      draggedChartCard.classList.remove("is-dragging");
+      draggedChartCard.style.removeProperty("width");
+      draggedChartCard.style.removeProperty("height");
+      draggedChartCard.style.removeProperty("transform");
+    }
+    if (chartDropPlaceholder) chartDropPlaceholder.remove();
+    captureTarget.classList.remove("is-chart-dragging");
     draggedChartCard = null;
+    chartDropPlaceholder = null;
     if (
       captureTarget.hasPointerCapture
       && captureTarget.hasPointerCapture(pointerId)
@@ -437,10 +569,10 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
         event.clientY - pendingChartDrag.startY
       );
       if (distance < 8) return;
-      draggedChartCard = pendingChartDrag.card;
-      draggedChartCard.classList.add("is-dragging");
+      beginChartDrag(event);
     }
     event.preventDefault();
+    positionDraggedChart(event);
     const pointed = document.elementFromPoint
       ? document.elementFromPoint(event.clientX, event.clientY)
       : event.target;
@@ -448,20 +580,34 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
     if (
       !target
       || target === draggedChartCard
-      || target.parentElement !== draggedChartCard.parentElement
+      || target.parentElement !== pendingChartDrag.captureTarget
     ) return;
     const bounds = target.getBoundingClientRect();
-    const draggedBounds = draggedChartCard.getBoundingClientRect();
-    const sameRow = Math.abs(draggedBounds.top - bounds.top)
-      < Math.min(draggedBounds.height, bounds.height) / 2;
+    const placeholderBounds = chartDropPlaceholder.getBoundingClientRect();
+    const sameRow = Math.abs(placeholderBounds.top - bounds.top)
+      < Math.min(placeholderBounds.height, bounds.height) / 2;
     const insertBefore = sameRow
       ? event.clientX < bounds.left + bounds.width / 2
       : event.clientY < bounds.top + bounds.height / 2;
     const reference = insertBefore
       ? target
       : target.nextElementSibling;
-    if (reference === draggedChartCard) return;
-    target.parentElement.insertBefore(draggedChartCard, reference);
+    if (reference === chartDropPlaceholder) return;
+    let currentReference = chartDropPlaceholder.nextElementSibling;
+    if (currentReference === draggedChartCard) {
+      currentReference = currentReference.nextElementSibling;
+    }
+    const intendedReference = reference === draggedChartCard
+      ? draggedChartCard.nextElementSibling
+      : reference;
+    if (currentReference === intendedReference) return;
+    animateChartShift(
+      pendingChartDrag.captureTarget,
+      () => pendingChartDrag.captureTarget.insertBefore(
+        chartDropPlaceholder,
+        reference
+      )
+    );
   });
 
   document.addEventListener("pointerup", finishChartDrag);
@@ -1634,7 +1780,10 @@ class HtmlReportRenderer:
         if details_html:
             return (
                 '<details class="summary-fact summary-fact-disclosure">'
-                f'<summary>{content}<span class="status-card-action">근거 보기</span></summary>'
+                f'<summary>{content}<span class="status-card-action">'
+                '<span class="disclosure-action-open">근거 보기</span>'
+                '<span class="disclosure-action-close">접기</span>'
+                '</span></summary>'
                 f'<div class="status-card-detail">{details_html}</div>'
                 '</details>'
             )
@@ -1715,13 +1864,19 @@ class HtmlReportRenderer:
                 )
             metadata = " · ".join(counts) or "건수 정보 없음"
             items.append(
-                '<li><div><strong>'
+                '<li><details class="collection-status-item"><summary>'
+                '<span class="collection-status-heading"><strong>'
                 f"{self._text(item.get('label') or item.get('key') or '데이터셋')}"
                 '</strong><span>'
                 f"{self._text(item.get('status_label') or item.get('status') or '판정 불가')}"
-                '</span></div><small>'
-                f"{self._text(metadata)} · {self._text(item.get('reason') or '판정 근거 없음')}"
-                '</small></li>'
+                '</span></span><small>'
+                f"{self._text(metadata)}"
+                '</small><span class="collection-detail-action">'
+                '<span class="disclosure-action-open">상세 보기</span>'
+                '<span class="disclosure-action-close">접기</span>'
+                '</span></summary><p class="collection-status-reason">'
+                f"{self._text(item.get('reason') or '판정 근거 없음')}"
+                '</p></details></li>'
             )
         return '<ul class="status-evidence-list">' + "".join(items) + '</ul>'
 
@@ -2118,7 +2273,10 @@ class HtmlReportRenderer:
         if details_html:
             return (
                 f'<details class="operational-status {safe_status}">'
-                f'<summary>{content}<span class="status-card-action">상세 보기</span></summary>'
+                f'<summary>{content}<span class="status-card-action">'
+                '<span class="disclosure-action-open">상세 보기</span>'
+                '<span class="disclosure-action-close">접기</span>'
+                '</span></summary>'
                 f'<div class="status-card-detail">{details_html}</div>'
                 '</details>'
             )
