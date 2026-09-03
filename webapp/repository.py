@@ -2287,7 +2287,13 @@ class PortalRepository:
             )
             return cursor.fetchall()
 
-    def report_detail(self, report_id: str, allowed_tenants: Optional[list[str]]) -> Optional[dict[str, Any]]:
+    def report_detail(
+        self,
+        report_id: str,
+        allowed_tenants: Optional[list[str]],
+        *,
+        include_snapshot: bool = True,
+    ) -> Optional[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -2305,6 +2311,8 @@ class PortalRepository:
                 return None
             if allowed_tenants is not None and str(report["tenant_id"]) not in allowed_tenants:
                 return None
+            if not include_snapshot:
+                return report
             schema = "public_data" if report["environment"] == "public" else "gov_data"
             cursor.execute(
                 f"SELECT normalized_data FROM {schema}.report_snapshots WHERE report_run_id = %s",
@@ -2325,6 +2333,36 @@ class PortalRepository:
                 )
             report["snapshot"] = payload
             return report
+
+    def report_html_artifact(
+        self,
+        report_id: str,
+        allowed_tenants: Optional[list[str]],
+    ) -> Optional[dict[str, Any]]:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT artifact.storage_uri, artifact.content_type,
+                       artifact.byte_size, artifact.checksum_sha256,
+                       report.tenant_id
+                FROM control.report_artifacts artifact
+                JOIN control.report_runs report
+                  ON report.id = artifact.report_run_id
+                WHERE report.id = %s AND artifact.artifact_type = 'HTML'
+                ORDER BY artifact.created_at DESC
+                LIMIT 1
+                """,
+                (report_id,),
+            )
+            artifact = cursor.fetchone()
+            if not artifact:
+                return None
+            if (
+                allowed_tenants is not None
+                and str(artifact["tenant_id"]) not in allowed_tenants
+            ):
+                return None
+            return artifact
 
     def report_cleanup_candidates(
         self,

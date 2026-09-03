@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import re
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Any
 
-from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, url_for
 
-from app.renderers import HtmlReportRenderer
-from app.report_models import ReportResult
 from webapp.presentation import format_kst
+from webapp.repository import _artifact_fingerprint, _local_report_artifact_paths
 from webapp.route_access import (
     _account_return,
     _can_access_tenant,
@@ -150,7 +152,11 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_login_required
     def report_detail(report_id: str):
         allowed = accessible_tenant_ids(g.user)
-        report = repository.report_detail(report_id, allowed)
+        report = repository.report_detail(
+            report_id,
+            allowed,
+            include_snapshot=False,
+        )
         if not report:
             abort(404)
         return render_template(
@@ -163,7 +169,9 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_msp_required
     def delete_report(report_id: str):
         if not repository.report_detail(
-            report_id, accessible_tenant_ids(g.user)
+            report_id,
+            accessible_tenant_ids(g.user),
+            include_snapshot=False,
         ):
             abort(404)
         try:
@@ -248,20 +256,44 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_login_required
     def report_content(report_id: str):
         allowed = accessible_tenant_ids(g.user)
-        report = repository.report_detail(report_id, allowed)
-        if not report:
+        artifact = repository.report_html_artifact(report_id, allowed)
+        if not artifact:
             abort(404)
         try:
-            result = ReportResult.from_dict(report.get("snapshot") or {})
-        except ValueError:
+            paths, failed = _local_report_artifact_paths(
+                [str(artifact["storage_uri"])],
+                include_legacy=False,
+                reject_outside=True,
+            )
+            if failed or len(paths) != 1:
+                abort(404)
+            path = next(iter(paths))
+            actual_sha256, actual_size = _artifact_fingerprint(path)
+            if (
+                actual_sha256 != str(artifact["checksum_sha256"])
+                or actual_size != int(artifact["byte_size"])
+            ):
+                abort(404)
+            script_sources = " ".join(
+                "'sha256-"
+                + base64.b64encode(sha256(script).digest()).decode("ascii")
+                + "'"
+                for script in re.findall(
+                    rb"<script(?:\s[^>]*)?>(.*?)</script>",
+                    path.read_bytes(),
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+            ) or "'none'"
+        except (KeyError, OSError, TypeError, ValueError):
             abort(404)
-        response = Response(
-            HtmlReportRenderer().render(result),
-            content_type="text/html; charset=utf-8",
+        response = send_file(
+            path,
+            mimetype="text/html",
+            conditional=True,
         )
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; style-src 'unsafe-inline'; "
-            f"script-src {HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE}; "
+            f"script-src {script_sources}; "
             "img-src data: blob:; "
             "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
         )

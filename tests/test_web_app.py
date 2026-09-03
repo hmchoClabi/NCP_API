@@ -1,10 +1,13 @@
 import base64
+from hashlib import sha256
 import io
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from app.renderers import HtmlReportRenderer
 from app.report_branding import validate_customer_logo
 from webapp.app import CSRF_COOKIE, SESSION_COOKIE, create_app
 from webapp.route_access import (
@@ -39,6 +42,8 @@ class FakePortalRepository:
         self.bulk_retention_updates = []
         self.updated_logos = []
         self.deleted_logos = []
+        self.report_artifact = None
+        self.report_detail_snapshot_requests = []
         self.recent_review = {
             "window_started_at": datetime(
                 2026, 8, 22, 15, 0, tzinfo=timezone.utc
@@ -97,12 +102,15 @@ class FakePortalRepository:
             "csrf_token_hash": token_hash("csrf-token"),
         }
 
-    def report_detail(self, report_id, allowed_tenants):
+    def report_detail(
+        self, report_id, allowed_tenants, *, include_snapshot=True,
+    ):
         self.allowed_tenants = allowed_tenants
+        self.report_detail_snapshot_requests.append(include_snapshot)
         tenant_id = "tenant-gov" if report_id == "report-gov" else "tenant-1"
         if allowed_tenants is not None and tenant_id not in allowed_tenants:
             return None
-        return {
+        report = {
             "id": report_id,
             "tenant_id": tenant_id,
             "customer_name": "Customer",
@@ -123,6 +131,16 @@ class FakePortalRepository:
                 "servers": [{"server_name": "web-1"}],
             },
         }
+        if not include_snapshot:
+            report.pop("snapshot")
+        return report
+
+    def report_html_artifact(self, report_id, allowed_tenants):
+        self.allowed_tenants = allowed_tenants
+        tenant_id = "tenant-gov" if report_id == "report-gov" else "tenant-1"
+        if allowed_tenants is not None and tenant_id not in allowed_tenants:
+            return None
+        return self.report_artifact
 
     def account_tenant(self, account_id):
         return "tenant-1" if account_id == "account-1" else None
@@ -671,22 +689,57 @@ class WebAppTests(unittest.TestCase):
         self.assertIn(b'class="report-detail-shell"', response.data)
         self.assertIn(b'class="report-frame"', response.data)
         self.assertNotIn(b'class="stat-grid"', response.data)
+        self.assertEqual(self.repository.report_detail_snapshot_requests, [False])
 
-    def test_customer_can_render_full_report_from_stored_snapshot(self):
+    def test_customer_can_open_stored_html_artifact(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
-        response = self.client.get("/reports/report-1/content")
+        content = b"<html><script>console.log('report')</script>web-1</html>"
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"REPORT_OUTPUT_DIR": directory},
+        ):
+            path = Path(directory) / "report.html"
+            path.write_bytes(content)
+            self.repository.report_artifact = {
+                "storage_uri": path.resolve().as_uri(),
+                "content_type": "text/html",
+                "byte_size": len(content),
+                "checksum_sha256": sha256(content).hexdigest(),
+            }
+            response = self.client.get("/reports/report-1/content")
+            response_data = response.get_data()
+            response.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.content_type)
-        self.assertIn("서버 이용 현황".encode("utf-8"), response.data)
-        self.assertIn(b"web-1", response.data)
+        self.assertEqual(response_data, content)
+        self.assertIn(b"web-1", response_data)
         policy = response.headers["Content-Security-Policy"]
         self.assertIn("frame-ancestors 'self'", policy)
-        self.assertIn(
-            f"script-src {HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE}",
-            policy,
-        )
+        script_hash = base64.b64encode(
+            sha256(b"console.log('report')").digest()
+        ).decode("ascii")
+        self.assertIn(f"script-src 'sha256-{script_hash}'", policy)
         self.assertIn("img-src data: blob:", policy)
+
+    def test_report_content_rejects_artifact_outside_report_root(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as outside,
+            patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}),
+        ):
+            path = Path(outside) / "report.html"
+            path.write_text("report", encoding="utf-8")
+            self.repository.report_artifact = {
+                "storage_uri": path.resolve().as_uri(),
+                "content_type": "text/html",
+                "byte_size": path.stat().st_size,
+                "checksum_sha256": sha256(path.read_bytes()).hexdigest(),
+            }
+            response = self.client.get("/reports/report-1/content")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_customer_viewer_can_enqueue_own_account_report(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
