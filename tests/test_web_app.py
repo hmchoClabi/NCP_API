@@ -1004,9 +1004,10 @@ class WebAppTests(unittest.TestCase):
         user["platform_roles"] = ["MSP_ADMIN"]
         self.repository.session_user = lambda token: user if token else None
         self.client.set_cookie(SESSION_COOKIE, "session-token")
+        dimension = {"clusterUUID": "cluster-1", "namespace": "clabi", "controller": "cronjob:back-sched"}
         self.repository.insight_alarms = summarize_insight_alarms([
-            report(events=[event(rule_name='<script>alert(1)</script>'),
-                           event('two', rule_name='<script>alert(1)</script>')])
+            report(events=[event(rule_name='<script>alert(1)</script>', dimension={**dimension, "pod": '<img src=x onerror=alert(2)>'}),
+                           event('two', rule_name='<script>alert(1)</script>', dimension={**dimension, "pod": 'back-sched-second'})])
         ], TODAY)
         response = self.client.get("/msp")
         self.assertEqual(response.status_code, 200)
@@ -1014,6 +1015,10 @@ class WebAppTests(unittest.TestCase):
         self.assertIn('2회'.encode(), response.data)
         self.assertIn(b'&lt;script&gt;alert(1)&lt;/script&gt;', response.data)
         self.assertNotIn(b'<script>alert(1)</script>', response.data)
+        self.assertIn('발생 내역 (2건)'.encode(), response.data)
+        self.assertIn(b'back-sched-second', response.data)
+        self.assertIn(b'&lt;img src=x onerror=alert(2)&gt;', response.data)
+        self.assertNotIn(b'<img src=x onerror=alert(2)>', response.data)
 
 
     def test_notification_feed_is_scoped_and_uses_kst(self):

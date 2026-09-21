@@ -7,6 +7,7 @@
     <div><span>발생 건수 (중복 수집 제외)</span><strong>{{ insight_alarms.event_count }}건</strong></div>
   </div>
   <p class="section-note">고객·계정·인스턴스·알람 규칙·지표·조건이 같은 발생을 묶습니다. 동일 이벤트를 여러 보고서에서 수집해도 한 번만 셉니다.</p>
+  <p class="section-note">NKS 정기 작업(CronJob)은 같은 클러스터·네임스페이스·작업 기준으로 묶습니다. 실행마다 바뀐 Pod와 노드는 발생 내역에서 확인할 수 있습니다.</p>
   <p class="section-note">성공·부분 수집으로 완료된 보고서 기준입니다. 실패·대기·실행 중 작업은 <a class="table-link" href="{{ url_for('report_history') }}">생성 이력</a>에서 확인하세요.</p>
   {% if insight_alarms.incomplete_report_count %}<p class="coverage-warning">{{ insight_alarms.incomplete_report_count }}개 보고서는 Insight 수집이 미완료·비활성 또는 확인 불가입니다. 표시된 알람이 없더라도 전체 정상으로 판단하지 마세요.</p>{% endif %}
   {% if insight_alarms.unidentified_count %}<p class="coverage-warning">이벤트 ID와 발생 시각이 없는 {{ insight_alarms.unidentified_count }}건은 중복 여부를 확인할 수 없습니다.</p>{% endif %}
@@ -14,9 +15,13 @@
   <div class="table-wrap"><table class="insight-alarm-table"><thead><tr><th scope="col">고객·계정</th><th scope="col">인스턴스</th><th scope="col">알람·조건</th><th scope="col">발생 횟수</th><th scope="col">최초·최근 발생</th><th scope="col">수집 당시 상태</th><th scope="col">근거</th></tr></thead><tbody>
   {% for alarm in insight_alarms['items'] %}<tr>
     <td><strong>{{ alarm.customer_name }}</strong><small>{{ alarm.account_name }} · {{ '공공' if alarm.environment == 'gov' else '민간' }}</small></td>
-    <td><strong>{{ alarm.resource_name }}</strong>{% if alarm.resource_id %}<small>{{ alarm.resource_id }}</small>{% endif %}</td>
+    <td><strong>{{ alarm.resource_name }}</strong>{% if alarm.resource_id %}<small>{{ alarm.resource_id }}</small>{% endif %}{% if alarm.workload %}<small>{{ alarm.workload }}</small>{% endif %}</td>
     <td><span class="status {{ 'warn' if alarm.severity in ['CRITICAL', 'WARNING'] else 'pending' }}">{{ {'CRITICAL': '위험', 'WARNING': '경고', 'INFO': '정보'}.get(alarm.severity, '등급 미확인') }}</span><strong>{{ alarm.alarm_name }}</strong><small>{{ alarm.metric or '-' }} {{ alarm.condition }}</small>{% if alarm.dimension != '{}' %}<details><summary>대상 상세</summary><small>{{ alarm.dimension }}</small></details>{% endif %}</td>
-    <td><strong>{{ alarm.count }}회</strong>{% if alarm.unknown_count %}<small>중복 확인 불가 {{ alarm.unknown_count }}건 포함</small>{% endif %}</td>
+    <td><strong>{{ alarm.count }}회</strong>{% if alarm.unknown_count %}<small>중복 확인 불가 {{ alarm.unknown_count }}건 포함</small>{% endif %}
+      {% if alarm.occurrences %}<details><summary>발생 내역 ({{ alarm.occurrences|length }}건)</summary><ul>
+        {% for occurrence in alarm.occurrences %}<li><strong>{{ occurrence.occurred_at|kst('%m-%d %H:%M:%S') }}</strong><small>Pod: {{ occurrence.pod }}</small><small>노드: {{ occurrence.node or '-' }}</small><small>{{ '종료 ' ~ (occurrence.ended_at|kst('%m-%d %H:%M:%S')) if occurrence.ended_at else '수집 당시 종료 미확인' }}</small><a class="table-link" href="{{ url_for('report_detail', report_id=occurrence.report_id) }}">원본 보고서</a></li>{% endfor %}
+      </ul></details>{% endif %}
+    </td>
     <td><strong>{{ alarm.first_at|kst('%m-%d %H:%M:%S') }}</strong><small>최근 {{ alarm.last_at|kst('%m-%d %H:%M:%S') }}</small></td>
     <td>{{ alarm.open_count }}건 종료 미확인<small>이후 상태 변경은 반영되지 않을 수 있습니다.</small></td>
     <td><a class="table-link" href="{{ url_for('report_detail', report_id=alarm.report_id) }}">보고서 보기</a></td>
