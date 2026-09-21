@@ -11,6 +11,7 @@ from typing import Any
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, url_for
 
 from webapp.presentation import format_kst
+from app.renderers.html_styles import REPORT_DISPLAY_STYLES
 from webapp.repository import _artifact_fingerprint, _local_report_artifact_paths
 from webapp.route_access import (
     _account_return,
@@ -163,6 +164,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             "report_detail.html",
             report=report,
             can_delete_report=_is_msp(g.user),
+            report_display_styles=REPORT_DISPLAY_STYLES,
         )
 
     @app.post("/reports/<report_id>/delete")
@@ -195,9 +197,35 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_login_required
     def report_history():
         tenant_ids = accessible_tenant_ids(g.user)
+        customers = (repository.tenants(allowed_environments=_msp_environment_scopes(g.user))
+                     if _is_msp(g.user) else [
+                         {"id": item["tenant_id"], "customer_name": item["customer_name"]}
+                         for item in g.user.get("memberships", [])])
+        selected_tenant = request.args.get("tenant_id", "").strip()
+        if selected_tenant:
+            if selected_tenant not in {str(item["id"]) for item in customers}:
+                abort(404)
+            tenant_ids = [selected_tenant]
+        query = request.args.get("q", "").strip()[:200]
+        status = request.args.get("status", "")
+        statuses = {"QUEUED": "대기", "RUNNING": "실행 중", "SUCCESS": "성공",
+                    "PARTIAL_SUCCESS": "부분 수집", "FAILED": "실패", "CANCELLED": "취소"}
+        if status and status not in statuses:
+            abort(400)
+        try:
+            page = int(request.args.get("page", "1"))
+            if not 1 <= page <= 100000:
+                raise ValueError
+        except ValueError:
+            abort(400)
+        history = repository.report_history(tenant_ids, query=query, status=status,
+                                            limit=51, offset=(page - 1) * 50)
+        filters = {"tenant_id": selected_tenant, "q": query, "status": status}
         return render_template(
             "history.html",
-            history=repository.report_history(tenant_ids),
+            history=history[:50], customers=customers, filters=filters, statuses=statuses,
+            page=page, previous_url=url_for("report_history", **filters, page=page - 1) if page > 1 else None,
+            next_url=url_for("report_history", **filters, page=page + 1) if len(history) > 50 else None,
             is_msp=_is_msp(g.user),
         )
 

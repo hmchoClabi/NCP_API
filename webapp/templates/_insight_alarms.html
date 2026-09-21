@@ -1,0 +1,25 @@
+<section class="panel" aria-labelledby="insight-alarm-title">
+  <div class="panel-heading"><div><h2 id="insight-alarm-title">금일 수집 Cloud Insight 알람</h2>
+    <p>{{ insight_alarms.day|kst('%Y-%m-%d') }} 완료 보고서 {{ insight_alarms.report_count }}건 · 고객 {{ insight_alarms.customer_count }}곳의 조회기간에 포함된 알람입니다. 실시간 상태가 아니며 발생일은 오늘 이전일 수 있습니다.</p></div></div>
+  <div class="summary-list">
+    <div><span>알람 발생 고객</span><strong>{{ insight_alarms.affected_customer_count }}곳</strong></div>
+    <div><span>알람 종류·대상</span><strong>{{ insight_alarms.group_count }}개</strong></div>
+    <div><span>발생 건수 (중복 수집 제외)</span><strong>{{ insight_alarms.event_count }}건</strong></div>
+  </div>
+  <p class="section-note">고객·계정·인스턴스·알람 규칙·지표·조건이 같은 발생을 묶습니다. 동일 이벤트를 여러 보고서에서 수집해도 한 번만 셉니다.</p>
+  <p class="section-note">성공·부분 수집으로 완료된 보고서 기준입니다. 실패·대기·실행 중 작업은 <a class="table-link" href="{{ url_for('report_history') }}">생성 이력</a>에서 확인하세요.</p>
+  {% if insight_alarms.incomplete_report_count %}<p class="coverage-warning">{{ insight_alarms.incomplete_report_count }}개 보고서는 Insight 수집이 미완료·비활성 또는 확인 불가입니다. 표시된 알람이 없더라도 전체 정상으로 판단하지 마세요.</p>{% endif %}
+  {% if insight_alarms.unidentified_count %}<p class="coverage-warning">이벤트 ID와 발생 시각이 없는 {{ insight_alarms.unidentified_count }}건은 중복 여부를 확인할 수 없습니다.</p>{% endif %}
+  {% if insight_alarms['items'] %}
+  <div class="table-wrap"><table class="insight-alarm-table"><thead><tr><th scope="col">고객·계정</th><th scope="col">인스턴스</th><th scope="col">알람·조건</th><th scope="col">발생 횟수</th><th scope="col">최초·최근 발생</th><th scope="col">수집 당시 상태</th><th scope="col">근거</th></tr></thead><tbody>
+  {% for alarm in insight_alarms['items'] %}<tr>
+    <td><strong>{{ alarm.customer_name }}</strong><small>{{ alarm.account_name }} · {{ '공공' if alarm.environment == 'gov' else '민간' }}</small></td>
+    <td><strong>{{ alarm.resource_name }}</strong>{% if alarm.resource_id %}<small>{{ alarm.resource_id }}</small>{% endif %}</td>
+    <td><span class="status {{ 'warn' if alarm.severity in ['CRITICAL', 'WARNING'] else 'pending' }}">{{ {'CRITICAL': '위험', 'WARNING': '경고', 'INFO': '정보'}.get(alarm.severity, '등급 미확인') }}</span><strong>{{ alarm.alarm_name }}</strong><small>{{ alarm.metric or '-' }} {{ alarm.condition }}</small>{% if alarm.dimension != '{}' %}<details><summary>대상 상세</summary><small>{{ alarm.dimension }}</small></details>{% endif %}</td>
+    <td><strong>{{ alarm.count }}회</strong>{% if alarm.unknown_count %}<small>중복 확인 불가 {{ alarm.unknown_count }}건 포함</small>{% endif %}</td>
+    <td><strong>{{ alarm.first_at|kst('%m-%d %H:%M:%S') }}</strong><small>최근 {{ alarm.last_at|kst('%m-%d %H:%M:%S') }}</small></td>
+    <td>{{ alarm.open_count }}건 종료 미확인<small>이후 상태 변경은 반영되지 않을 수 있습니다.</small></td>
+    <td><a class="table-link" href="{{ url_for('report_detail', report_id=alarm.report_id) }}">보고서 보기</a></td>
+  </tr>{% endfor %}</tbody></table></div>
+  {% else %}<div class="empty compact"><strong>{{ '오늘 완료된 보고서가 없습니다.' if insight_alarms.report_count == 0 else '오늘 완료된 보고서에서 수집된 알람이 없습니다.' }}</strong></div>{% endif %}
+</section>

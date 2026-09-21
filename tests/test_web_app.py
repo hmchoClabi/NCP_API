@@ -16,6 +16,7 @@ from webapp.route_access import (
     _msp_environment_scopes,
 )
 from webapp.security import token_hash
+from webapp.insight_dashboard import summarize_insight_alarms
 
 
 class FakePortalRepository:
@@ -44,6 +45,7 @@ class FakePortalRepository:
         self.deleted_logos = []
         self.report_artifact = None
         self.report_detail_snapshot_requests = []
+        self.insight_alarms = summarize_insight_alarms([], datetime(2026, 9, 21, tzinfo=timezone.utc))
         self.recent_review = {
             "window_started_at": datetime(
                 2026, 8, 22, 15, 0, tzinfo=timezone.utc
@@ -451,6 +453,7 @@ class FakePortalRepository:
                 "used_percent": 92.0,
             },
             "recent_review": self.recent_review,
+            "insight_alarms": self.insight_alarms,
         }
 
     def accounts_for_tenants(self, tenant_ids):
@@ -459,8 +462,9 @@ class FakePortalRepository:
     def reports_for_tenants(self, tenant_ids):
         return []
 
-    def report_history(self, tenant_ids=None):
+    def report_history(self, tenant_ids=None, **filters):
         self.history_tenants = tenant_ids
+        self.history_filters = filters
         return []
 
 
@@ -976,6 +980,42 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.history_tenants, ["tenant-1"])
 
+    def test_history_filters_cannot_widen_scope_and_are_paginated(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        response = self.client.get("/history?tenant_id=tenant-1&q=web&status=FAILED&page=2")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.repository.history_tenants, ["tenant-1"])
+        self.assertEqual(self.repository.history_filters, {"query": "web", "status": "FAILED", "limit": 51, "offset": 50})
+        self.assertIn(b"tenant_id=tenant-1", response.data)
+        self.assertEqual(self.client.get("/history?tenant_id=tenant-gov").status_code, 404)
+        for query in ("page=0", "page=abc", "page=100001", "status=INVALID"):
+            self.assertEqual(self.client.get("/history?" + query).status_code, 400)
+
+    def test_authenticated_login_redirects_and_navigation_marks_current_page(self):
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.assertEqual(self.client.get("/login").status_code, 302)
+        response = self.client.get("/history")
+        self.assertIn(b'href="/history" class="is-current" aria-current="page"', response.data)
+        self.assertIn('본문 바로가기'.encode(), response.data)
+
+    def test_insight_dashboard_renders_repeat_count_and_escapes_event_text(self):
+        from tests.test_insight_dashboard import TODAY, event, report
+        user = self.repository.session_user("session-token")
+        user["platform_roles"] = ["MSP_ADMIN"]
+        self.repository.session_user = lambda token: user if token else None
+        self.client.set_cookie(SESSION_COOKIE, "session-token")
+        self.repository.insight_alarms = summarize_insight_alarms([
+            report(events=[event(rule_name='<script>alert(1)</script>'),
+                           event('two', rule_name='<script>alert(1)</script>')])
+        ], TODAY)
+        response = self.client.get("/msp")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('금일 수집 Cloud Insight 알람'.encode(), response.data)
+        self.assertIn('2회'.encode(), response.data)
+        self.assertIn(b'&lt;script&gt;alert(1)&lt;/script&gt;', response.data)
+        self.assertNotIn(b'<script>alert(1)</script>', response.data)
+
+
     def test_notification_feed_is_scoped_and_uses_kst(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         response = self.client.get(
@@ -1002,6 +1042,12 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(formatter(0), "0초")
         self.assertEqual(formatter(125), "2분 5초")
         self.assertEqual(formatter(3_661), "1시간 1분 1초")
+
+    def test_status_labels_keep_unknown_values_and_do_not_change_stored_codes(self):
+        formatter = self.app.jinja_env.filters['status_label']
+        self.assertEqual(formatter('PARTIAL_SUCCESS'), '부분 수집')
+        self.assertEqual(formatter('FUTURE_STATUS'), 'FUTURE_STATUS')
+        self.assertEqual(formatter(None), '-')
 
     def test_inclusive_end_filter_converts_exclusive_month_boundary(self):
         formatter = self.app.jinja_env.filters["inclusive_end"]

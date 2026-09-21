@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ report.customer_name }} 보고서{% endblock %}
 {% block content %}
+<nav class="breadcrumb" aria-label="상위 화면"><a href="{{ url_for('customer_portal') }}">보고서 목록</a>{% if current_user.platform_roles %} / <a href="{{ url_for('msp_customer', tenant_id=report.tenant_id) }}">{{ report.customer_name }}</a>{% endif %} / 보고서</nav>
+<template id="report-display-style">{{ report_display_styles }}</template>
 <div class="report-detail-shell">
   <header class="report-toolbar">
     <div class="report-title">
@@ -9,10 +11,13 @@
       <p>{{ report.period_start|kst('%Y-%m-%d %H:%M') }} – {{ report.period_end|inclusive_end(report.end_exclusive)|kst('%Y-%m-%d %H:%M') }} · {{ report.account_name or '기본 계정' }}</p>
     </div>
     <div class="report-actions">
-      <span class="status {{ 'ok' if report.status == 'SUCCESS' else 'warn' }}">{{ report.status }}</span>
+      <button type="button" class="secondary" data-report-action="print" disabled>인쇄 · PDF 저장</button>
+      <button type="button" class="secondary" data-report-action="expand" disabled>모두 펼치기</button>
+      <button type="button" class="secondary" data-report-action="collapse" disabled>모두 접기</button>
+      <span class="status {{ 'ok' if report.status == 'SUCCESS' else 'warn' }}" title="{{ report.status }}">{{ report.status|status_label }}</span>
       <a class="secondary" href="{{ url_for('report_content', report_id=report.id) }}" target="_blank" rel="noopener">새 창에서 보기</a>
       {% if can_delete_report %}
-      <form method="post" action="{{ url_for('delete_report', report_id=report.id) }}" onsubmit="return confirm('이 보고서와 관련 수집 데이터를 삭제하시겠습니까? 이 작업은 복구할 수 없습니다.');">
+      <form method="post" action="{{ url_for('delete_report', report_id=report.id) }}" data-confirm-message="{{ report.customer_name }} · {{ report.period_start|kst('%Y-%m-%d') }} 보고서와 관련 수집 데이터를 삭제하시겠습니까? 이 작업은 복구할 수 없습니다." onsubmit="return confirm(this.dataset.confirmMessage);">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="danger-button" type="submit">보고서 삭제</button>
       </form>

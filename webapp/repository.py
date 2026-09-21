@@ -18,6 +18,7 @@ from psycopg.rows import dict_row
 
 from database.config import DatabaseSettings
 from webapp.security import CredentialCipher, hash_password, token_hash
+from webapp.insight_dashboard import summarize_insight_alarms
 from utils.credentials import NCPCredentials
 from app.customer import CustomerProfile
 from app.network_configuration import replace_configuration_records
@@ -1620,6 +1621,7 @@ class PortalRepository:
                 "recent_review": _build_dashboard_review(
                     [], window_started_at
                 ),
+                "insight_alarms": summarize_insight_alarms([], window_started_at + timedelta(days=1)),
                 "artifact_storage": artifact_storage,
             }
         tenant_filter = ""
@@ -1664,7 +1666,11 @@ class PortalRepository:
                                ELSE gov_snapshot.normalized_data -> 'analysis'
                            END,
                            '{{}}'::jsonb
-                       ) AS analysis
+                       ) AS analysis,
+                       COALESCE(public_snapshot.normalized_data -> 'insight_events',
+                                gov_snapshot.normalized_data -> 'insight_events', '[]'::jsonb) AS insight_events,
+                       COALESCE(public_snapshot.normalized_data -> 'dataset_statuses',
+                                gov_snapshot.normalized_data -> 'dataset_statuses', '[]'::jsonb) AS dataset_statuses
                 FROM control.report_runs report
                 JOIN control.tenants tenant
                   ON tenant.id = report.tenant_id
@@ -1695,6 +1701,7 @@ class PortalRepository:
         return {
             "summary": summary,
             "recent_review": recent_review,
+            "insight_alarms": summarize_insight_alarms(reports, window_started_at + timedelta(days=1)),
             "artifact_storage": artifact_storage,
         }
 
@@ -3443,15 +3450,24 @@ class PortalRepository:
             return cursor.fetchall()
 
     def report_history(
-        self, tenant_ids: Optional[list[str]] = None
+        self, tenant_ids: Optional[list[str]] = None, *, query: str = "",
+        status: str = "", limit: int = 500, offset: int = 0,
     ) -> list[dict[str, Any]]:
         if tenant_ids == []:
             return []
-        condition = ""
-        parameters: tuple[Any, ...] = ()
+        conditions = []
+        parameters: list[Any] = []
         if tenant_ids is not None:
-            condition = "WHERE history.tenant_id = ANY(%s::uuid[])"
-            parameters = (tenant_ids,)
+            conditions.append("history.tenant_id = ANY(%s::uuid[])")
+            parameters.append(tenant_ids)
+        if query:
+            conditions.append("concat_ws(' ', history.customer_name, history.account_name, history.account_code) ILIKE %s")
+            parameters.append("%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        if status:
+            conditions.append("COALESCE(history.report_status, history.job_status) = %s")
+            parameters.append(status)
+        condition = "WHERE " + " AND ".join(conditions) if conditions else ""
+        parameters.extend((max(1, min(limit, 500)), max(0, offset)))
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -3506,8 +3522,8 @@ class PortalRepository:
                 )
                 SELECT * FROM history
                 {condition}
-                ORDER BY requested_at DESC
-                LIMIT 500
+                ORDER BY requested_at DESC, history_id DESC
+                LIMIT %s OFFSET %s
                 """,
                 parameters,
             )

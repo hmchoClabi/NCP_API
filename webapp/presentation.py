@@ -55,6 +55,15 @@ def format_duration(value: Any) -> str:
     return " ".join(parts)
 
 
+def format_status(value: Any) -> str:
+    return {
+        "SUCCESS": "성공", "PARTIAL_SUCCESS": "부분 수집", "FAILED": "실패",
+        "QUEUED": "대기", "RUNNING": "실행 중", "CANCELLED": "취소",
+        "ACTIVE": "활성", "DISABLED": "비활성", "OFFBOARDED": "종료",
+        "VALID": "정상", "INVALID": "확인 필요",
+    }.get(str(value), str(value) if value is not None else "-")
+
+
 def inclusive_period_end(value: Any, end_exclusive: Any = True) -> Any:
     """배타적 종료 시각을 화면 표시용 포함 종료 시각으로 변환한다."""
     exclusive = (
@@ -85,6 +94,7 @@ def register_presentation(app: Flask) -> None:
     """
     app.add_template_filter(format_kst, "kst")
     app.add_template_filter(format_duration, "duration")
+    app.add_template_filter(format_status, "status_label")
     app.add_template_filter(inclusive_period_end, "inclusive_end")
 
     @app.context_processor

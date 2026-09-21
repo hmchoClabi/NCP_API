@@ -1,6 +1,19 @@
 """독립형 HTML 보고서의 정적 스타일 정의."""
 
 
+REPORT_DISPLAY_STYLES = """
+.chart-card, .chart, .chart-legend { min-width: 0; }
+.chart-legend-item { max-width: 100%; min-width: 0; text-align: left; }
+.chart-legend-item > span { min-width: 0; overflow-wrap: anywhere; }
+.chart-legend-item i { flex: 0 0 9px; }
+@media print {
+  .chart-legend { display: flex !important; gap: 4px 12px; }
+  .chart-legend-item { font-size: 8pt; color: #334155 !important; }
+  .chart-legend-item.is-muted { opacity: .55; }
+}
+"""
+
+
 HTML_REPORT_STYLES = """
 :root {
   color-scheme: light;

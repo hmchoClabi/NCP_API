@@ -66,6 +66,18 @@ class ArtifactStorageUsageTests(unittest.TestCase):
 
 
 class DashboardReviewTests(unittest.TestCase):
+    def test_history_search_is_parameterized_and_scope_is_preserved(self):
+        repository = PortalRepository(MagicMock())
+        connection = MagicMock()
+        cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+        repository._connect = MagicMock(return_value=connection)
+        repository.report_history(["tenant-1"], query="50%_\\' OR 1=1", status="FAILED", limit=51, offset=50)
+        query, parameters = cursor.execute.call_args.args
+        self.assertIn("history.tenant_id = ANY(%s::uuid[])", query)
+        self.assertIn("LIMIT %s OFFSET %s", query)
+        self.assertNotIn("OR 1=1", query)
+        self.assertEqual(parameters, [["tenant-1"], "%50\\%\\_\\\\' OR 1=1%", "FAILED", 51, 50])
+
     def test_findings_are_deduplicated_and_successful_changes_stay_reviewable(self):
         window = datetime(
             2026, 8, 23, tzinfo=timezone(timedelta(hours=9))

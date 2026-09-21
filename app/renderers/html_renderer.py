@@ -13,7 +13,7 @@ from app.collection_diagnostics import (
     diagnostic_service_name,
     normalize_collection_issue,
 )
-from app.renderers.html_styles import HTML_REPORT_STYLES
+from app.renderers.html_styles import HTML_REPORT_STYLES, REPORT_DISPLAY_STYLES
 from app.renderers.html_view_models import (
     BillingDisplayData,
     ReportDisplayData,
@@ -2719,7 +2719,7 @@ class HtmlReportRenderer:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="report-id" content="{self._text(report.report_id)}">
   <title>{self._text(report_title)} · {self._text(report.report_id)}</title>
-  <style>{HTML_REPORT_STYLES}</style>
+  <style>{HTML_REPORT_STYLES}{REPORT_DISPLAY_STYLES}</style>
 </head>
 <body>
   <main class="report-shell">
@@ -4144,6 +4144,7 @@ class HtmlReportRenderer:
             )
             legend_parts.append(
                 '<button type="button" class="chart-legend-item" '
+                f'title="{self._text(label)}" '
                 f'data-chart-toggle="{series_id}" aria-controls="{series_id}" '
                 'aria-pressed="false">'
                 f'<i style="background:{color}" aria-hidden="true"></i>'

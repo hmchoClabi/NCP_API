@@ -55,6 +55,8 @@ def register_auth_routes(
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "GET":
+            if g.get("user"):
+                return redirect(url_for("index"))
             login_csrf = request.cookies.get(csrf_cookie) or secrets.token_urlsafe(32)
             response = app.make_response(
                 render_template("login.html", csrf_token=login_csrf)

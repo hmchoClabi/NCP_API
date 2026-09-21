@@ -9,9 +9,9 @@
       <td>{{ '일일' if item.report_type == 'DAILY' else ('주간' if item.report_type == 'WEEKLY' else ('월간' if item.report_type == 'MONTHLY' else item.report_type)) }}</td>
       <td>{{ item.created_at|kst('%Y-%m-%d %H:%M:%S') }}</td>
       <td>{{ item.execution_seconds|duration }}</td>
-      <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}">{{ item.status }}</span></td>
+      <td><span class="status {{ 'ok' if item.status == 'SUCCESS' else 'warn' }}" title="{{ item.status }}">{{ item.status|status_label }}</span></td>
       <td>{{ item.error_count }}</td>
-      <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a>{% if can_delete_reports|default(false) %}<form method="post" action="{{ url_for('delete_report', report_id=item.id) }}" onsubmit="return confirm('이 보고서와 관련 수집 데이터를 삭제하시겠습니까? 이 작업은 복구할 수 없습니다.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-action" type="submit">보고서 삭제</button></form>{% endif %}</td>
+      <td><a class="table-link" href="{{ url_for('report_detail', report_id=item.id) }}">보고서 보기</a>{% if can_delete_reports|default(false) %}<details><summary>더 보기</summary><form method="post" action="{{ url_for('delete_report', report_id=item.id) }}" data-confirm-message="{{ item.customer_name|default('선택 고객') }} · {{ item.account_name or '기본 계정' }} · {{ item.period_start|kst('%Y-%m-%d') }} 보고서를 삭제하시겠습니까? 이 작업은 복구할 수 없습니다." onsubmit="return confirm(this.dataset.confirmMessage);"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-action" type="submit">보고서 삭제</button></form></details>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table>
 </div>

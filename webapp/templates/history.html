@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block title %}보고서 생성 이력{% endblock %}
 {% block content %}
-<header class="page-header"><div><span class="eyebrow">REPORT HISTORY</span><h1>보고서 생성 이력</h1><p>수동·자동 실행 시각, 조회 기간, 계정 및 생성 결과를 확인합니다.</p></div><span class="count-pill">최근 {{ history|length }}건</span></header>
+<header class="page-header"><div><span class="eyebrow">REPORT HISTORY</span><h1>보고서 생성 이력</h1><p>수동·자동 실행 시각, 조회 기간, 계정 및 생성 결과를 확인합니다.</p></div><span class="count-pill">{{ page }}페이지 · {{ history|length }}건</span></header>
+<section class="panel"><form class="list-filters" method="get">
+  <label>고객<select name="tenant_id"><option value="">접근 가능한 전체 고객</option>{% for customer in customers %}<option value="{{ customer.id }}"{% if filters.tenant_id == customer.id|string %} selected{% endif %}>{{ customer.customer_name }}</option>{% endfor %}</select></label>
+  <label>고객·계정 검색<input name="q" value="{{ filters.q }}" maxlength="200" type="search"></label>
+  <label>결과<select name="status"><option value="">전체 결과</option>{% for value, label in statuses.items() %}<option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <button class="primary" type="submit">조회</button><a class="table-link" href="{{ url_for('report_history') }}">초기화</a>
+</form></section>
 <section class="panel"><div class="table-wrap"><table><thead><tr>{% if is_msp %}<th>고객</th>{% endif %}<th>계정</th><th>방식</th><th>요청 시각</th><th>조회 기간</th><th>결과</th><th>오류</th><th>보고서</th></tr></thead><tbody>
 {% for item in history %}<tr>{% if is_msp %}<td><strong>{{ item.customer_name }}</strong><small><span class="tag {{ item.environment }}">{{ '공공' if item.environment == 'gov' else '민간' }}</span></small></td>{% endif %}<td><strong>{{ item.account_name or '기본 계정' }}</strong><small>{{ item.account_code or '-' }}</small></td><td>{{ '수동' if item.trigger_type == 'MANUAL' else '자동' }}<small>{{ item.report_type }}</small></td><td>{{ item.requested_at|kst }}<small>{{ item.requested_by_name or 'Scheduler' }}</small></td><td>{% if item.period_start and item.period_end %}<strong>{{ item.period_start|kst('%Y-%m-%d %H:%M') }}</strong><small>~ {{ item.period_end|inclusive_end(item.end_exclusive)|kst('%Y-%m-%d %H:%M') }}</small>{% else %}{{ item.target_value or '-' }}{% endif %}</td><td><span class="status {{ 'ok' if item.job_status in ('SUCCESS', 'PARTIAL_SUCCESS') else ('warn' if item.job_status in ('FAILED', 'CANCELLED') else 'pending') }}">{{ item.report_status or item.job_status }}</span></td><td>{{ item.error_count }}</td><td>{% if item.report_id %}<a class="table-link" href="{{ url_for('report_detail', report_id=item.report_id) }}">재현하기</a>{% else %}<span class="muted">{{ '처리 중' if item.job_status in ('QUEUED', 'RUNNING') else '-' }}</span>{% endif %}</td></tr>
 {% else %}<tr><td colspan="{{ 8 if is_msp else 7 }}"><div class="empty compact"><p>보고서 생성 이력이 없습니다.</p></div></td></tr>{% endfor %}
 </tbody></table></div></section>
+<nav class="pagination" aria-label="이력 페이지">{% if previous_url %}<a class="table-link" href="{{ previous_url }}">← 이전 50건</a>{% endif %}<span>{{ page }}페이지</span>{% if next_url %}<a class="table-link" href="{{ next_url }}">다음 50건 →</a>{% endif %}</nav>
 {% endblock %}

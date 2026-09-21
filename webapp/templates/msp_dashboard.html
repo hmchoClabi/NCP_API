@@ -9,6 +9,7 @@
 {% set report_type_labels = {'DAILY': '일간', 'WEEKLY': '주간', 'MONTHLY': '월간', 'CUSTOM': '사용자 지정'} %}
 {% set category_labels = {'DATA_QUALITY': '수집 신뢰도', 'METRIC': '성능 지표', 'EVENT': '이벤트', 'CHANGE': '변경 이력', 'AVAILABILITY': '가용성', 'PERFORMANCE': '성능', 'SECURITY': '보안', 'COST': '비용', 'OPERATION': '운영'} %}
 {% set severity_labels = {'CRITICAL': '즉시 확인', 'WARNING': '우선 확인', 'REVIEW': '변경 검토'} %}
+{% include '_insight_alarms.html' %}
 <section class="panel storage-panel {{ storage_status|lower }}" aria-labelledby="storage-title">
   <div class="panel-heading">
     <div><h2 id="storage-title">보고서 저장공간</h2><p>{% if storage_status == 'NORMAL' %}저장공간 여유가 있습니다.{% elif storage_status == 'WARNING' %}80% 이상 사용 중입니다. 정리 또는 증설을 계획하세요.{% elif storage_status == 'CRITICAL' %}90% 이상 사용 중입니다. 즉시 정리하거나 증설하세요.{% else %}저장공간 정보를 확인할 수 없습니다. PVC 상태를 점검하세요.{% endif %}</p></div>

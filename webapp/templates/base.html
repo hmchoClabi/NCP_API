@@ -4,14 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <title>{% block title %}NCP Report Hub{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='automation.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='notifications.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='report_settings.css') }}">
-  <script defer src="{{ url_for('static', filename='portal.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ux.css', v=app_version) }}">
+  <script defer src="{{ url_for('static', filename='portal.js', v=app_version) }}"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">본문 바로가기</a>
   <div class="notification-region" aria-live="polite" aria-atomic="false"
        {% if current_user %}data-notification-url="{{ url_for('notifications') }}" data-notification-since="{{ notification_since }}"{% endif %}>
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -31,21 +34,25 @@
         <span class="brand-mark">NR</span>
         <span><strong>NCP Report</strong><small>Operations Hub</small></span>
       </a>
+      <button type="button" class="menu-toggle secondary" aria-expanded="true" aria-controls="sidebar-content" hidden>메뉴</button>
+      <div id="sidebar-content">
+      {% macro menu_link(endpoint, label, active) %}<a href="{{ url_for(endpoint, **kwargs) }}"{% if active %} class="is-current" aria-current="page"{% endif %}>{{ label }}</a>{% endmacro %}
       <nav aria-label="주 메뉴">
         {% if current_user.platform_roles %}
         <p class="nav-label">MSP 운영</p>
-        <a href="{{ url_for('msp_dashboard') }}">통합 대시보드</a>
-        <a href="{{ url_for('msp_customers', environment='public') }}">민간 고객</a>
-        <a href="{{ url_for('msp_customers', environment='gov') }}">공공 고객</a>
-        <a href="{{ url_for('msp_schedules') }}">전체 실행 일정</a>
-        {% if 'MSP_ADMIN' in current_user.platform_roles %}
-        <a href="{{ url_for('msp_data_cleanup') }}">데이터 정리</a>
-        <a href="{{ url_for('msp_users') }}">MSP 계정·사용자 관리</a>
-        {% endif %}
+        {{ menu_link('msp_dashboard', '통합 대시보드', request.endpoint == 'msp_dashboard') }}
+        {{ menu_link('msp_customers', '민간 고객', (request.endpoint == 'msp_customers' and environment == 'public') or (request.endpoint == 'msp_customer' and tenant.environment == 'public'), environment='public') }}
+        {{ menu_link('msp_customers', '공공 고객', (request.endpoint == 'msp_customers' and environment == 'gov') or (request.endpoint == 'msp_customer' and tenant.environment == 'gov'), environment='gov') }}
+        {{ menu_link('msp_schedules', '전체 실행 일정', request.endpoint == 'msp_schedules') }}
         {% endif %}
         <p class="nav-label">보고서</p>
-        <a href="{{ url_for('customer_portal') }}">{{ '전체 고객 보고서' if current_user.platform_roles else '내 고객 포털' }}</a>
-        <a href="{{ url_for('report_history') }}">생성 이력</a>
+        {{ menu_link('customer_portal', '전체 고객 보고서' if current_user.platform_roles else '내 고객 포털', request.endpoint in ['customer_portal', 'report_detail']) }}
+        {{ menu_link('report_history', '생성 이력', request.endpoint == 'report_history') }}
+        {% if 'MSP_ADMIN' in current_user.platform_roles %}
+        <p class="nav-label">관리</p>
+        {{ menu_link('msp_users', 'MSP 계정·사용자 관리', request.endpoint == 'msp_users') }}
+        {{ menu_link('msp_data_cleanup', '데이터 정리', request.endpoint == 'msp_data_cleanup') }}
+        {% endif %}
       </nav>
       <div class="sidebar-footer">
         <span>{{ current_user.display_name }}</span>
@@ -55,11 +62,12 @@
           <button class="text-button" type="submit">로그아웃</button>
         </form>
       </div>
+      </div>
     </aside>
     {% endif %}
-    <main class="main{% if not current_user %} full{% endif %}">
+    <main id="main" tabindex="-1" class="main{% if not current_user %} full{% endif %}">
       {% block content %}{% endblock %}
-      <footer aria-label="애플리케이션 버전" style="margin:28px 18px 14px;color:#64748b;font-size:11px;text-align:right">
+      <footer class="app-version" aria-label="애플리케이션 버전">
         버전 {{ app_version }}{% if app_source_revision %} · {{ app_source_revision[:7] }}{% endif %}
       </footer>
     </main>

@@ -1,6 +1,91 @@
 (() => {
   "use strict";
 
+  const menu = document.querySelector(".menu-toggle");
+  const sidebar = document.querySelector(".sidebar");
+  if (menu && sidebar) {
+    menu.hidden = false;
+    const smallScreen = window.matchMedia("(max-width: 1000px)");
+    const setMenuOpen = (open) => {
+      sidebar.classList.toggle("is-collapsed", !open);
+      menu.setAttribute("aria-expanded", String(open));
+      menu.textContent = open ? "메뉴 닫기" : "메뉴 열기";
+    };
+    setMenuOpen(!smallScreen.matches);
+    smallScreen.addEventListener("change", () => setMenuOpen(!smallScreen.matches));
+    menu.addEventListener("click", () => setMenuOpen(menu.getAttribute("aria-expanded") !== "true"));
+    sidebar.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && smallScreen.matches) {
+        setMenuOpen(false);
+        menu.focus();
+      }
+    });
+  }
+
+  document.querySelectorAll(".table-wrap").forEach((table, index) => {
+    const hint = document.createElement("p");
+    hint.className = "table-scroll-hint";
+    hint.id = `table-scroll-hint-${index}`;
+    hint.textContent = "표를 좌우로 스크롤하면 나머지 항목을 볼 수 있습니다.";
+    table.before(hint);
+    const update = () => {
+      const overflowing = table.scrollWidth > table.clientWidth + 1;
+      hint.hidden = !overflowing;
+      if (overflowing) {
+        table.tabIndex = 0;
+        table.setAttribute("aria-describedby", hint.id);
+      } else {
+        table.removeAttribute("tabindex");
+        table.removeAttribute("aria-describedby");
+      }
+    };
+    update();
+    if (window.ResizeObserver) new ResizeObserver(update).observe(table);
+  });
+
+  const reportFrame = document.querySelector(".report-frame");
+  const reportButtons = document.querySelectorAll("[data-report-action]");
+  if (reportFrame) {
+    let reportDocument;
+    let beforePrint = [];
+    const prepareReport = () => {
+      reportDocument = null;
+      reportButtons.forEach((button) => { button.disabled = true; });
+      try {
+        const content = reportFrame.contentDocument;
+        if (!content?.querySelector(".report-shell")) return;
+        reportDocument = content;
+        if (!content.querySelector("#portal-report-display")) {
+          const style = content.createElement("style");
+          style.id = "portal-report-display";
+          style.textContent = document.querySelector("#report-display-style").content.textContent;
+          content.head.append(style);
+        }
+        reportFrame.contentWindow.addEventListener("afterprint", () => {
+          beforePrint.forEach(([detail, open]) => { detail.open = open; });
+          beforePrint = [];
+        });
+        reportButtons.forEach((button) => { button.disabled = false; });
+      } catch (_) {
+        // Authentication redirects or unavailable content keep actions disabled.
+      }
+    };
+    reportFrame.addEventListener("load", prepareReport);
+    if (reportFrame.contentDocument?.readyState === "complete") prepareReport();
+    reportButtons.forEach((button) => button.addEventListener("click", () => {
+      if (!reportDocument) return;
+      const details = Array.from(reportDocument.querySelectorAll("details"));
+      if (button.dataset.reportAction === "print") {
+        beforePrint = details.map((detail) => [detail, detail.open]);
+        details.forEach((detail) => { detail.open = true; });
+        reportFrame.contentWindow.focus();
+        reportFrame.contentWindow.print();
+      } else {
+        details.forEach((detail) => { detail.open = button.dataset.reportAction === "expand"; });
+      }
+    }));
+  }
+
   document.querySelectorAll("[data-retention-policy]").forEach((policy) => {
     const mode = policy.querySelector("[data-retention-mode]");
     const daysLabel = policy.querySelector("[data-retention-days]");
@@ -66,7 +151,23 @@
       "click", () => dismiss(notification)
     );
     window.requestAnimationFrame(() => notification.classList.add("is-visible"));
-    window.setTimeout(() => dismiss(notification), lifetimeMs);
+    if (notification.classList.contains("error")) {
+      notification.setAttribute("role", "alert");
+      return;
+    }
+    let timer;
+    const pause = () => window.clearTimeout(timer);
+    const resume = () => {
+      pause();
+      if (!notification.matches(":hover, :focus-within")) {
+        timer = window.setTimeout(() => dismiss(notification), lifetimeMs);
+      }
+    };
+    notification.addEventListener("pointerenter", pause);
+    notification.addEventListener("pointerleave", resume);
+    notification.addEventListener("focusin", pause);
+    notification.addEventListener("focusout", () => window.setTimeout(resume, 0));
+    resume();
   }
 
   function addNotification(event) {

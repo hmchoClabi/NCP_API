@@ -5,6 +5,7 @@
 
 <section class="split-grid">
   <article class="panel">
+    <details class="registration-details"><summary>MSP 관리자·운영자 추가</summary>
     <div class="panel-heading"><div><h2>MSP 관리자·운영자 추가</h2><p>권한에서 관리자를 선택하면 계정·고객·일정을 관리할 수 있는 관리자 계정이 생성됩니다.</p></div></div>
     <form class="form-stack" method="post" action="{{ url_for('create_msp_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -20,6 +21,7 @@
       <label>비밀번호 확인<input type="password" name="password_confirmation" required minlength="12" autocomplete="new-password"></label>
       <button class="primary" type="submit">MSP 계정 등록</button>
     </form>
+    </details>
   </article>
   <article class="panel">
     <div class="panel-heading"><div><h2>MSP 계정 목록</h2><p>각 사용자는 독립된 로그인 계정과 감사 이력을 가집니다.</p></div></div>
@@ -55,6 +57,7 @@
 
 <section class="split-grid">
   <article class="panel">
+    <details class="registration-details"><summary>신규 고객 사용자 등록</summary>
     <div class="panel-heading"><div><h2>신규 고객 사용자</h2><p>고객사에 연결하기 전에는 로그인할 수 없습니다.</p></div></div>
     <form class="form-stack" method="post" action="{{ url_for('create_portal_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -64,8 +67,10 @@
       <label>비밀번호 확인<input type="password" name="password_confirmation" required minlength="12" autocomplete="new-password"></label>
       <button class="primary" type="submit">고객 사용자 등록</button>
     </form>
+    </details>
   </article>
   <article class="panel">
+    <details class="registration-details"{% if selected_tenant_id %} open{% endif %}><summary>고객사 연결·관리자 권한 지정</summary>
     <div class="panel-heading"><div><h2>고객사 연결·관리자 권한 지정</h2><p>사용자를 고객사에 연결하고 고객 관리자 또는 조회 권한을 지정합니다.</p></div></div>
     {% if users and customers %}<form class="form-stack" method="post" action="{{ url_for('assign_portal_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -74,6 +79,7 @@
       <label>권한<select name="role"><option value="CUSTOMER_VIEWER">조회 사용자</option><option value="CUSTOMER_ADMIN">고객 관리자</option></select></label>
       <button class="primary" type="submit">고객사 연결</button>
     </form>{% else %}<div class="empty compact"><p>사용자와 고객사를 먼저 등록하세요.</p></div>{% endif %}
+    </details>
   </article>
 </section>
 
