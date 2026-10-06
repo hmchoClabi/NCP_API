@@ -1,0 +1,28 @@
+# T10 — 품질 점검과 회귀 방지 장치
+
+> 마지막 단계지만, **각 지시서 완료 후 해당 화면에 대해 부분 실행**해도 됩니다.
+
+## 목표
+개편 결과가 이후 GPT 작업으로 다시 무너지지 않도록 자동 점검을 저장소에 심어 둡니다.
+
+## 작업 지시
+
+1. **E2E·시각 회귀 (Playwright)**
+   - 화면 목록: 로그인, 대시보드, 현재 이슈, 고객 목록, 고객 워크스페이스 7탭, 실행 일정(목록·타임라인), 리포트 프로필, 보고서 보관함, 실행 이력, 보고서 뷰어, 계정·사용자, 저장공간·보존.
+   - 폭 375 / 768 / 1280 / 1440 × 라이트 / 다크 캡처, 기준 이미지와 비교(허용 오차 설정).
+   - 각 화면에서 `document.documentElement.scrollWidth <= innerWidth` 단언(페이지 가로 스크롤 금지).
+2. **접근성 자동 점검** — axe-core(자체 호스팅 번들)로 위 화면 검사, `serious`/`critical` 0건을 CI 실패 조건으로.
+3. **정적 검사**
+   - CSS: 토큰 파일 외 hex 색상 금지, `!important` 금지(허용 목록 제외) — 간단한 스크립트 또는 stylelint 규칙.
+   - 앱 화면: 렌더된 HTML의 **보이는 텍스트 노드**(script·style·속성·`<option value>` 제외)에 상태 코드 원문
+     (`SUCCESS|PARTIAL_SUCCESS|FAILED|ACTIVE` 등)이나 마이크로초 포함 ISO 시각이 있으면 실패. `<time datetime>`·`title`·`data-code` 속성은 허용.
+   - 보고서 산출물: 보이는 텍스트 노드에 원시 JSON(`{"` 패턴)·ISO 마이크로초 패턴이 있으면 실패(`<script>` 안 차트 데이터는 허용).
+4. **성능 예산** — 목록 HTML ≤ 60KB/50행, 대시보드 서버 응답 p95 ≤ 400ms, 렌더 차단 CSS `<link>`는 생성된 `app.{build_id}.css` 1개.
+5. **결정성 회귀** — 고정 스냅샷 3종을 `tests/fixtures/snapshots/`에 두고 렌더 해시를 골든 파일로 비교(`RENDERER_VERSION` 변경 시에만 갱신, 갱신 사유를 `CHANGELOG-renderer.md`에 기록).
+6. **보안 점검** — 로그·예외·HTML에 키 패턴(`ncp_iam_`, Access Key 형식 등)이 나오면 실패하는 테스트, 모든 POST에 CSRF 검증 테스트, 공유 링크 만료·범위 테스트.
+7. **운영 문서** — `docs/operations.md`: 스케줄러·sweep 설정값, 저장공간 산정식, 재현 검증 명령, 장애 시 점검 순서.
+
+## 완료 조건
+- [ ] CI에서 위 1–6이 실행되고 현재 main에서 모두 통과
+- [ ] 의도적으로 hex 색상 하나를 컴포넌트 CSS에 넣으면 CI 실패하는지 확인(스크린샷 또는 로그)
+- [ ] `docs/operations.md` 작성
