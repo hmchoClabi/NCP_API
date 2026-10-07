@@ -1,7 +1,8 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
+
+import pytest
 
 from app.report_models import ReportResult
 from database.config import DatabaseSettings
@@ -9,10 +10,7 @@ from database.report_repository import PostgresReportRepository
 from webapp.repository import PortalRepository
 
 
-@unittest.skipUnless(
-    os.getenv("REPORT_DB_INTEGRATION_TEST") == "1",
-    "Set REPORT_DB_INTEGRATION_TEST=1 to run against the local PostgreSQL.",
-)
+@pytest.mark.integration
 class DatabaseIntegrationTests(unittest.TestCase):
     CUSTOMER_ID = "integration-smoke-customer"
 

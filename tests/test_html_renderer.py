@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from app.collection_diagnostics import normalize_collection_issue
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
@@ -593,7 +595,7 @@ class HtmlReportRendererTests(unittest.TestCase):
             .split("</summary>", 1)[0],
         )
 
-    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    @pytest.mark.js
     def test_chart_script_multi_selects_series_and_uses_export_size(self):
         html = HtmlReportRenderer().render(self._sample_report())
         script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
@@ -795,7 +797,7 @@ assert.deepStrictEqual(
             completed.stdout + completed.stderr,
         )
 
-    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    @pytest.mark.js
     def test_chart_tooltip_uses_nearest_exact_point_and_legend_focus(self):
         html = HtmlReportRenderer().render(self._sample_report())
         script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
@@ -920,7 +922,7 @@ assert.strictEqual(tooltip.hidden, true);
             completed.stdout + completed.stderr,
         )
 
-    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    @pytest.mark.js
     def test_chart_cards_reorder_with_pointer_and_keyboard(self):
         html = HtmlReportRenderer().render(self._sample_report())
         script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
@@ -1227,7 +1229,7 @@ handlers.pointerup({pointerId: 4});
             completed.stdout + completed.stderr,
         )
 
-    @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+    @pytest.mark.js
     def test_resource_summary_cards_filter_rows_and_restore_all(self):
         report = self._sample_report()
         report.report_options = {

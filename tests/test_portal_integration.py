@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 
+import pytest
+
 from app.report_branding import validate_customer_logo
 from database.config import DatabaseSettings
 from webapp.repository import PortalRepository
@@ -18,10 +20,7 @@ from webapp.security import (
 )
 
 
-@unittest.skipUnless(
-    os.getenv("REPORT_DB_INTEGRATION_TEST") == "1",
-    "Set REPORT_DB_INTEGRATION_TEST=1 to run against local PostgreSQL.",
-)
+@pytest.mark.integration
 class PortalIntegrationTests(unittest.TestCase):
     TENANT_CODE = "portal-integration"
     ADMIN_EMAIL = "portal-admin-integration@example.invalid"

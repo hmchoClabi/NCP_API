@@ -1,2 +1,7 @@
 -r requirements.txt
 pytest>=9.0.0,<10
+ruff
+pytest-cov
+pip-audit
+pre-commit
+pre-commit-hooks

@@ -1,15 +1,14 @@
 import os
 import unittest
 
+import pytest
+
 from app.report_models import ReportResult
 from database.config import DatabaseSettings
 from database.report_repository import PostgresReportRepository
 
 
-@unittest.skipUnless(
-    os.getenv("REPORT_DB_WORKER_INTEGRATION_TEST") == "1",
-    "Set REPORT_DB_WORKER_INTEGRATION_TEST=1 with a prepared test account.",
-)
+@pytest.mark.worker_integration
 class WorkerPersistenceIntegrationTests(unittest.TestCase):
     def test_public_worker_can_replace_report_details(self):
         settings = DatabaseSettings.from_env()
