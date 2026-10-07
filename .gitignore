@@ -12,6 +12,9 @@ reports/
 .ruff_cache/
 .mypy_cache/
 .tmp/
+/*.pdf
+/*.docx
+/*.html
 .coverage
 htmlcov/
 database/.generated/

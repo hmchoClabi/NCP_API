@@ -34,7 +34,7 @@ Review and commit changes on `master` before release:
 
 ```powershell
 git status
-git add --all
+git add -p
 git diff --cached --check
 git commit -m "Describe the release"
 ```
