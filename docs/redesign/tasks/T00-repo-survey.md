@@ -1,5 +1,8 @@
 # T00 — 저장소 조사 및 현행 구조 지도 작성 (코드 변경 없음)
 
+> **상태: 완료 (2026-10-06, 커밋 8d2e310 기준).** 결과는 `docs/redesign/current-map.md`입니다. 이 지시서를 다시 실행하지 않습니다.
+> 10절 판정에 따른 후속 지시서 수정은 2026-10-07에 반영했고, 11절 질문에 대한 사용자 결정은 `docs/redesign/decisions.md`(D1–D3)에 있습니다.
+
 > 먼저 `AGENTS.md`, `docs/redesign/00-context.md`, `docs/redesign/01-design-system.md`를 읽으세요.
 > 이 작업에서는 **어떤 소스 파일도 수정하지 않습니다.** 산출물은 문서 1개입니다.
 

@@ -21,7 +21,7 @@
 ## 2. CSS 구조
 
 ```
-static/css/
+webapp/static/css/
 ├── 00-tokens.css        @layer tokens
 ├── 10-base.css          @layer base        (reset, 타이포, 링크, 포커스, 스킵링크)
 ├── 20-layout.css        @layer layout      (앱 셸, 사이드바, 상단바, 페이지 그리드)
@@ -31,7 +31,7 @@ static/css/
 ```
 
 `@import` 체인은 렌더를 지연시키고 캐시 버스팅이 안 되므로 쓰지 않습니다. 대신 **서버 시작 시(또는 배포 이미지 빌드 시) 파일을 순서대로 이어 붙이는 짧은 스크립트**로
-`static/build/app.{build_id}.css` 하나를 만들고, 템플릿은 이 파일만 `<link>`합니다(별도 프런트엔드 빌드 도구는 도입하지 않음).
+`webapp/static/build/app.{build_id}.css` 하나를 만들고, 템플릿은 이 파일만 `<link>`합니다(별도 프런트엔드 빌드 도구는 도입하지 않음).
 
 ```text
 출력 첫 줄:  @layer tokens, base, layout, components, pages, utilities;
@@ -45,7 +45,7 @@ static/css/
 ```
 
 - 기존 `portal.css`, `automation.css`, `notifications.css`, `report_settings.css`, `ux.css`의 규칙은
-  위 구조로 **이동**하고 원본 파일은 삭제합니다. `!important`는 `utilities` 레이어의 `visually-hidden` 외에는 금지.
+  위 구조로 **이동**합니다. 원본 파일 삭제는 운영 PVC 산출물의 `/static/` 참조를 점검한 뒤 별도 작업으로 합니다(T01 현행 반영). `!important`는 `utilities` 레이어의 `visually-hidden` 외에는 금지.
 - 생성 파일명에 `build_id`가 들어가므로 캐시 버스팅이 자동으로 됩니다. JS는 현재처럼 `?v={{ build_id }}`.
 - 보고서 본문(`/reports/{id}/content`)은 **자체 완결형 HTML**이어야 하므로 앱 CSS를 링크하지 않습니다.
   대신 같은 토큰 값을 보고서 템플릿 인라인 CSS에 복제합니다(`report-tokens.css`를 렌더 시 인라인).
@@ -126,7 +126,7 @@ static/css/
 @media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; } }
 ```
 
-글꼴은 Pretendard Variable woff2를 `static/fonts/`에 자체 호스팅하고 `font-display: swap`.
+글꼴은 Pretendard Variable woff2를 `webapp/static/fonts/`에 자체 호스팅하고 `font-display: swap`.
 숫자 열·KPI·시각에는 `font-variant-numeric: tabular-nums;`
 
 ## 4. 레이아웃·반응형
@@ -144,7 +144,7 @@ static/css/
 
 ## 5. 컴포넌트 명세
 
-각 컴포넌트는 `templates/components/`에 Jinja 매크로(또는 해당 스택의 partial)로 만들고, 화면에서는 매크로만 호출합니다.
+각 컴포넌트는 `webapp/templates/components/`에 Jinja 매크로로 만들고, 화면에서는 매크로만 호출합니다. `base.html`의 기존 `menu_link` 매크로와 중복되지 않게 합니다.
 
 ### 5.1 Button
 - 변형: `primary`(강조색 채움) / `secondary`(surface-2 채움) / `ghost`(테두리 없음) / `danger`(danger-fg 테두리·글자, 채움 없음) / `danger-solid`(위험 영역의 최종 실행 버튼만)
@@ -154,7 +154,8 @@ static/css/
 
 ### 5.2 StatusBadge — `status_badge(code, kind=None)`
 아이콘 + 한국어 라벨 + 톤. 원 코드는 `title`과 `data-code`에만.
-`kind`는 같은 코드가 다른 의미로 쓰일 때 구분하는 이름공간입니다(기본 `None` = 작업·고객 상태).
+`kind`는 같은 코드가 다른 의미로 쓰일 때 구분하는 이름공간입니다(기본 `None` = 작업·보고서·고객 상태).
+작업(`report_jobs.status`)과 보고서(`report_runs.status`)는 같은 기본 kind로 라벨을 붙이되, 이력 화면에서는 "작업"과 "보고서 결과"를 다른 열로 보여줍니다(작업 `SUCCESS` + 보고서 `PARTIAL_SUCCESS` = 부분 수집).
 일정은 `enabled` 값을 `schedule_state(schedule) -> "ACTIVE" | "PAUSED"`로 바꾼 뒤 `status_badge(..., kind="schedule")`로 표시합니다.
 
 | kind | 코드 | 라벨 | 톤 | 아이콘 |
@@ -162,12 +163,20 @@ static/css/
 | (기본) | `SUCCESS` | 정상 완료 | ok | check |
 | | `PARTIAL_SUCCESS` | 부분 수집 | warn | alert-triangle |
 | | `FAILED` / `ERROR` | 실패 | danger | x-circle |
-| | `PENDING` / `QUEUED` | 대기 | neutral | clock |
+| | `QUEUED` | 대기 | neutral | clock |
 | | `RUNNING` | 실행 중 | info | loader |
-| | `WAITING_DATA` | 데이터 대기 | info | hourglass |
+| | `RETRYING` | 재시도 대기 | warn | refresh |
+| | `CANCELLED` | 취소됨 | neutral | ban |
+| | `WAITING_DATA` (신규, T06 승인 시) | 데이터 대기 | info | hourglass |
 | | `ACTIVE` | 활성 | ok | dot |
 | | `ONBOARDING` | 온보딩 중 | info | dot |
+| | `SUSPENDED` | 일시 중지 | warn | pause |
 | | `OFFBOARDED` | 오프보딩됨 | neutral | archive |
+| `account` | `ACTIVE` / `DISABLED` / `CREDENTIAL_ERROR` | 사용 중 / 사용 안 함 / API 키 오류 | ok / neutral / danger | dot / pause / key |
+| `user` | `INVITED` / `ACTIVE` / `LOCKED` / `DISABLED` | 초대됨 / 활성 / 잠김 / 비활성 | info / ok / warn / neutral | mail / dot / lock / pause |
+| `trigger` | `MANUAL` / `SCHEDULED` / `RETRY` | 수동 / 자동 / 재시도 | neutral | |
+| `dataset` | `COLLECTED` / `COLLECTED_EMPTY` / `PARTIAL` / `FAILED` / `NOT_REQUESTED` | 수집됨 / 수집됨(데이터 없음) / 일부 수집 / 수집 실패 / 요청 안 함 | ok / neutral / warn / danger / neutral | |
+| `event_case` | `NEW` / `ACKNOWLEDGED` / `IN_PROGRESS` / `RESOLVED` / `IGNORED` / `NOT_DETECTED` | 신규 / 확인함 / 처리 중 / 해결됨 / 무시 / 미탐지 | danger / info / info / ok / neutral / neutral | |
 | `schedule` | `ACTIVE` / `PAUSED` | 활성 / 일시 중지 | ok / neutral | dot / pause |
 | `severity` | `CRITICAL` / `WARNING` / `INFO` | 위험 / 주의 / 정보 | danger / warn / info | alert-octagon / alert-triangle / info |
 | `issue_state` | `OPEN` / `ACKNOWLEDGED` / `RESOLVED` / `STALE` / `MUTED` | 진행 중 / 확인함 / 해결됨 / 종료 미확인 / 음소거 | danger / info / ok / neutral / neutral | |
@@ -176,10 +185,15 @@ static/css/
 | `job_type` | `COLLECT_AND_RENDER` / `RERENDER` / `RECOLLECT` / `VERIFY` | 생성 / 재생성 / 재수집 / 재현 검증 | neutral / info / info / neutral | |
 | `render_mode` | `ORIGINAL` / `RERENDER_LATEST` / `RECOLLECT` | 원본 / 최신 템플릿 재생성 / 재수집 | neutral / info / info | |
 | `reproduction` | `VERIFIED` / `DIFFERS` / `UNAVAILABLE` | 재현 일치 / 결과 다름 / 재현 불가 | ok / warn / neutral | |
-| `cleanup` | T00 18번에서 확인한 정리 상태 코드 전부 | 예: 정리 가능 / 정리 요청됨 / 정리 완료 / 보존 대상 | | |
+| `cleanup` | (정리 가능) / `ACTIVE` / `LATEST` / `RETENTION` / `POLICY_FOREVER` / `CLEANUP_QUEUED` | 정리 가능 / 보호됨 · 실행 중 / 보호됨 · 최신 정상본 / 보호됨 · 보존 기한 내 / 보호됨 · 영구 보존 / 정리 요청됨 | ok / neutral / neutral / neutral / neutral / info | |
+| `cleanup_error` | `INVALID_CLEANUP_REQUEST` / `PROTECTED_AT_EXECUTION` / `DELETE_FAILED` | 요청 검증 실패 / 실행 시 보호되어 건너뜀 / 정리 실패 | warn / neutral / danger | |
+
+- `cleanup`의 "정리 가능"은 코드가 아니라 `eligible=true` + 보호 사유 없음의 조합입니다(`webapp/repository.py:2374`). `cleanup_error`는 `cleanup_last_error_code` 표시용으로, 보호 사유와 다른 이름공간입니다.
+- T07에서 신규 보호 사유 `LEGAL_HOLD`(보호됨 · 법적 보존)가 `cleanup`에 추가됩니다.
 
 알 수 없는 코드는 `neutral` 톤 + "알 수 없음" 라벨(원 코드는 `title`)로 표시하고 서버 로그에 경고를 남깁니다.
-매핑은 **한 곳(예: `app/ui/status.py`)** 에만 정의하고 템플릿·JS·보고서 렌더러가 모두 이를 씁니다.
+매핑은 **한 곳**에만 정의하고 템플릿·JS·보고서 렌더러가 모두 이를 씁니다. 출발점은 기존 `webapp/presentation.py`의 `format_status`(:58, Jinja 이름 `status_label`)와 T00B-9의 `status_tone`입니다(두 번째 카탈로그 신설 금지).
+보고서 렌더러(`app/`)도 같은 매핑을 써야 하므로, `webapp` → `app` 의존 방향을 지키려면 매핑 표를 `app/` 쪽 중립 모듈로 옮기고 `webapp/presentation.py`가 그것을 import하는 방식을 계획에 제시하세요.
 
 ### 5.3 Panel / Card
 - `surface` 배경, `border` 1px, `radius-lg`, `shadow-1`, 패딩 `sp-6`(모바일 `sp-4`).

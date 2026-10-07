@@ -2,9 +2,27 @@
 
 > 선행: T03. 기준: `00-context.md` 3절, `01-design-system.md` 5.8–5.10절.
 
+## 현행 반영 (T00 결과·결정, 2026-10-07) — 본문과 충돌하면 이 절이 우선
+- **저장 위치**: 고객 출력 설정과 보존 정책은 `control.tenant_report_settings.settings` **JSON 한 행**입니다
+  (schema_version 1.4, `sections`, `section_order`, `resource_categories`, `monitoring_categories`, `operational_analysis`, `retention_policies.DAILY/WEEKLY/MONTHLY`).
+  별도 보존 테이블이나 유형별 행 테이블을 만들지 않고 **이 JSON에 키를 추가**합니다. 섹션별 저장 = 같은 행에서 해당 키만 갱신하고 나머지 키는 보존.
+- **유형별 구성**: 추가형 키(예: `layouts_by_type: {"DAILY": {...}, "WEEKLY": {...}, "MONTHLY": {...}}`, 없으면 기존 `sections`/`section_order`)로 저장합니다.
+  `CUSTOM`(시간 범위) 보고서는 일일 구성을 씁니다. 이 JSON의 `schema_version`(1.4)은 설정 스키마 버전이며 T07의 스냅샷 스키마 버전(1.5)과 **별개**입니다. 올릴 때 이전 버전 JSON도 그대로 읽혀야 합니다.
+- **폼 이름 유지**: 현행 `section_order`(hidden ×8)를 `section_order[]`로 바꾸지 않습니다. JS가 없을 때 정렬은 ↑↓ 버튼의 **서버 제출**로 동작해야 합니다.
+- **결정 D1**: 범주 선택 영역의 이름은 **"표시 범위"** 입니다. 보고서에 무엇을 보여줄지만 정하며 수집을 줄이지 않습니다.
+  화면에 "선택하지 않은 범주도 수집·보관되며, 보고서에만 표시되지 않습니다" 안내를 둡니다. `collect_wms`·`collect_security_monitoring`은 기존 의미(수집 토글) 그대로 둡니다.
+  - 출력용 자원 필터와 모니터링 수집에 쓰이는 범주 합집합을 구분하세요(current-map 11절, `app/report_pipeline.py:94` `build_collection_plan`).
+    현재 코드에서 선택 범주가 수집을 줄이는 곳이 있으면 **고치지 말고 보고**합니다.
+- **결정 D3**: CPU·메모리·디스크 임계치 하한 50%, `warning < critical`, 기본값 유지 — **T00B-10에서 구현**됩니다. 이 작업은 분석 기준 섹션 UI만 옮기고 검증 규칙을 다시 만들지 않습니다
+  (T00B-10이 아직이면 여기서 D3대로 구현).
+- **설정 변경 이력**: 기존 감사 기록(`webapp/repository.py:1842–1941`, `audit.data_change_logs`)을 재사용하고, 전/후 값이 부족하면 그 구조를 확장합니다.
+  새 `report_settings_audit` 테이블은 기존 구조로 불가능할 때만 이유와 함께 승인받습니다.
+- **미리보기**: T07 전에는 저장된 데이터로 완전한 재렌더를 보장할 수 없으므로, 이번 작업의 미리보기는 **섹션 구성 요약(목차)** 으로 한정합니다.
+- 템플릿은 `webapp/templates/`. 사용자 탭의 `/msp/users?tenant_id=` 링크는 폼 사전 선택 의미입니다(T03). 로고는 `control.tenant_branding`의 DB 바이트입니다.
+
 ## 목표
 고객 상세(`/msp/customer/{tenant_id}`)는 **자동 작성·커스터마이징·스케줄링이 모두 일어나는 중심 화면**입니다.
-지금은 h2 8개·폼 14개가 한 페이지에 세로로 이어지고, 출력 설정은 성격이 다른 4가지(구성·수집·분석·보존)가 **한 폼 한 저장 버튼**에 묶여 있습니다.
+지금은 h2 8개·폼 14개가 한 페이지에 세로로 이어지고, 출력 설정은 성격이 다른 4가지(구성·표시 범위·분석·보존)가 **한 폼 한 저장 버튼**에 묶여 있습니다.
 이를 탭 기반 워크스페이스로 나누고, 각 설정을 독립 저장 단위로 분리합니다.
 
 ## 탭 구성
@@ -18,7 +36,7 @@ URL: `/msp/customer/{id}` (개요) · `/msp/customer/{id}/{tab}`
 | **자동화** | 계정별 일정 표(유형·주기·실행 시각·다음 실행·상태·최근 결과), 즉시 생성 | `일정 추가`, `중지/재개`, `지금 실행` |
 | **출력 설정** | 하위 섹션 5개(아래), 각자 저장 버튼 | 저장, 미리보기 |
 | **계정·API 키** | NCP 계정 목록, 키 등록·교체(마스킹 표시, 마지막 교체일), 권한 진단 결과 | `계정 추가`, `키 교체` |
-| **사용자** | 연결된 고객 사용자 | `/msp/users?tenant_id=` 링크 + 빠른 초대 |
+| **사용자** | 연결된 고객 사용자 | `/msp/users?customer={id}` 목록 링크(T03) + `/msp/users?tenant_id={id}` 연결 폼 링크 + 빠른 초대 |
 | **위험 영역** | API 키 삭제, 고객 오프보딩 | 타이핑 확인 대화상자 |
 
 - 상단 헤더: 고객명 + 환경 배지 + 상태 배지 + 코드 · 브레드크럼 `고객 › 클라비`.
@@ -30,25 +48,26 @@ URL: `/msp/customer/{id}` (개요) · `/msp/customer/{id}/{tab}`
 현재 `POST /msp/customer/{id}/report-settings` 한 개 → 아래 5개로 분리합니다(기존 엔드포인트는 호환을 위해 유지하되 내부적으로 위임).
 
 1. **보고서 구성** `POST …/report-settings/layout`
-   - 섹션 8개 on/off + **드래그 정렬**(JS) / ↑↓ 버튼(JS 없을 때 대체). 정렬은 `section_order[]`.
+   - 섹션 8개 on/off + **드래그 정렬**(JS) / ↑↓ 버튼(JS 없을 때 서버 제출로 대체). 정렬 필드 이름은 현행 `section_order` 유지.
    - 각 섹션 카드에 설명 한 줄 + "포함되는 내용" 툴팁.
-   - **보고서 유형별 구성**: 일일·주간·월간 탭(시간 범위 보고서는 일일 구성을 사용). 기본은 "모든 유형 동일" 체크, 해제 시 유형별로 다르게(예: 월간만 청구·Organization 비용 포함).
-     T05의 프로필이 생기기 전까지는 고객 설정 테이블에 `report_type`별 행을 둡니다(마이그레이션).
-2. **수집 범위** `POST …/report-settings/collection`
+   - **보고서 유형별 구성**: 일일·주간·월간 탭(시간 범위 `CUSTOM` 보고서는 일일 구성을 사용). 기본은 "모든 유형 동일" 체크, 해제 시 유형별로 다르게(예: 월간만 청구·Organization 비용 포함).
+     T05의 프로필이 생기기 전까지는 `tenant_report_settings.settings` JSON에 유형별 키를 추가해 저장합니다(테이블 마이그레이션 없음, 위 현행 반영 절).
+2. **표시 범위** `POST …/report-settings/scope` (결정 D1 — 수집은 줄이지 않음)
    - 자원 범주 34개를 **그룹으로 묶어** 표시: 컴퓨트(서버·Auto Scaling·Server Image), 스토리지(Block·Object·NAS·Archive·Snapshot·Backup),
      네트워크(Load Balancer·VPC·Subnet·Route·ACG·NACL·NAT·Public IP·Peering·VPG·IPsec·Cloud Connect), 글로벌(Edge·DNS·GTM), DB·데이터(Cloud DB·Search·Data Streaming·Hadoop·Data Stream),
      앱·보안(API Gateway·Certificate·Functions·보안 서비스), Kubernetes. 그룹 단위 전체 선택.
-   - 모니터링 범주 11개, WMS·Security Monitoring 수집 토글.
-   - 각 범주 옆에 "최근 수집 시 N개 발견" 표시(최근 스냅샷에서 집계, T07 이전에는 최근 보고서 기준) → 빈 범주를 끄도록 유도.
+   - 모니터링 범주 11개(표시 범위).
+   - WMS·Security Monitoring **수집 토글**은 의미가 다르므로 같은 섹션 안 별도 소제목 "추가 수집 항목"으로 구분합니다.
+   - 각 범주 옆에 "최근 수집 시 N개 발견" 표시(최근 스냅샷에서 집계, T07 이전에는 최근 보고서 기준) → 보고서에 비어 보이는 범주를 숨기도록 안내(수집은 계속됨).
 3. **분석 기준** `POST …/report-settings/analysis`
    - 맨 위에 `analysis_enabled`(결정론적 운영 분석 사용) 토글. 끄면 아래 임계치 입력을 비활성화.
    - 임계치 11개를 "자원 사용률 / 비용 / 가용성·응답" 3그룹으로.
-   - **CPU·메모리·스토리지 주의/위험 최소값 90% 제한 재검토**: 서버 검증은 `0 < warning < critical ≤ 100`으로 바꾸고,
-     90% 미만 입력 시 경고 문구만 표시(차단 아님). 90% 하한이 정책상 필요한지는 **이 작업의 계획 단계에서 사용자에게 질문**해 확인하세요.
+   - **CPU·메모리·스토리지 임계치 범위는 결정 D3**: 입력 50–100%, `warning < critical`, 기본값(주의 90·위험 95) 유지,
+     70% 미만은 저장 허용 + "경고가 자주 발생할 수 있습니다" 안내. 템플릿의 `min`/`max`는 `app/report_options.py` 상수에서 받습니다(T00B-10).
    - 기본값과 다른 값은 "기본값과 다름" 표시 + 개별 "기본값으로" 버튼.
 4. **보존 정책** `POST …/report-settings/retention`
-   - 저장 위치: `customer_retention_policy(tenant_id, report_type, artifact_mode(DAYS|FOREVER), artifact_days, updated_by, updated_at)`.
-     기존 보존 설정 저장 위치(T00 4절)가 이미 이런 형태면 재사용합니다. T07에서 `snapshot_mode`·`snapshot_days`가 추가됩니다.
+   - 저장 위치: 기존 `tenant_report_settings.settings.retention_policies.{DAILY,WEEKLY,MONTHLY}`(`mode` = `DAYS`|`FOREVER`, `days` 1–3650)를 그대로 씁니다.
+     T07에서 원천 데이터 보존 키가 같은 JSON에 추가됩니다. 설정이 없는 유형을 자동 삭제 대상으로 만들지 않습니다(현행 정리 규칙 유지).
    - 일·주·월별 `기간 지정(일)` / `영구 보존`. 현재 사용량과 정책 적용 시 다음 정리에서 삭제될 예상 건수·용량을 미리 표시.
    - T07 이후에는 "원천 데이터(스냅샷)"와 "산출물(HTML)" 보존을 분리.
 
@@ -58,9 +77,9 @@ URL: `/msp/customer/{id}` (개요) · `/msp/customer/{id}/{tab}`
 
 공통:
 - 각 섹션은 독립 폼. 변경이 있으면 저장 버튼 활성 + "저장하지 않은 변경" 표시, 이탈 시 `beforeunload` 경고.
-- 저장 성공 토스트 + **설정 변경 이력**(누가·언제·무엇을, 전/후 값) 테이블 `report_settings_audit` 기록. 출력 설정 탭 하단에 최근 10건.
-- **미리보기**: `GET …/report-settings/preview?report_type=daily` → 가장 최근 수집 데이터로 현재 설정을 적용한 보고서를 iframe에 렌더(저장하지 않음).
-  T07 전에는 최근 보고서의 수집 데이터 경로를 T00 결과에 맞춰 사용하고, 불가능하면 섹션 구성 요약(목차)만 미리보기.
+- 저장 성공 토스트 + **설정 변경 이력**(누가·언제·무엇을, 전/후 값)을 기존 감사 기록에 남기고(필요 시 확장, 위 현행 반영 절) 출력 설정 탭 하단에 최근 10건.
+- **미리보기**: `GET …/report-settings/preview?report_type=daily` → 이번 작업에서는 현재 설정 기준 **섹션 구성 요약(목차)** 만 보여줍니다.
+  실제 본문 미리보기(저장된 스냅샷으로 재렌더)는 T07 이후 추가합니다.
 
 ## 자동화 탭 상세
 - 표: 계정 / 유형 / 주기(`매일 09:00`, `매주 월 09:00`, `매월 1일 09:00`) / 다음 실행(`fmt_ago` + 절대 시각) / 최근 결과(배지 + 이력 링크) / 상태 / `⋯`(편집·중지·재개·지금 실행·삭제).
@@ -72,7 +91,9 @@ URL: `/msp/customer/{id}` (개요) · `/msp/customer/{id}/{tab}`
 - [ ] 7개 탭이 각각 URL을 가지고 직접 진입·새로고침 가능
 - [ ] 출력 설정 5개 섹션이 독립 저장되고, 하나를 저장해도 다른 섹션의 미저장 변경이 사라지지 않음
 - [ ] 유형별 섹션 구성 저장·적용(일일 생성 시 일일 구성 사용) 테스트 통과
-- [ ] 설정 변경 이력 기록 및 표시
+- [ ] 설정 변경 이력 기록 및 표시(기존 감사 구조 재사용·확장)
+- [ ] 기존 고객 설정 JSON이 변경 없이 읽히고, 기존 보고서 생성 결과(섹션·순서·범주·임계치·보존)가 바뀌지 않음(회귀 테스트)
+- [ ] 표시 범위를 바꿔도 수집 호출 대상이 같음(D1 회귀 테스트)
 - [ ] "전체 생성 이력 보기"가 `tenant_id` 필터 유지
 - [ ] API 키 삭제·고객 오프보딩은 위험 영역 탭에만 존재(일정 삭제는 자동화 탭 `⋯` 허용)
 - [ ] 375px에서 탭 바 가로 스크롤, 폼 1열, 가로 스크롤 없음
