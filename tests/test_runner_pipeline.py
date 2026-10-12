@@ -87,11 +87,13 @@ class CurrentServerCollector:
         self.last_raw_data = {}
 
     def collect(self):
-        return [{
-            "server_id": "current-server",
-            "server_name": "current-server",
-            "status": "RUN",
-        }]
+        return [
+            {
+                "server_id": "current-server",
+                "server_name": "current-server",
+                "status": "RUN",
+            }
+        ]
 
 
 class EmptyInfrastructureCollector:
@@ -158,18 +160,9 @@ class HistoricalFallbackInfrastructureCollector:
     def collect(self, servers, server_raw_data, categories=None):
         del servers, server_raw_data, categories
         kst = ZoneInfo("Asia/Seoul")
-        before_end = int(
-            datetime(2026, 8, 8, 23, 59, 59, tzinfo=kst).timestamp()
-            * 1000
-        )
-        at_end = int(
-            datetime(2026, 8, 9, 0, 0, 0, tzinfo=kst).timestamp()
-            * 1000
-        )
-        after_end = int(
-            datetime(2026, 8, 9, 0, 0, 1, tzinfo=kst).timestamp()
-            * 1000
-        )
+        before_end = int(datetime(2026, 8, 8, 23, 59, 59, tzinfo=kst).timestamp() * 1000)
+        at_end = int(datetime(2026, 8, 9, 0, 0, 0, tzinfo=kst).timestamp() * 1000)
+        after_end = int(datetime(2026, 8, 9, 0, 0, 1, tzinfo=kst).timestamp() * 1000)
         return [
             {
                 "category": "SERVER",
@@ -238,11 +231,13 @@ class NetworkSnapshotRepository:
         customer,
         reference_at=None,
     ):
-        self.requests.append({
-            "period": period,
-            "customer": customer,
-            "reference_at": reference_at,
-        })
+        self.requests.append(
+            {
+                "period": period,
+                "customer": customer,
+                "reference_at": reference_at,
+            }
+        )
         return self.snapshot
 
 
@@ -267,9 +262,7 @@ class FailingInfrastructureCollector:
         self.last_warnings = []
 
     def collect(self, servers, server_raw_data, categories=None):
-        raise RuntimeError(
-            "inventory failed https://example.test/path?privateKey=hidden"
-        )
+        raise RuntimeError("inventory failed https://example.test/path?privateKey=hidden")
 
 
 class FailingInfrastructureMetricCollector:
@@ -284,9 +277,7 @@ class FailingInfrastructureMetricCollector:
         end_time,
         selected_categories=None,
     ):
-        raise RuntimeError(
-            "metric failed https://example.test/path?privateKey=hidden"
-        )
+        raise RuntimeError("metric failed https://example.test/path?privateKey=hidden")
 
 
 class EmptyActivityCollector:
@@ -344,13 +335,13 @@ class RunnerPipelineTests(unittest.TestCase):
         return runner
 
     def _network_collection_plan(self):
-        options = ReportOptions({
-            "sections": ["infrastructure_inventory"],
-            "resource_categories": list(
-                self.NETWORK_CONFIGURATION_CATEGORIES
-            ),
-            "monitoring_categories": [],
-        })
+        options = ReportOptions(
+            {
+                "sections": ["infrastructure_inventory"],
+                "resource_categories": list(self.NETWORK_CONFIGURATION_CATEGORIES),
+                "monitoring_categories": [],
+            }
+        )
         return build_collection_plan(options)
 
     @staticmethod
@@ -364,11 +355,13 @@ class RunnerPipelineTests(unittest.TestCase):
                 "details": {
                     "vpc_no": "vpc-1",
                     "route_count": 1,
-                    "routes": [{
-                        "destination_cidr": "0.0.0.0/0",
-                        "target_type": "NATGW",
-                        "target_no": "nat-1",
-                    }],
+                    "routes": [
+                        {
+                            "destination_cidr": "0.0.0.0/0",
+                            "target_type": "NATGW",
+                            "target_no": "nat-1",
+                        }
+                    ],
                 },
             },
             {
@@ -379,12 +372,14 @@ class RunnerPipelineTests(unittest.TestCase):
                 "details": {
                     "vpc_no": "vpc-1",
                     "rule_count": 1,
-                    "rules": [{
-                        "direction": "INBND",
-                        "protocol": "TCP",
-                        "source_ip_block": "10.0.0.0/8",
-                        "port_range": "443",
-                    }],
+                    "rules": [
+                        {
+                            "direction": "INBND",
+                            "protocol": "TCP",
+                            "source_ip_block": "10.0.0.0/8",
+                            "port_range": "443",
+                        }
+                    ],
                 },
             },
             {
@@ -395,14 +390,16 @@ class RunnerPipelineTests(unittest.TestCase):
                 "details": {
                     "vpc_no": "vpc-1",
                     "rule_count": 1,
-                    "rules": [{
-                        "priority": 10,
-                        "direction": "INBND",
-                        "protocol": "TCP",
-                        "source_ip_block": "10.0.0.0/8",
-                        "port_range": "443",
-                        "action": "ALLOW",
-                    }],
+                    "rules": [
+                        {
+                            "priority": 10,
+                            "direction": "INBND",
+                            "protocol": "TCP",
+                            "source_ip_block": "10.0.0.0/8",
+                            "port_range": "443",
+                            "action": "ALLOW",
+                        }
+                    ],
                 },
             },
         ]
@@ -527,9 +524,10 @@ class RunnerPipelineTests(unittest.TestCase):
         server_data = [{"server_id": "one"}]
 
         for retained_interval in ("Hour2", "Day1"):
-            with self.subTest(retained_interval=retained_interval), patch(
-                "app.runner.InsightMetricCollector"
-            ) as collector_class:
+            with (
+                self.subTest(retained_interval=retained_interval),
+                patch("app.runner.InsightMetricCollector") as collector_class,
+            ):
                 collector = collector_class.return_value
                 collector.collect.return_value = []
                 collector.last_errors = []
@@ -591,10 +589,7 @@ class RunnerPipelineTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            [
-                item["category"]
-                for item in CapturingInfrastructureMetricCollector.received
-            ],
+            [item["category"] for item in CapturingInfrastructureMetricCollector.received],
             ["LOAD_BALANCER", "TARGET_GROUP"],
         )
 
@@ -653,9 +648,7 @@ class RunnerPipelineTests(unittest.TestCase):
             "app.runner.InfrastructureMetricCollector",
             FailingInfrastructureMetricCollector,
         ):
-            metrics, errors, warnings = (
-                runner.collect_infrastructure_metrics([], 1, 2)
-            )
+            metrics, errors, warnings = runner.collect_infrastructure_metrics([], 1, 2)
 
         self.assertEqual(metrics, [])
         self.assertEqual(warnings, [])
@@ -807,17 +800,13 @@ class RunnerPipelineTests(unittest.TestCase):
             end=date(2026, 7, 31),
             period_type="month",
         )
-        current_configuration = self._network_configuration_records(
-            "current"
-        )
+        current_configuration = self._network_configuration_records("current")
         resource_result = ResourceCollectionResult(
             infrastructure=current_configuration,
             collection_metadata={
                 "infrastructure": {
                     "source": "LIVE_API_COLLECTION",
-                    "collected_categories": list(
-                        self.NETWORK_CONFIGURATION_CATEGORIES
-                    ),
+                    "collected_categories": list(self.NETWORK_CONFIGURATION_CATEGORIES),
                     "completed_at": "2026-08-10T09:30:00+09:00",
                 }
             },
@@ -864,26 +853,26 @@ class RunnerPipelineTests(unittest.TestCase):
             "2026-08-10T09:30:00+09:00",
         )
         self.assertFalse(result.generation_snapshot["reused"])
-        self.assertTrue(any(
-            warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
-            for warning in result.warnings
-        ))
+        self.assertTrue(
+            any(
+                warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
+                for warning in result.warnings
+            )
+        )
         self.assertEqual(len(repository.requests), 1)
 
     def test_period_and_generation_network_backups_stay_separate(self):
-        historical_configuration = self._network_configuration_records(
-            "historical"
+        historical_configuration = self._network_configuration_records("historical")
+        repository = NetworkSnapshotRepository(
+            {
+                "captured_at": "2026-07-15T10:00:00+09:00",
+                "selected_categories": list(self.NETWORK_CONFIGURATION_CATEGORIES),
+                "configuration": historical_configuration,
+                "_snapshot_reference": {
+                    "report_run_id": "historical-run-1",
+                },
+            }
         )
-        repository = NetworkSnapshotRepository({
-            "captured_at": "2026-07-15T10:00:00+09:00",
-            "selected_categories": list(
-                self.NETWORK_CONFIGURATION_CATEGORIES
-            ),
-            "configuration": historical_configuration,
-            "_snapshot_reference": {
-                "report_run_id": "historical-run-1",
-            },
-        })
         runner = self._runner_without_factory_init()
         runner.report_repository = repository
         runner._today_kst = lambda: date(2026, 8, 10)
@@ -892,17 +881,13 @@ class RunnerPipelineTests(unittest.TestCase):
             end=date(2026, 7, 31),
             period_type="month",
         )
-        current_configuration = self._network_configuration_records(
-            "current"
-        )
+        current_configuration = self._network_configuration_records("current")
         resource_result = ResourceCollectionResult(
             infrastructure=current_configuration,
             collection_metadata={
                 "infrastructure": {
                     "source": "LIVE_API_COLLECTION",
-                    "collected_categories": list(
-                        self.NETWORK_CONFIGURATION_CATEGORIES
-                    ),
+                    "collected_categories": list(self.NETWORK_CONFIGURATION_CATEGORIES),
                     "completed_at": "2026-08-10T09:30:00+09:00",
                 }
             },
@@ -945,9 +930,7 @@ class RunnerPipelineTests(unittest.TestCase):
             "historical-run-1",
         )
         self.assertEqual(
-            {item["resource_name"] for item in (
-                result.generation_snapshot["configuration"]
-            )},
+            {item["resource_name"] for item in (result.generation_snapshot["configuration"])},
             {
                 "current-routes",
                 "current-web-acg",
@@ -958,24 +941,30 @@ class RunnerPipelineTests(unittest.TestCase):
             result.metadata["captured_at"],
             result.generation_snapshot["captured_at"],
         )
-        self.assertFalse(any(
-            warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
-            for warning in result.warnings
-        ))
+        self.assertFalse(
+            any(
+                warning.get("code") == "NETWORK_PERIOD_SNAPSHOT_UNAVAILABLE"
+                for warning in result.warnings
+            )
+        )
 
     def test_live_collection_crossing_period_end_uses_stored_snapshot(self):
         snapshot = {
-            "servers": [{
-                "server_id": "stored-server",
-                "server_name": "stored-server",
-                "status": "RUN",
-            }],
-            "infrastructure": [{
-                "category": "SERVER",
-                "resource_id": "stored-server",
-                "resource_name": "stored-server",
-                "details": {"server_instance_no": "stored-server"},
-            }],
+            "servers": [
+                {
+                    "server_id": "stored-server",
+                    "server_name": "stored-server",
+                    "status": "RUN",
+                }
+            ],
+            "infrastructure": [
+                {
+                    "category": "SERVER",
+                    "resource_id": "stored-server",
+                    "resource_name": "stored-server",
+                    "details": {"server_instance_no": "stored-server"},
+                }
+            ],
             "report_options": {
                 "resource_categories": ["SERVER"],
             },
@@ -984,9 +973,7 @@ class RunnerPipelineTests(unittest.TestCase):
                     "completed_at": "2026-08-07T11:00:00+09:00",
                     "source": "LIVE_API_COLLECTION",
                     "collected_categories": ["SERVER"],
-                    "inventory_completeness": (
-                        "COMPLETE_FOR_SELECTED_SCOPE"
-                    ),
+                    "inventory_completeness": ("COMPLETE_FOR_SELECTED_SCOPE"),
                     "collection_issue_count": 0,
                 }
             },
@@ -1046,30 +1033,33 @@ class RunnerPipelineTests(unittest.TestCase):
             "STORED_REPORT_SNAPSHOT",
         )
         self.assertEqual(
-            report.collection_metadata["infrastructure"][
-                "inventory_completeness"
-            ],
+            report.collection_metadata["infrastructure"]["inventory_completeness"],
             "PARTIAL",
         )
-        self.assertTrue(any(
-            warning.get("code")
-            == "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE"
-            for warning in report.collection_warnings
-        ))
+        self.assertTrue(
+            any(
+                warning.get("code") == "SNAPSHOT_CATEGORY_COVERAGE_INCOMPLETE"
+                for warning in report.collection_warnings
+            )
+        )
 
     def test_stored_period_snapshot_also_persists_current_observation(self):
         snapshot = {
-            "servers": [{
-                "server_id": "stored-server",
-                "server_name": "stored-server",
-                "status": "RUN",
-            }],
-            "infrastructure": [{
-                "category": "SERVER",
-                "resource_id": "stored-server",
-                "resource_name": "stored-server",
-                "details": {"server_instance_no": "stored-server"},
-            }],
+            "servers": [
+                {
+                    "server_id": "stored-server",
+                    "server_name": "stored-server",
+                    "status": "RUN",
+                }
+            ],
+            "infrastructure": [
+                {
+                    "category": "SERVER",
+                    "resource_id": "stored-server",
+                    "resource_name": "stored-server",
+                    "details": {"server_instance_no": "stored-server"},
+                }
+            ],
             "report_options": {
                 "resource_categories": ["SERVER", "VPC"],
             },
@@ -1078,9 +1068,7 @@ class RunnerPipelineTests(unittest.TestCase):
                     "completed_at": "2026-08-08T11:00:00+09:00",
                     "source": "LIVE_API_COLLECTION",
                     "collected_categories": ["SERVER", "VPC"],
-                    "inventory_completeness": (
-                        "COMPLETE_FOR_SELECTED_SCOPE"
-                    ),
+                    "inventory_completeness": ("COMPLETE_FOR_SELECTED_SCOPE"),
                     "collection_issue_count": 0,
                 }
             },
@@ -1129,11 +1117,7 @@ class RunnerPipelineTests(unittest.TestCase):
             report.collection_metadata["infrastructure"]["source"],
             "STORED_REPORT_SNAPSHOT",
         )
-        observation = (
-            repository.saved_report.to_persistence_dict()[
-                "infrastructure_snapshot"
-            ]
-        )
+        observation = repository.saved_report.to_persistence_dict()["infrastructure_snapshot"]
         self.assertEqual(
             {item["resource_id"] for item in observation["infrastructure"]},
             {"current-server", "current-vpc"},
@@ -1190,9 +1174,9 @@ class RunnerPipelineTests(unittest.TestCase):
                 ) as metric_collector,
             ):
                 report = runner.run(target_day="2026-08-08")
-                html_text = (
-                    Path(temp_dir) / "ncp_report_20260808_20260808.html"
-                ).read_text(encoding="utf-8")
+                html_text = (Path(temp_dir) / "ncp_report_20260808_20260808.html").read_text(
+                    encoding="utf-8"
+                )
 
         self.assertEqual(
             [server["server_id"] for server in report.servers],
@@ -1215,28 +1199,31 @@ class RunnerPipelineTests(unittest.TestCase):
         )
         self.assertEqual(metadata["inventory_completeness"], "PARTIAL")
         self.assertEqual(
-            metadata["historical_filter"]["infrastructure"][
-                "excluded_after_period_count"
-            ],
+            metadata["historical_filter"]["infrastructure"]["excluded_after_period_count"],
             2,
         )
         self.assertEqual(
             metadata["historical_filter"]["unknown_create_time_count"],
             1,
         )
-        self.assertTrue(any(
-            warning.get("code")
-            == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
-            for warning in report.collection_warnings
-        ))
-        self.assertFalse(any(
-            warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
-            for warning in report.collection_warnings
-        ))
-        self.assertTrue(any(
-            warning.get("code") == "RESOURCE_CREATE_TIME_UNAVAILABLE"
-            for warning in report.collection_warnings
-        ))
+        self.assertTrue(
+            any(
+                warning.get("code") == "CURRENT_STATE_FILTERED_BY_CREATE_TIME"
+                for warning in report.collection_warnings
+            )
+        )
+        self.assertFalse(
+            any(
+                warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
+                for warning in report.collection_warnings
+            )
+        )
+        self.assertTrue(
+            any(
+                warning.get("code") == "RESOURCE_CREATE_TIME_UNAVAILABLE"
+                for warning in report.collection_warnings
+            )
+        )
         self.assertIn("old-server", html_text)
         self.assertIn("old-storage", html_text)
         self.assertNotIn("인프라 시간 기준 안내", html_text)
@@ -1246,9 +1233,7 @@ class RunnerPipelineTests(unittest.TestCase):
         self.assertNotIn("new-storage", html_text)
         public_payload = report.to_dict()
         public_old_server = next(
-            server
-            for server in public_payload["servers"]
-            if server["server_name"] == "old-server"
+            server for server in public_payload["servers"] if server["server_name"] == "old-server"
         )
         self.assertEqual(
             public_old_server["historical_presence_confidence"],
@@ -1260,18 +1245,13 @@ class RunnerPipelineTests(unittest.TestCase):
             if resource["resource_name"] == "old-server"
         )
         self.assertEqual(
-            public_old_resource["details"][
-                "historical_presence_confidence"
-            ],
+            public_old_resource["details"]["historical_presence_confidence"],
             "INFERRED_FROM_CREATE_TIME",
         )
         persistence_snapshot = report.to_persistence_dict()
         observation = persistence_snapshot["infrastructure_snapshot"]
         self.assertEqual(
-            {
-                resource["resource_id"]
-                for resource in observation["infrastructure"]
-            },
+            {resource["resource_id"] for resource in observation["infrastructure"]},
             {
                 "old-server",
                 "boundary-server",
@@ -1310,9 +1290,7 @@ class RunnerPipelineTests(unittest.TestCase):
 
             with (
                 patch("app.runner.ServerCollector") as server_collector,
-                patch(
-                    "app.runner.InfrastructureCollector"
-                ) as infrastructure_collector,
+                patch("app.runner.InfrastructureCollector") as infrastructure_collector,
                 patch.object(
                     runner,
                     "_now_kst_iso",
@@ -1329,10 +1307,12 @@ class RunnerPipelineTests(unittest.TestCase):
             report.collection_metadata["infrastructure"]["source"],
             "UNAVAILABLE",
         )
-        self.assertTrue(any(
-            warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
-            for warning in report.collection_warnings
-        ))
+        self.assertTrue(
+            any(
+                warning.get("code") == "PERIOD_SNAPSHOT_UNAVAILABLE"
+                for warning in report.collection_warnings
+            )
+        )
 
     def test_datetime_range_uses_exclusive_end_and_time_file_suffix(self):
         runner = self._runner_without_factory_init()
@@ -1519,9 +1499,7 @@ class RunnerPipelineTests(unittest.TestCase):
                 html_path.read_text(encoding="utf-8"),
             )
             self.assertEqual(
-                json.loads(json_path.read_text(encoding="utf-8"))[
-                    "schema_version"
-                ],
+                json.loads(json_path.read_text(encoding="utf-8"))["schema_version"],
                 "1.5",
             )
 

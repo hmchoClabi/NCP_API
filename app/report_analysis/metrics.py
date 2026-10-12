@@ -131,12 +131,14 @@ def analyze_metrics(
                 threshold=rule["critical"],
                 expected_interval_seconds=interval,
             )
-            item_summary.update({
-                "warning_threshold": rule["warning"],
-                "critical_threshold": rule["critical"],
-                "warning_duration_seconds": warning_duration,
-                "critical_duration_seconds": critical_duration,
-            })
+            item_summary.update(
+                {
+                    "warning_threshold": rule["warning"],
+                    "critical_threshold": rule["critical"],
+                    "warning_duration_seconds": warning_duration,
+                    "critical_duration_seconds": critical_duration,
+                }
+            )
             finding = _threshold_finding(
                 item,
                 item_summary,
@@ -144,19 +146,19 @@ def analyze_metrics(
                 required_duration=rule["duration_seconds"],
             )
             if finding:
-                item_summary.update({
-                    "alert_severity": finding.severity,
-                    "alert_threshold": (
-                        rule["critical"]
-                        if finding.severity == "CRITICAL"
-                        else rule["warning"]
-                    ),
-                    "alert_duration_seconds": (
-                        critical_duration
-                        if finding.severity == "CRITICAL"
-                        else warning_duration
-                    ),
-                })
+                item_summary.update(
+                    {
+                        "alert_severity": finding.severity,
+                        "alert_threshold": (
+                            rule["critical"] if finding.severity == "CRITICAL" else rule["warning"]
+                        ),
+                        "alert_duration_seconds": (
+                            critical_duration
+                            if finding.severity == "CRITICAL"
+                            else warning_duration
+                        ),
+                    }
+                )
                 findings.append(finding)
         summaries.append(item_summary)
 
@@ -208,9 +210,7 @@ def _server_series(report: Any) -> list[dict[str, Any]]:
                     sorted(
                         (str(name), str(value))
                         for name, value in (
-                            dimensions.items()
-                            if isinstance(dimensions, Mapping)
-                            else []
+                            dimensions.items() if isinstance(dimensions, Mapping) else []
                         )
                     )
                 )
@@ -219,24 +219,25 @@ def _server_series(report: Any) -> list[dict[str, Any]]:
                     str(metric_name),
                     dimension_key,
                 )
-                series = grouped.setdefault(key, {
-                    "category": "SERVER",
-                    "resource_id": str(server.get("server_id") or ""),
-                    "resource_name": resource_name,
-                    "metric": str(metric_name),
-                    "metric_label": _metric_label(
-                        metric_kind,
-                        str(metric_name),
-                    ),
-                    "kind": metric_kind,
-                    "alert_eligible": (
-                        selected_stat_name in {"avg", "min"}
-                    ),
-                    "unit": "%" if normalized_name in _SERVER_METRIC_KIND else None,
-                    "aggregation": selected_stat_name.upper() or None,
-                    "interval_seconds": metric_interval,
-                    "points_by_time": {},
-                })
+                series = grouped.setdefault(
+                    key,
+                    {
+                        "category": "SERVER",
+                        "resource_id": str(server.get("server_id") or ""),
+                        "resource_name": resource_name,
+                        "metric": str(metric_name),
+                        "metric_label": _metric_label(
+                            metric_kind,
+                            str(metric_name),
+                        ),
+                        "kind": metric_kind,
+                        "alert_eligible": (selected_stat_name in {"avg", "min"}),
+                        "unit": "%" if normalized_name in _SERVER_METRIC_KIND else None,
+                        "aggregation": selected_stat_name.upper() or None,
+                        "interval_seconds": metric_interval,
+                        "points_by_time": {},
+                    },
+                )
                 series["points_by_time"].update(dict(points))
     result = []
     for series in grouped.values():
@@ -258,19 +259,21 @@ def _infrastructure_series(report: Any) -> list[dict[str, Any]]:
             points = _normalize_points(series.get("points"))
             if not points:
                 continue
-            result.append({
-                "category": str(group.get("category") or "INFRASTRUCTURE"),
-                "resource_id": str(series.get("resource_id") or ""),
-                "resource_name": str(series.get("resource_name") or "-"),
-                "metric": metric,
-                "metric_label": str(group.get("metric_label") or metric),
-                "kind": metric_kind,
-                "alert_eligible": aggregation in {"AVG", "MIN"},
-                "unit": unit or None,
-                "aggregation": aggregation or None,
-                "interval_seconds": expected_interval,
-                "points": points,
-            })
+            result.append(
+                {
+                    "category": str(group.get("category") or "INFRASTRUCTURE"),
+                    "resource_id": str(series.get("resource_id") or ""),
+                    "resource_name": str(series.get("resource_name") or "-"),
+                    "metric": metric,
+                    "metric_label": str(group.get("metric_label") or metric),
+                    "kind": metric_kind,
+                    "alert_eligible": aggregation in {"AVG", "MIN"},
+                    "unit": unit or None,
+                    "aggregation": aggregation or None,
+                    "interval_seconds": expected_interval,
+                    "points": points,
+                }
+            )
     return result
 
 
@@ -373,10 +376,13 @@ def _threshold_finding(
         },
     ]
     if series.get("aggregation"):
-        evidence.insert(0, {
-            "label": "집계 방식",
-            "value": series.get("aggregation"),
-        })
+        evidence.insert(
+            0,
+            {
+                "label": "집계 방식",
+                "value": series.get("aggregation"),
+            },
+        )
     return Finding(
         rule_id=f"METRIC_{kind}_SUSTAINED",
         severity=severity,
@@ -413,17 +419,11 @@ def _thresholds(policy: Mapping[str, Any] | None) -> dict[str, dict[str, float]]
         warning = number(raw.get(warning_name))
         critical = number(raw.get(critical_name))
         if warning is not None and warning >= 0:
-            result[kind]["warning"] = _bounded_utilization_percent(
-                warning
-            )
+            result[kind]["warning"] = _bounded_utilization_percent(warning)
         if critical is not None and critical >= 0:
-            result[kind]["critical"] = _bounded_utilization_percent(
-                critical
-            )
+            result[kind]["critical"] = _bounded_utilization_percent(critical)
         if sustained_minutes is not None and sustained_minutes >= 0:
-            result[kind]["duration_seconds"] = _bounded_duration_seconds(
-                sustained_minutes * 60
-            )
+            result[kind]["duration_seconds"] = _bounded_duration_seconds(sustained_minutes * 60)
     for raw_kind, raw_values in raw.items():
         kind = str(raw_kind).upper()
         if kind not in result or not isinstance(raw_values, Mapping):
@@ -432,13 +432,9 @@ def _thresholds(policy: Mapping[str, Any] | None) -> dict[str, dict[str, float]]
             parsed = number(raw_values.get(name))
             if parsed is not None and parsed >= 0:
                 if name in {"warning", "critical"}:
-                    result[kind][name] = _bounded_utilization_percent(
-                        parsed
-                    )
+                    result[kind][name] = _bounded_utilization_percent(parsed)
                 else:
-                    result[kind][name] = _bounded_duration_seconds(
-                        parsed
-                    )
+                    result[kind][name] = _bounded_duration_seconds(parsed)
     for values in result.values():
         if values["critical"] < values["warning"]:
             values["critical"] = values["warning"]

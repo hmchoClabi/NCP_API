@@ -35,8 +35,16 @@ REPORT_RETENTION_MIN_DAYS = 1
 REPORT_RETENTION_MAX_DAYS = 3_650
 REPORT_RETENTION_SETTINGS_KEY = "retention_policies"
 _PERSONAL_DATA_KEYS = {
-    "account_name", "actor", "actor_id", "email", "email_address",
-    "member_no", "member_number", "user", "user_id", "user_name",
+    "account_name",
+    "actor",
+    "actor_id",
+    "email",
+    "email_address",
+    "member_no",
+    "member_number",
+    "user",
+    "user_id",
+    "user_name",
 }
 _ACTIVE_REPORT_STATUSES = {"QUEUED", "RUNNING", "RETRYING"}
 _MSP_ACCOUNT_MANAGEMENT_LOCK_ID = 1_311_787_345
@@ -70,8 +78,7 @@ class ReportCleanupProtectedError(ValueError):
 
 def default_report_retention_policies() -> dict[str, dict[str, Any]]:
     return {
-        report_type: {"mode": "FOREVER", "days": None}
-        for report_type in REPORT_RETENTION_TYPES
+        report_type: {"mode": "FOREVER", "days": None} for report_type in REPORT_RETENTION_TYPES
     }
 
 
@@ -80,9 +87,7 @@ def _retention_days(value: Any) -> Optional[int]:
         return None
     if isinstance(value, int):
         days = value
-    elif isinstance(value, str) and re.fullmatch(
-        r"[1-9][0-9]{0,3}", value.strip()
-    ):
+    elif isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,3}", value.strip()):
         days = int(value.strip())
     else:
         return None
@@ -170,9 +175,9 @@ def _artifact_storage_usage() -> dict[str, Any]:
         "used_percent": None,
     }
     try:
-        output_root = Path(
-            os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
-        ).resolve(strict=True)
+        output_root = Path(os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")).resolve(
+            strict=True
+        )
         if not output_root.is_dir():
             return unavailable
         total, used, free = disk_usage(output_root)
@@ -232,20 +237,22 @@ def _build_dashboard_review(
             existing["report_count"] = len(existing["_report_ids"])
             return
         resource_data = resource if isinstance(resource, Mapping) else {}
-        evidence_rows = [
-            dict(entry)
-            for entry in evidence
-            if isinstance(entry, Mapping) and entry.get("value") is not None
-        ] if isinstance(evidence, list) else []
+        evidence_rows = (
+            [
+                dict(entry)
+                for entry in evidence
+                if isinstance(entry, Mapping) and entry.get("value") is not None
+            ]
+            if isinstance(evidence, list)
+            else []
+        )
         grouped[key] = {
             "tenant_id": report.get("tenant_id"),
             "customer_code": report.get("customer_code"),
             "customer_name": report.get("customer_name"),
             "environment": report.get("environment"),
             "account_name": (
-                report.get("account_name")
-                or report.get("account_code")
-                or "계정 미확인"
+                report.get("account_name") or report.get("account_code") or "계정 미확인"
             ),
             "report_id": report.get("id"),
             "report_type": report.get("report_type"),
@@ -260,9 +267,7 @@ def _build_dashboard_review(
             "evidence": evidence_rows,
             "impact": impact,
             "recommendation": recommendation,
-            "resource_name": (
-                resource_data.get("name") or resource_data.get("id") or ""
-            ),
+            "resource_name": (resource_data.get("name") or resource_data.get("id") or ""),
             "report_count": 1,
             "_report_ids": {report_id},
         }
@@ -272,11 +277,7 @@ def _build_dashboard_review(
         report_ids.add(report_id)
         customer_ids.add(str(report.get("tenant_id") or ""))
         analysis = report.get("analysis")
-        findings = (
-            analysis.get("findings")
-            if isinstance(analysis, Mapping)
-            else None
-        )
+        findings = analysis.get("findings") if isinstance(analysis, Mapping) else None
         if not isinstance(findings, list):
             add_item(
                 report,
@@ -292,13 +293,9 @@ def _build_dashboard_review(
                         "unit": "건",
                     },
                 ],
-                impact=(
-                    "이 보고서는 통합 대시보드에서 운영 상태를 "
-                    "자동 판정할 수 없습니다."
-                ),
+                impact=("이 보고서는 통합 대시보드에서 운영 상태를 자동 판정할 수 없습니다."),
                 recommendation=(
-                    "고객 보고서 설정의 핵심 요약·운영 분석을 활성화한 뒤 "
-                    "보고서를 다시 생성하세요."
+                    "고객 보고서 설정의 핵심 요약·운영 분석을 활성화한 뒤 보고서를 다시 생성하세요."
                 ),
             )
             continue
@@ -311,18 +308,13 @@ def _build_dashboard_review(
             severity = str(finding.get("severity") or "").upper()
             if (
                 severity not in {"CRITICAL", "WARNING"}
-                or str(finding.get("status") or "OPEN").upper()
-                == "EXCEPTION"
+                or str(finding.get("status") or "OPEN").upper() == "EXCEPTION"
             ):
                 continue
             category = str(finding.get("category") or "OPERATION")
-            has_quality_finding = (
-                has_quality_finding or category == "DATA_QUALITY"
-            )
+            has_quality_finding = has_quality_finding or category == "DATA_QUALITY"
             resource = (
-                finding.get("resource")
-                if isinstance(finding.get("resource"), Mapping)
-                else {}
+                finding.get("resource") if isinstance(finding.get("resource"), Mapping) else {}
             )
             fallback = json.dumps(
                 [
@@ -343,8 +335,7 @@ def _build_dashboard_review(
                 title=str(finding.get("title") or "운영 점검 항목"),
                 evidence=finding.get("evidence"),
                 impact=str(
-                    finding.get("impact")
-                    or "보고기간에 규칙 기반 점검 항목이 탐지되었습니다."
+                    finding.get("impact") or "보고기간에 규칙 기반 점검 항목이 탐지되었습니다."
                 ),
                 recommendation=str(
                     finding.get("recommendation")
@@ -353,13 +344,9 @@ def _build_dashboard_review(
                 resource=resource,
             )
 
-        if (
-            not has_quality_finding
-            and (
-                str(report.get("status") or "").upper()
-                == "PARTIAL_SUCCESS"
-                or int(report.get("error_count") or 0) > 0
-            )
+        if not has_quality_finding and (
+            str(report.get("status") or "").upper() == "PARTIAL_SUCCESS"
+            or int(report.get("error_count") or 0) > 0
         ):
             add_item(
                 report,
@@ -375,21 +362,14 @@ def _build_dashboard_review(
                         "unit": "건",
                     },
                 ],
-                impact=(
-                    "일부 데이터가 빠져 정상 여부와 추세를 "
-                    "확정할 수 없습니다."
-                ),
+                impact=("일부 데이터가 빠져 정상 여부와 추세를 확정할 수 없습니다."),
                 recommendation=(
                     "보고서의 데이터 수집 요약에서 실패 데이터셋과 "
                     "API 권한을 확인한 뒤 다시 생성하세요."
                 ),
             )
 
-        changes = (
-            analysis.get("changes")
-            if isinstance(analysis.get("changes"), Mapping)
-            else {}
-        )
+        changes = analysis.get("changes") if isinstance(analysis.get("changes"), Mapping) else {}
         created_count = changes.get("created_success_count")
         deleted_count = changes.get("deleted_success_count")
         created_count = (
@@ -425,38 +405,31 @@ def _build_dashboard_review(
                     "과금에 반영되지 않았을 수 있습니다."
                 ),
                 recommendation=(
-                    "Activity Tracer의 수행 계정과 상세 이력을 현재 "
-                    "자원 인벤토리와 대조하세요."
+                    "Activity Tracer의 수행 계정과 상세 이력을 현재 자원 인벤토리와 대조하세요."
                 ),
             )
 
     items = list(grouped.values())
     for item in items:
         item.pop("_report_ids", None)
-    items.sort(key=lambda item: (
-        _DASHBOARD_SEVERITY_ORDER.get(str(item.get("severity")), 99),
-        str(item.get("customer_name") or "").casefold(),
-        str(item.get("account_name") or "").casefold(),
-        str(item.get("title") or "").casefold(),
-    ))
+    items.sort(
+        key=lambda item: (
+            _DASHBOARD_SEVERITY_ORDER.get(str(item.get("severity")), 99),
+            str(item.get("customer_name") or "").casefold(),
+            str(item.get("account_name") or "").casefold(),
+            str(item.get("title") or "").casefold(),
+        )
+    )
     return {
         "window_started_at": window_started_at,
         "report_count": len(report_ids),
         "customer_count": len(customer_ids),
         "analyzed_report_count": len(analyzed_report_ids),
-        "affected_customer_count": len({
-            str(item.get("tenant_id") or "") for item in items
-        }),
+        "affected_customer_count": len({str(item.get("tenant_id") or "") for item in items}),
         "attention_count": len(items),
-        "critical_count": sum(
-            item["severity"] == "CRITICAL" for item in items
-        ),
-        "warning_count": sum(
-            item["severity"] == "WARNING" for item in items
-        ),
-        "review_count": sum(
-            item["severity"] == "REVIEW" for item in items
-        ),
+        "critical_count": sum(item["severity"] == "CRITICAL" for item in items),
+        "warning_count": sum(item["severity"] == "WARNING" for item in items),
+        "review_count": sum(item["severity"] == "REVIEW" for item in items),
         "items": items,
     }
 
@@ -468,9 +441,7 @@ def _local_report_artifact_paths(
     reject_outside: bool = False,
 ) -> tuple[set[Path], int]:
     try:
-        output_root = Path(
-            os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")
-        ).resolve()
+        output_root = Path(os.environ.get("REPORT_OUTPUT_DIR", "/app/output/report")).resolve()
     except (OSError, ValueError):
         return set(), max(1, len(set(storage_uris)))
 
@@ -543,9 +514,8 @@ def _remove_queued_artifact(
         return True, "MISSING"
     except (OSError, ValueError):
         return False, "READ_FAILED"
-    if (
-        actual_byte_size != expected_byte_size
-        or not secrets.compare_digest(actual_sha256, expected_sha256)
+    if actual_byte_size != expected_byte_size or not secrets.compare_digest(
+        actual_sha256, expected_sha256
     ):
         return False, "CONTENT_CHANGED"
     try:
@@ -620,15 +590,8 @@ def _validate_msp_status_change(
     if target_user_id == actor_id:
         raise ValueError("현재 로그인한 자신의 MSP 계정 상태는 변경할 수 없습니다.")
     if current_status not in {"ACTIVE", "DISABLED"}:
-        raise ValueError(
-            "잠김 또는 초대 상태의 계정은 이 화면에서 활성화·비활성화할 수 없습니다."
-        )
-    if (
-        not enabled
-        and current_status == "ACTIVE"
-        and is_admin
-        and (active_admin_count or 0) <= 1
-    ):
+        raise ValueError("잠김 또는 초대 상태의 계정은 이 화면에서 활성화·비활성화할 수 없습니다.")
+    if not enabled and current_status == "ACTIVE" and is_admin and (active_admin_count or 0) <= 1:
         raise ValueError("마지막 활성 MSP 관리자는 비활성화할 수 없습니다.")
 
 
@@ -656,11 +619,8 @@ def _validate_user_deletion(
     target_environments = (
         None
         if platform_roles and None in platform_environment_scopes
-        else {
-            scope
-            for scope in platform_environment_scopes
-            if scope is not None
-        } | membership_environments
+        else {scope for scope in platform_environment_scopes if scope is not None}
+        | membership_environments
     )
     if allowed_environments is not None and (
         target_environments is None
@@ -678,9 +638,7 @@ def _validate_user_deletion(
         raise ValueError("마지막 활성 MSP 관리자는 삭제할 수 없습니다.")
     if blocked_customer_names:
         customers = ", ".join(blocked_customer_names)
-        raise ValueError(
-            f"다른 활성 고객 관리자를 먼저 지정하세요: {customers}"
-        )
+        raise ValueError(f"다른 활성 고객 관리자를 먼저 지정하세요: {customers}")
     return "MSP" if platform_roles else "CUSTOMER"
 
 
@@ -731,9 +689,7 @@ class PortalRepository:
             )
             role_bindings = cursor.fetchall()
             user["platform_role_bindings"] = role_bindings
-            user["platform_roles"] = list(dict.fromkeys(
-                row["role"] for row in role_bindings
-            ))
+            user["platform_roles"] = list(dict.fromkeys(row["role"] for row in role_bindings))
             cursor.execute(
                 """
                 SELECT membership.tenant_id, membership.role,
@@ -848,9 +804,7 @@ class PortalRepository:
                 (user_id,),
             )
             if cursor.fetchone()["has_customer_membership"]:
-                raise ValueError(
-                    "고객 사용자 이메일은 MSP 계정으로 등록할 수 없습니다."
-                )
+                raise ValueError("고객 사용자 이메일은 MSP 계정으로 등록할 수 없습니다.")
             cursor.execute(
                 """
                 INSERT INTO control.platform_roles (user_id, role)
@@ -904,9 +858,7 @@ class PortalRepository:
                 (user_id,),
             )
             if cursor.fetchone()["has_platform_role"]:
-                raise ValueError(
-                    "MSP 계정 이메일은 고객 사용자로 등록할 수 없습니다."
-                )
+                raise ValueError("MSP 계정 이메일은 고객 사용자로 등록할 수 없습니다.")
             cursor.execute(
                 """
                 INSERT INTO control.memberships (tenant_id, user_id, role, status)
@@ -922,9 +874,7 @@ class PortalRepository:
             )
         return str(user_id)
 
-    def create_portal_user(
-        self, email: str, password: str, display_name: str
-    ) -> str:
+    def create_portal_user(self, email: str, password: str, display_name: str) -> str:
         email, display_name = _validate_user_fields(email, display_name)
         password_hash = hash_password(password)
         with self._connect() as connection, connection.cursor() as cursor:
@@ -1016,9 +966,7 @@ class PortalRepository:
             )
             return str(user_id)
 
-    def msp_users(
-        self, allowed_environments: Optional[set[str]] = None
-    ) -> list[dict[str, Any]]:
+    def msp_users(self, allowed_environments: Optional[set[str]] = None) -> list[dict[str, Any]]:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -1046,10 +994,7 @@ class PortalRepository:
             users = cursor.fetchall()
         if allowed_environments is None:
             return users
-        return [
-            user for user in users
-            if user["environment_scope"] in allowed_environments
-        ]
+        return [user for user in users if user["environment_scope"] in allowed_environments]
 
     def set_msp_user_enabled(
         self,
@@ -1107,9 +1052,7 @@ class PortalRepository:
                       AND role.role = 'MSP_ADMIN'
                     """
                 )
-                active_admin_count = int(
-                    cursor.fetchone()["active_admin_count"]
-                )
+                active_admin_count = int(cursor.fetchone()["active_admin_count"])
             _validate_msp_status_change(
                 target_user_id=user_id,
                 actor_id=actor_id,
@@ -1191,23 +1134,15 @@ class PortalRepository:
                 raise PermissionError("사용자 관리 권한이 없습니다.")
             current_actor_environments = (
                 None
-                if any(
-                    item["environment_scope"] is None
-                    for item in actor_bindings
-                )
-                else {
-                    str(item["environment_scope"])
-                    for item in actor_bindings
-                }
+                if any(item["environment_scope"] is None for item in actor_bindings)
+                else {str(item["environment_scope"]) for item in actor_bindings}
             )
             if allowed_environments is None:
                 effective_allowed_environments = current_actor_environments
             elif current_actor_environments is None:
                 effective_allowed_environments = allowed_environments
             else:
-                effective_allowed_environments = (
-                    allowed_environments & current_actor_environments
-                )
+                effective_allowed_environments = allowed_environments & current_actor_environments
             cursor.execute(
                 """
                 SELECT id, email, password_hash, display_name, status
@@ -1254,15 +1189,9 @@ class PortalRepository:
                 (user_id,),
             )
             memberships = cursor.fetchall()
-            membership_environments = {
-                str(item["environment"]) for item in memberships
-            }
+            membership_environments = {str(item["environment"]) for item in memberships}
             platform_environment_scopes = {
-                (
-                    str(item["environment_scope"])
-                    if item["environment_scope"] is not None
-                    else None
-                )
+                (str(item["environment_scope"]) if item["environment_scope"] is not None else None)
                 for item in role_bindings
             }
 
@@ -1277,9 +1206,7 @@ class PortalRepository:
                       AND role.role = 'MSP_ADMIN'
                     """
                 )
-                active_admin_count = int(
-                    cursor.fetchone()["active_admin_count"]
-                )
+                active_admin_count = int(cursor.fetchone()["active_admin_count"])
             blocked_customer_names = tuple(
                 str(item["customer_name"])
                 for item in memberships
@@ -1358,9 +1285,7 @@ class PortalRepository:
             )
             return str(target["display_name"]), account_type
 
-    def assign_customer_membership(
-        self, user_id: str, tenant_id: str, role: str
-    ) -> None:
+    def assign_customer_membership(self, user_id: str, tenant_id: str, role: str) -> None:
         if role not in {"CUSTOMER_VIEWER", "CUSTOMER_ADMIN"}:
             raise ValueError("지원하지 않는 고객 권한입니다.")
         try:
@@ -1421,9 +1346,7 @@ class PortalRepository:
                     (tenant_id, user_id),
                 )
                 if not cursor.fetchone()["has_other_active_admin"]:
-                    raise ValueError(
-                        "다른 활성 고객 관리자를 먼저 지정하세요."
-                    )
+                    raise ValueError("다른 활성 고객 관리자를 먼저 지정하세요.")
             cursor.execute(
                 "SELECT id FROM control.tenants WHERE id = %s AND status <> 'OFFBOARDED'",
                 (tenant_id,),
@@ -1491,29 +1414,33 @@ class PortalRepository:
             users_by_id: dict[str, dict[str, Any]] = {}
             for row in cursor.fetchall():
                 user_id = str(row["id"])
-                user = users_by_id.setdefault(user_id, {
-                    "id": row["id"],
-                    "email": row["email"],
-                    "display_name": row["display_name"],
-                    "user_status": row["user_status"],
-                    "last_login_at": row["last_login_at"],
-                    "created_at": row["created_at"],
-                    "can_delete": allowed_environments is None or (
-                        bool(row["environment_scopes"])
-                        and set(row["environment_scopes"]).issubset(
-                            allowed_environments
-                        )
-                    ),
-                    "memberships": [],
-                })
+                user = users_by_id.setdefault(
+                    user_id,
+                    {
+                        "id": row["id"],
+                        "email": row["email"],
+                        "display_name": row["display_name"],
+                        "user_status": row["user_status"],
+                        "last_login_at": row["last_login_at"],
+                        "created_at": row["created_at"],
+                        "can_delete": allowed_environments is None
+                        or (
+                            bool(row["environment_scopes"])
+                            and set(row["environment_scopes"]).issubset(allowed_environments)
+                        ),
+                        "memberships": [],
+                    },
+                )
                 if row["tenant_id"]:
-                    user["memberships"].append({
-                        "tenant_id": row["tenant_id"],
-                        "customer_name": row["customer_name"],
-                        "environment": row["environment"],
-                        "role": row["role"],
-                        "status": row["membership_status"],
-                    })
+                    user["memberships"].append(
+                        {
+                            "tenant_id": row["tenant_id"],
+                            "customer_name": row["customer_name"],
+                            "environment": row["environment"],
+                            "role": row["role"],
+                            "status": row["membership_status"],
+                        }
+                    )
             return list(users_by_id.values())
 
     def customer_user_accessible_in_environments(
@@ -1601,15 +1528,11 @@ class PortalRepository:
             )
             return str(row["id"])
 
-    def dashboard(
-        self, allowed_environments: Optional[set[str]] = None
-    ) -> dict[str, Any]:
+    def dashboard(self, allowed_environments: Optional[set[str]] = None) -> dict[str, Any]:
         artifact_storage = _artifact_storage_usage()
-        window_started_at = (
-            datetime.now(_DASHBOARD_KST).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) - timedelta(days=1)
-        )
+        window_started_at = datetime.now(_DASHBOARD_KST).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) - timedelta(days=1)
         if allowed_environments is not None and not allowed_environments:
             return {
                 "summary": {
@@ -1618,10 +1541,10 @@ class PortalRepository:
                     "gov_count": 0,
                     "issue_count": 0,
                 },
-                "recent_review": _build_dashboard_review(
-                    [], window_started_at
+                "recent_review": _build_dashboard_review([], window_started_at),
+                "insight_alarms": summarize_insight_alarms(
+                    [], window_started_at + timedelta(days=1)
                 ),
-                "insight_alarms": summarize_insight_alarms([], window_started_at + timedelta(days=1)),
                 "artifact_storage": artifact_storage,
             }
         tenant_filter = ""
@@ -1694,14 +1617,14 @@ class PortalRepository:
                 report_parameters,
             )
             reports = cursor.fetchall()
-        recent_review = _build_dashboard_review(
-            reports, window_started_at
-        )
+        recent_review = _build_dashboard_review(reports, window_started_at)
         summary["issue_count"] = recent_review["affected_customer_count"]
         return {
             "summary": summary,
             "recent_review": recent_review,
-            "insight_alarms": summarize_insight_alarms(reports, window_started_at + timedelta(days=1)),
+            "insight_alarms": summarize_insight_alarms(
+                reports, window_started_at + timedelta(days=1)
+            ),
             "artifact_storage": artifact_storage,
         }
 
@@ -1744,9 +1667,7 @@ class PortalRepository:
             )
             return cursor.fetchall()
 
-    def tenant_ids_for_environments(
-        self, allowed_environments: set[str]
-    ) -> list[str]:
+    def tenant_ids_for_environments(self, allowed_environments: set[str]) -> list[str]:
         """MSP 환경 범위에 포함되는 tenant ID만 반환한다."""
 
         if not allowed_environments:
@@ -1778,18 +1699,12 @@ class PortalRepository:
                 (tenant_id,),
             )
             report_settings = cursor.fetchone()
-            stored_settings = (
-                report_settings["settings"] if report_settings else None
-            )
-            tenant["report_options"] = normalize_report_options(
-                stored_settings
-            )
-            tenant["retention_policies"] = (
-                normalize_report_retention_policies(
-                    stored_settings.get(REPORT_RETENTION_SETTINGS_KEY)
-                    if isinstance(stored_settings, Mapping)
-                    else None
-                )
+            stored_settings = report_settings["settings"] if report_settings else None
+            tenant["report_options"] = normalize_report_options(stored_settings)
+            tenant["retention_policies"] = normalize_report_retention_policies(
+                stored_settings.get(REPORT_RETENTION_SETTINGS_KEY)
+                if isinstance(stored_settings, Mapping)
+                else None
             )
             cursor.execute(
                 """
@@ -1829,13 +1744,11 @@ class PortalRepository:
             schedules = cursor.fetchall()
             schedules_by_account: dict[str, list[dict[str, Any]]] = {}
             for schedule in schedules:
-                schedules_by_account.setdefault(
-                    str(schedule["cloud_account_id"]), []
-                ).append(schedule)
-            for account in tenant["accounts"]:
-                account["schedules"] = schedules_by_account.get(
-                    str(account["id"]), []
+                schedules_by_account.setdefault(str(schedule["cloud_account_id"]), []).append(
+                    schedule
                 )
+            for account in tenant["accounts"]:
+                account["schedules"] = schedules_by_account.get(str(account["id"]), [])
             tenant["reports"] = self._report_rows(cursor, tenant_id)
             return tenant
 
@@ -1889,13 +1802,9 @@ class PortalRepository:
                 if settings_row and isinstance(settings_row["settings"], Mapping)
                 else {}
             )
-            legacy_policies = _preserved_legacy_analysis_policies(
-                stored_settings
-            )
+            legacy_policies = _preserved_legacy_analysis_policies(stored_settings)
             if legacy_policies:
-                normalized["operational_analysis"]["policies"] = (
-                    legacy_policies
-                )
+                normalized["operational_analysis"]["policies"] = legacy_policies
             settings = dict(normalized)
             if normalized_retention is not None:
                 settings[REPORT_RETENTION_SETTINGS_KEY] = normalized_retention
@@ -1920,9 +1829,7 @@ class PortalRepository:
             )
             changed_fields: dict[str, Any] = {"report_options": normalized}
             if normalized_retention is not None:
-                changed_fields[REPORT_RETENTION_SETTINGS_KEY] = (
-                    normalized_retention
-                )
+                changed_fields[REPORT_RETENTION_SETTINGS_KEY] = normalized_retention
             cursor.execute(
                 """
                 INSERT INTO audit.data_change_logs (
@@ -1966,9 +1873,7 @@ class PortalRepository:
     ) -> int:
         normalized = validate_report_retention_policies(policies)
         try:
-            normalized_tenant_ids = sorted({
-                str(UUID(str(tenant_id))) for tenant_id in tenant_ids
-            })
+            normalized_tenant_ids = sorted({str(UUID(str(tenant_id))) for tenant_id in tenant_ids})
         except (TypeError, ValueError) as exc:
             raise ValueError("고객 선택값이 올바르지 않습니다.") from exc
         if not normalized_tenant_ids:
@@ -1998,9 +1903,7 @@ class PortalRepository:
             )
             matched_ids = [str(row["id"]) for row in cursor.fetchall()]
             if matched_ids != normalized_tenant_ids:
-                raise ValueError(
-                    "선택 항목에 접근할 수 없거나 비활성 고객이 있습니다."
-                )
+                raise ValueError("선택 항목에 접근할 수 없거나 비활성 고객이 있습니다.")
             cursor.execute(
                 """
                 INSERT INTO control.tenant_report_settings (tenant_id)
@@ -2037,9 +1940,12 @@ class PortalRepository:
                 """,
                 (
                     actor_id,
-                    json.dumps({
-                        REPORT_RETENTION_SETTINGS_KEY: normalized,
-                    }, ensure_ascii=False),
+                    json.dumps(
+                        {
+                            REPORT_RETENTION_SETTINGS_KEY: normalized,
+                        },
+                        ensure_ascii=False,
+                    ),
                     normalized_tenant_ids,
                 ),
             )
@@ -2056,8 +1962,7 @@ class PortalRepository:
             raise ValueError("검증된 고객사 로고가 필요합니다.")
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id FROM control.tenants "
-                "WHERE id = %s AND status <> 'OFFBOARDED'",
+                "SELECT id FROM control.tenants WHERE id = %s AND status <> 'OFFBOARDED'",
                 (tenant_id,),
             )
             if not cursor.fetchone():
@@ -2092,8 +1997,7 @@ class PortalRepository:
         """새 보고서에서 로고를 제거하되 기존 보고서 스냅샷은 유지한다."""
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id FROM control.tenants "
-                "WHERE id = %s AND status <> 'OFFBOARDED'",
+                "SELECT id FROM control.tenants WHERE id = %s AND status <> 'OFFBOARDED'",
                 (tenant_id,),
             )
             if not cursor.fetchone():
@@ -2198,9 +2102,7 @@ class PortalRepository:
             row = cursor.fetchone()
             return str(row["environment"]) if row else None
 
-    def msp_user_environment_scopes(
-        self, user_id: str
-    ) -> Optional[set[str]]:
+    def msp_user_environment_scopes(self, user_id: str) -> Optional[set[str]]:
         """대상 MSP 계정의 환경 범위를 반환한다. ``None``은 전체 범위다."""
 
         try:
@@ -2254,13 +2156,11 @@ class PortalRepository:
             )
             schedules_by_account: dict[str, list[dict[str, Any]]] = {}
             for schedule in cursor.fetchall():
-                schedules_by_account.setdefault(
-                    str(schedule["cloud_account_id"]), []
-                ).append(schedule)
-            for account in accounts:
-                account["schedules"] = schedules_by_account.get(
-                    str(account["id"]), []
+                schedules_by_account.setdefault(str(schedule["cloud_account_id"]), []).append(
+                    schedule
                 )
+            for account in accounts:
+                account["schedules"] = schedules_by_account.get(str(account["id"]), [])
             return accounts
 
     def reports_for_tenants(self, tenant_ids: list[str]) -> list[dict[str, Any]]:
@@ -2364,10 +2264,7 @@ class PortalRepository:
             artifact = cursor.fetchone()
             if not artifact:
                 return None
-            if (
-                allowed_tenants is not None
-                and str(artifact["tenant_id"]) not in allowed_tenants
-            ):
+            if allowed_tenants is not None and str(artifact["tenant_id"]) not in allowed_tenants:
                 return None
             return artifact
 
@@ -2487,9 +2384,7 @@ class PortalRepository:
         if all_eligible:
             normalized_ids = [
                 str(report["id"])
-                for report in self.report_cleanup_candidates(
-                    allowed_environments
-                )
+                for report in self.report_cleanup_candidates(allowed_environments)
                 if report.get("eligible")
             ]
             if not normalized_ids:
@@ -2500,9 +2395,9 @@ class PortalRepository:
                 }
         else:
             try:
-                normalized_ids = list(dict.fromkeys(
-                    str(UUID(str(report_id))) for report_id in (report_ids or [])
-                ))
+                normalized_ids = list(
+                    dict.fromkeys(str(UUID(str(report_id))) for report_id in (report_ids or []))
+                )
             except (TypeError, ValueError) as exc:
                 raise ValueError("보고서 선택값이 올바르지 않습니다.") from exc
             if not normalized_ids:
@@ -2564,26 +2459,14 @@ class PortalRepository:
                 tuple(parameters),
             )
             rows = cursor.fetchall()
-            if not all_eligible and {
-                str(row["id"]) for row in rows
-            } != set(normalized_ids):
-                raise ValueError(
-                    "선택 항목에 접근할 수 없거나 존재하지 않는 보고서가 있습니다."
-                )
+            if not all_eligible and {str(row["id"]) for row in rows} != set(normalized_ids):
+                raise ValueError("선택 항목에 접근할 수 없거나 존재하지 않는 보고서가 있습니다.")
 
-            already_queued = sum(
-                row.get("protection_reason") == "CLEANUP_QUEUED"
-                for row in rows
-            )
+            already_queued = sum(row.get("protection_reason") == "CLEANUP_QUEUED" for row in rows)
             protected = sum(
-                row.get("protection_reason") not in (None, "CLEANUP_QUEUED")
-                for row in rows
+                row.get("protection_reason") not in (None, "CLEANUP_QUEUED") for row in rows
             )
-            eligible_ids = [
-                str(row["id"])
-                for row in rows
-                if row.get("protection_reason") is None
-            ]
+            eligible_ids = [str(row["id"]) for row in rows if row.get("protection_reason") is None]
             queued_rows: list[dict[str, Any]] = []
             if eligible_ids:
                 cursor.execute(
@@ -2647,10 +2530,12 @@ class PortalRepository:
                         """,
                         (
                             actor_id,
-                            json.dumps({
-                                "cleanup_requested": True,
-                                "cleanup_reason": "MANUAL",
-                            }),
+                            json.dumps(
+                                {
+                                    "cleanup_requested": True,
+                                    "cleanup_reason": "MANUAL",
+                                }
+                            ),
                             [str(row["id"]) for row in queued_rows],
                         ),
                     )
@@ -2738,11 +2623,13 @@ class PortalRepository:
                     WHERE report.id = ANY(%s::uuid[])
                     """,
                     (
-                        json.dumps({
-                            "automated": True,
-                            "cleanup_requested": True,
-                            "cleanup_reason": "RETENTION_POLICY_EXPIRED",
-                        }),
+                        json.dumps(
+                            {
+                                "automated": True,
+                                "cleanup_requested": True,
+                                "cleanup_reason": "RETENTION_POLICY_EXPIRED",
+                            }
+                        ),
                         [str(row["id"]) for row in queued_rows],
                     ),
                 )
@@ -2914,18 +2801,19 @@ class PortalRepository:
             ) referenced_artifacts
             """,
             (
-                owner_id, storage_uris,
-                owner_id, storage_uris,
-                owner_id, storage_uris,
-                owner_id, storage_uris,
-                owner_id, storage_uris,
+                owner_id,
+                storage_uris,
+                owner_id,
+                storage_uris,
+                owner_id,
+                storage_uris,
+                owner_id,
+                storage_uris,
+                owner_id,
+                storage_uris,
             ),
         )
-        return [
-            str(row["storage_uri"])
-            for row in cursor.fetchall()
-            if row.get("storage_uri")
-        ]
+        return [str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")]
 
     @staticmethod
     def _referenced_artifact_storage_uris(
@@ -2956,11 +2844,7 @@ class PortalRepository:
             """,
             (storage_uris,) * 5,
         )
-        return {
-            str(row["storage_uri"])
-            for row in cursor.fetchall()
-            if row.get("storage_uri")
-        }
+        return {str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")}
 
     def _queue_artifact_cleanup(
         self,
@@ -2976,13 +2860,15 @@ class PortalRepository:
             reject_outside=True,
         )
         if failed:
-            raise ValueError(
-                f"로컬 보고서 경로 {failed}건을 안전하게 확인하지 못했습니다."
+            raise ValueError(f"로컬 보고서 경로 {failed}건을 안전하게 확인하지 못했습니다.")
+        lookup_uris = list(
+            dict.fromkeys(
+                (
+                    *storage_uris,
+                    *(candidate.as_uri() for candidate in candidates),
+                )
             )
-        lookup_uris = list(dict.fromkeys((
-            *storage_uris,
-            *(candidate.as_uri() for candidate in candidates),
-        )))
+        )
         shared_uris = self._other_artifact_storage_uris(
             cursor,
             lookup_uris,
@@ -3007,9 +2893,7 @@ class PortalRepository:
                 continue
             entries.append((candidate.as_uri(), checksum, byte_size))
         if failed:
-            raise ValueError(
-                f"로컬 보고서 파일 {failed}건을 안전하게 확인하지 못했습니다."
-            )
+            raise ValueError(f"로컬 보고서 파일 {failed}건을 안전하게 확인하지 못했습니다.")
         if not entries:
             return None, 0, len(shared_candidates)
 
@@ -3023,8 +2907,11 @@ class PortalRepository:
                 ) VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
-                    operation_id, tenant_id, storage_uri,
-                    checksum, byte_size,
+                    operation_id,
+                    tenant_id,
+                    storage_uri,
+                    checksum,
+                    byte_size,
                 ),
             )
         return operation_id, len(entries), len(shared_candidates)
@@ -3101,9 +2988,7 @@ class PortalRepository:
                 count_filter = "WHERE operation_id = %s"
                 count_parameters = (operation_id,)
             cursor.execute(
-                "SELECT count(*) AS count "
-                "FROM control.artifact_cleanup_outbox "
-                f"{count_filter}",
+                f"SELECT count(*) AS count FROM control.artifact_cleanup_outbox {count_filter}",
                 count_parameters,
             )
             pending = int(cursor.fetchone()["count"])
@@ -3178,9 +3063,7 @@ class PortalRepository:
             if not report:
                 raise ValueError("보고서를 찾을 수 없습니다.")
             if report["status"] in _ACTIVE_REPORT_STATUSES:
-                raise ReportCleanupProtectedError(
-                    "실행 중인 보고서는 삭제할 수 없습니다."
-                )
+                raise ReportCleanupProtectedError("실행 중인 보고서는 삭제할 수 없습니다.")
             cursor.execute(
                 """
                 SELECT settings, clock_timestamp() AS evaluated_at
@@ -3200,21 +3083,15 @@ class PortalRepository:
                     "영구 보존 정책이 적용된 보고서는 정리할 수 없습니다."
                 )
             if protect_latest and bool(report.get("is_latest")):
-                raise ReportCleanupProtectedError(
-                    "계정별 최신 정상 보고서는 정리할 수 없습니다."
-                )
+                raise ReportCleanupProtectedError("계정별 최신 정상 보고서는 정리할 수 없습니다.")
             if bool(report.get("retention_protected")):
                 raise ReportCleanupProtectedError(
                     "보존 기한이 지나지 않은 보고서는 정리할 수 없습니다."
                 )
             if automated_retention:
                 if not policy or policy["mode"] != "DAYS" or not settings_row:
-                    raise ReportCleanupProtectedError(
-                        "유효한 기간 보존 정책을 확인할 수 없습니다."
-                    )
-                retention_base = report.get("completed_at") or report.get(
-                    "created_at"
-                )
+                    raise ReportCleanupProtectedError("유효한 기간 보존 정책을 확인할 수 없습니다.")
+                retention_base = report.get("completed_at") or report.get("created_at")
                 evaluated_at = settings_row.get("evaluated_at")
                 if retention_base is None or evaluated_at is None:
                     raise ReportCleanupProtectedError(
@@ -3222,43 +3099,32 @@ class PortalRepository:
                     )
                 expires_at = retention_base + timedelta(days=policy["days"])
                 if expires_at > evaluated_at:
-                    raise ReportCleanupProtectedError(
-                        "보고서 보존 기간이 아직 지나지 않았습니다."
-                    )
+                    raise ReportCleanupProtectedError("보고서 보존 기간이 아직 지나지 않았습니다.")
                 retention_audit = {
                     "automated": True,
                     "cleanup_reason": "RETENTION_POLICY_EXPIRED",
                     "retention_policy": policy,
                     "retention_basis": (
-                        "completed_at"
-                        if report.get("completed_at") is not None
-                        else "created_at"
+                        "completed_at" if report.get("completed_at") is not None else "created_at"
                     ),
                     "retention_base_at": retention_base.isoformat(),
                     "retention_expired_at": expires_at.isoformat(),
                 }
 
-            schema = (
-                "public_data" if report["environment"] == "public"
-                else "gov_data"
-            )
+            schema = "public_data" if report["environment"] == "public" else "gov_data"
             cursor.execute(
-                "SELECT storage_uri FROM control.report_artifacts "
-                "WHERE report_run_id = %s",
+                "SELECT storage_uri FROM control.report_artifacts WHERE report_run_id = %s",
                 (report_id,),
             )
             storage_uris.extend(
-                str(row["storage_uri"]) for row in cursor.fetchall()
-                if row.get("storage_uri")
+                str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")
             )
             cursor.execute(
-                f"SELECT storage_uri FROM {schema}.raw_payload_refs "
-                "WHERE report_run_id = %s",
+                f"SELECT storage_uri FROM {schema}.raw_payload_refs WHERE report_run_id = %s",
                 (report_id,),
             )
             storage_uris.extend(
-                str(row["storage_uri"]) for row in cursor.fetchall()
-                if row.get("storage_uri")
+                str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")
             )
             cursor.execute(
                 f"SELECT artifact_uri FROM {schema}.metric_series "
@@ -3266,8 +3132,7 @@ class PortalRepository:
                 (report_id,),
             )
             storage_uris.extend(
-                str(row["artifact_uri"]) for row in cursor.fetchall()
-                if row.get("artifact_uri")
+                str(row["artifact_uri"]) for row in cursor.fetchall() if row.get("artifact_uri")
             )
 
             (
@@ -3301,7 +3166,9 @@ class PortalRepository:
                 ) VALUES (%s, %s, 'control.report_runs', %s, 'DELETE', %s::jsonb)
                 """,
                 (
-                    report["tenant_id"], actor_id, report_id,
+                    report["tenant_id"],
+                    actor_id,
+                    report_id,
                     json.dumps(changed_fields),
                 ),
             )
@@ -3385,9 +3252,7 @@ class PortalRepository:
             )
             return cursor.fetchall()
 
-    def schedules(
-        self, allowed_environments: Optional[set[str]] = None
-    ) -> list[dict[str, Any]]:
+    def schedules(self, allowed_environments: Optional[set[str]] = None) -> list[dict[str, Any]]:
         if allowed_environments is not None and not allowed_environments:
             return []
         environment_filter = ""
@@ -3450,8 +3315,13 @@ class PortalRepository:
             return cursor.fetchall()
 
     def report_history(
-        self, tenant_ids: Optional[list[str]] = None, *, query: str = "",
-        status: str = "", limit: int = 500, offset: int = 0,
+        self,
+        tenant_ids: Optional[list[str]] = None,
+        *,
+        query: str = "",
+        status: str = "",
+        limit: int = 500,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         if tenant_ids == []:
             return []
@@ -3461,8 +3331,12 @@ class PortalRepository:
             conditions.append("history.tenant_id = ANY(%s::uuid[])")
             parameters.append(tenant_ids)
         if query:
-            conditions.append("concat_ws(' ', history.customer_name, history.account_name, history.account_code) ILIKE %s")
-            parameters.append("%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            conditions.append(
+                "concat_ws(' ', history.customer_name, history.account_name, history.account_code) ILIKE %s"
+            )
+            parameters.append(
+                "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            )
         if status:
             conditions.append("COALESCE(history.report_status, history.job_status) = %s")
             parameters.append(status)
@@ -3565,8 +3439,11 @@ class PortalRepository:
                 RETURNING id
                 """,
                 (
-                    tenant_id, account_code, display_name.strip(),
-                    tenant["environment"], tenant["region"],
+                    tenant_id,
+                    account_code,
+                    display_name.strip(),
+                    tenant["environment"],
+                    tenant["region"],
                 ),
             )
             account_id = cursor.fetchone()["id"]
@@ -3591,9 +3468,13 @@ class PortalRepository:
                     rotated_at = clock_timestamp()
                 """,
                 (
-                    tenant_id, account_id, encrypted.key_reference,
-                    encrypted.encrypted_dek, encrypted.dek_nonce,
-                    encrypted.ciphertext, encrypted.credential_nonce,
+                    tenant_id,
+                    account_id,
+                    encrypted.key_reference,
+                    encrypted.encrypted_dek,
+                    encrypted.dek_nonce,
+                    encrypted.ciphertext,
+                    encrypted.credential_nonce,
                     encrypted.access_key_hint,
                 ),
             )
@@ -3604,15 +3485,15 @@ class PortalRepository:
                 ) VALUES (%s, %s, 'control.encrypted_credentials', %s, 'UPDATE', %s::jsonb)
                 """,
                 (
-                    tenant_id, actor_id, str(account_id),
+                    tenant_id,
+                    actor_id,
+                    str(account_id),
                     json.dumps({"credential": "rotated", "account_code": account_code}),
                 ),
             )
         return str(account_id)
 
-    def delete_account_credential(
-        self, tenant_id: str, account_id: str, actor_id: str
-    ) -> str:
+    def delete_account_credential(self, tenant_id: str, account_id: str, actor_id: str) -> str:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -3669,11 +3550,15 @@ class PortalRepository:
                           'DELETE', %s::jsonb)
                 """,
                 (
-                    tenant_id, actor_id, account_id,
-                    json.dumps({
-                        "credential": "removed",
-                        "account_code": account["account_code"],
-                    }),
+                    tenant_id,
+                    actor_id,
+                    account_id,
+                    json.dumps(
+                        {
+                            "credential": "removed",
+                            "account_code": account["account_code"],
+                        }
+                    ),
                 ),
             )
             return account["display_name"]
@@ -3704,13 +3589,11 @@ class PortalRepository:
                 (tenant_id,),
             )
             cursor.execute(
-                "UPDATE control.cloud_accounts SET status = 'DISABLED' "
-                "WHERE tenant_id = %s",
+                "UPDATE control.cloud_accounts SET status = 'DISABLED' WHERE tenant_id = %s",
                 (tenant_id,),
             )
             cursor.execute(
-                "UPDATE control.account_report_schedules SET enabled = false "
-                "WHERE tenant_id = %s",
+                "UPDATE control.account_report_schedules SET enabled = false WHERE tenant_id = %s",
                 (tenant_id,),
             )
             cursor.execute(
@@ -3723,8 +3606,7 @@ class PortalRepository:
                 (tenant_id,),
             )
             cursor.execute(
-                "UPDATE control.memberships SET status = 'SUSPENDED' "
-                "WHERE tenant_id = %s",
+                "UPDATE control.memberships SET status = 'SUSPENDED' WHERE tenant_id = %s",
                 (tenant_id,),
             )
             cursor.execute(
@@ -3750,12 +3632,16 @@ class PortalRepository:
                           'DELETE', %s::jsonb)
                 """,
                 (
-                    tenant_id, actor_id, tenant_id,
-                    json.dumps({
-                        "status": "OFFBOARDED",
-                        "customer_code": tenant["customer_code"],
-                        "credentials": "removed",
-                    }),
+                    tenant_id,
+                    actor_id,
+                    tenant_id,
+                    json.dumps(
+                        {
+                            "status": "OFFBOARDED",
+                            "customer_code": tenant["customer_code"],
+                            "credentials": "removed",
+                        }
+                    ),
                 ),
             )
             return tenant["customer_name"]
@@ -3798,8 +3684,8 @@ class PortalRepository:
         """
         with self._connect() as connection, connection.cursor() as cursor:
             tenant = self._tenant_for_anonymization(cursor, tenant_id)
-            anonymous_code, anonymous_name, anonymous_customer = (
-                self._anonymous_tenant_identity(tenant_id, tenant)
+            anonymous_code, anonymous_name, anonymous_customer = self._anonymous_tenant_identity(
+                tenant_id, tenant
             )
             self._anonymize_tenant_members(cursor, tenant_id)
             self._anonymize_tenant_contacts_and_accounts(cursor, tenant_id)
@@ -3897,14 +3783,12 @@ class PortalRepository:
     @staticmethod
     def _anonymize_orphan_users(cursor: Any, orphan_ids: list[str]) -> None:
         cursor.execute(
-            "SELECT lower(email) AS email FROM control.users "
-            "WHERE id = ANY(%s::uuid[])",
+            "SELECT lower(email) AS email FROM control.users WHERE id = ANY(%s::uuid[])",
             (orphan_ids,),
         )
         orphan_emails = [str(row["email"]) for row in cursor.fetchall()]
         cursor.execute(
-            "DELETE FROM control.user_sessions "
-            "WHERE user_id = ANY(%s::uuid[])",
+            "DELETE FROM control.user_sessions WHERE user_id = ANY(%s::uuid[])",
             (orphan_ids,),
         )
         cursor.execute(
@@ -3986,8 +3870,7 @@ class PortalRepository:
     ) -> None:
         for schema in ("public_data", "gov_data"):
             cursor.execute(
-                f"SELECT id, normalized_data FROM {schema}.report_snapshots "
-                "WHERE tenant_id = %s",
+                f"SELECT id, normalized_data FROM {schema}.report_snapshots WHERE tenant_id = %s",
                 (tenant_id,),
             )
             for snapshot in cursor.fetchall():
@@ -4004,8 +3887,7 @@ class PortalRepository:
                     ),
                 )
             cursor.execute(
-                f"UPDATE {schema}.activity_events "
-                "SET account_name = %s WHERE tenant_id = %s",
+                f"UPDATE {schema}.activity_events SET account_name = %s WHERE tenant_id = %s",
                 (_ANONYMIZED_VALUE, tenant_id),
             )
 
@@ -4100,24 +3982,15 @@ class PortalRepository:
                 (tenant_id,),
             )
             storage_uris.extend(
-                str(row["storage_uri"])
-                for row in cursor.fetchall()
-                if row.get("storage_uri")
+                str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")
             )
-            schema = (
-                "public_data"
-                if tenant["environment"] == "public"
-                else "gov_data"
-            )
+            schema = "public_data" if tenant["environment"] == "public" else "gov_data"
             cursor.execute(
-                f"SELECT storage_uri FROM {schema}.raw_payload_refs "
-                "WHERE tenant_id = %s",
+                f"SELECT storage_uri FROM {schema}.raw_payload_refs WHERE tenant_id = %s",
                 (tenant_id,),
             )
             storage_uris.extend(
-                str(row["storage_uri"])
-                for row in cursor.fetchall()
-                if row.get("storage_uri")
+                str(row["storage_uri"]) for row in cursor.fetchall() if row.get("storage_uri")
             )
             cursor.execute(
                 f"SELECT artifact_uri FROM {schema}.metric_series "
@@ -4125,9 +3998,7 @@ class PortalRepository:
                 (tenant_id,),
             )
             storage_uris.extend(
-                str(row["artifact_uri"])
-                for row in cursor.fetchall()
-                if row.get("artifact_uri")
+                str(row["artifact_uri"]) for row in cursor.fetchall() if row.get("artifact_uri")
             )
 
             (
@@ -4142,9 +4013,7 @@ class PortalRepository:
                 owner_id=tenant_id,
             )
 
-            code_hash = sha256(
-                tenant["customer_code"].casefold().encode("utf-8")
-            ).hexdigest()
+            code_hash = sha256(tenant["customer_code"].casefold().encode("utf-8")).hexdigest()
             cursor.execute(
                 """
                 INSERT INTO control.customer_deletion_tombstones (
@@ -4153,8 +4022,12 @@ class PortalRepository:
                 ) VALUES (%s, %s, %s, NULLIF(%s, ''), %s, %s)
                 """,
                 (
-                    code_hash, tenant["environment"], report_count,
-                    archive_reference, False, actor_id,
+                    code_hash,
+                    tenant["environment"],
+                    report_count,
+                    archive_reference,
+                    False,
+                    actor_id,
                 ),
             )
             cursor.execute(
@@ -4165,17 +4038,21 @@ class PortalRepository:
                 ) VALUES (%s, %s, 'control.tenants', %s, 'DELETE', %s::jsonb)
                 """,
                 (
-                    tenant_id, actor_id, tenant_id,
-                    json.dumps({
-                        "permanent": True,
-                        "report_count": report_count,
-                        "archive_reference": archive_reference or None,
-                        "artifact_reference_count": len(set(storage_uris)),
-                        "cleanup_operation_id": cleanup_operation_id,
-                        "cleanup_file_count": cleanup_queued_count,
-                        "shared_artifact_count": shared_artifact_count,
-                        "forced": False,
-                    }),
+                    tenant_id,
+                    actor_id,
+                    tenant_id,
+                    json.dumps(
+                        {
+                            "permanent": True,
+                            "report_count": report_count,
+                            "archive_reference": archive_reference or None,
+                            "artifact_reference_count": len(set(storage_uris)),
+                            "cleanup_operation_id": cleanup_operation_id,
+                            "cleanup_file_count": cleanup_queued_count,
+                            "shared_artifact_count": shared_artifact_count,
+                            "forced": False,
+                        }
+                    ),
                 ),
             )
             cursor.execute(
@@ -4232,14 +4109,13 @@ class PortalRepository:
         if not row or row["status"] != "VALID":
             raise ValueError("Active credentials were not found for the account.")
         plaintext = cipher.decrypt(
-            str(row["id"]), row["encrypted_dek"], row["dek_nonce"],
-            row["ciphertext"], row["credential_nonce"],
+            str(row["id"]),
+            row["encrypted_dek"],
+            row["dek_nonce"],
+            row["ciphertext"],
+            row["credential_nonce"],
         )
-        branding = (
-            self._branding_view(row)
-            if row["logo_content"] is not None
-            else {}
-        )
+        branding = self._branding_view(row) if row["logo_content"] is not None else {}
         customer = CustomerProfile(
             customer_id=row["customer_code"],
             customer_name=row["customer_name"],

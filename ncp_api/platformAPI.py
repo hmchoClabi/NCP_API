@@ -7,8 +7,8 @@ NCP 상품 가격정보, 사용비용, 할인정보 등을 조회하는 기능�
 from typing import Dict, List, Optional
 from ncp_api.base import BaseNCPAPI
 
-class PlatformAPI(BaseNCPAPI):
 
+class PlatformAPI(BaseNCPAPI):
     ENDPOINT_KEY = "platform"
 
     @staticmethod
@@ -27,25 +27,26 @@ class PlatformAPI(BaseNCPAPI):
     ================================================================
     LIST PRICE APIs
     ================================================================    
-    """ 
+    """
+
     def get_price_list(
         self,
         price_no_list: List[str],
         promise_no_list: Optional[List[str]] = None,
         pay_currency_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         요금제 목록을 조회합니다.
-        
+
         Args:
             priceNoList.N	List<String>	Required	조회할 가격 번호 리스트 1~99
             promiseNoList.N	List<String>	Optional	조회할 약정 번호 리스트
             payCurrencyCode	String	Optional	결제 통화 코드            KRW | USD | JPY
             responseFormatType	String	Optional	응답 결과의 형식             xml (기본값) | json
-        
+
         Returns:
-            Dict: 
+            Dict:
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
                 priceList	List<Price>	Required	List<Price> 데이터 타입
                     priceNo	String	Required	가격 번호
@@ -78,31 +79,31 @@ class PlatformAPI(BaseNCPAPI):
         params = {}
 
         for idx, price_no in enumerate(price_no_list, start=1):
-            params[f'priceNoList.{idx}'] = price_no
+            params[f"priceNoList.{idx}"] = price_no
 
         if promise_no_list is not None:
             for idx, promise_no in enumerate(promise_no_list, start=1):
-                params[f'promiseNoList.{idx}'] = promise_no
+                params[f"promiseNoList.{idx}"] = promise_no
 
         if pay_currency_code is not None:
-            params['payCurrencyCode'] = pay_currency_code
+            params["payCurrencyCode"] = pay_currency_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        
-        return self.client.get('/product/getPriceList', params=params)
-    
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/product/getPriceList", params=params)
+
     def get_product_category_list(
         self,
         product_category_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         서비스 카테고리 목록을 조회합니다.
-        
+
         Args:
             product_category_code: 상품 카테고리 코드 (선택사항)
             responseFormatType: 응답 포맷 타입 (json 또는 xml, 기본값: json)
-        
+
         Returns:
             Dict: 상품 카테고리 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -113,12 +114,12 @@ class PlatformAPI(BaseNCPAPI):
         params = {}
 
         if product_category_code is not None:
-            params['productCategoryCode'] = product_category_code
+            params["productCategoryCode"] = product_category_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/product/getProductCategoryList', params=params)   
-    
+        return self.client.get("/product/getProductCategoryList", params=params)
+
     def get_product_list(
         self,
         region_code: str,
@@ -128,11 +129,11 @@ class PlatformAPI(BaseNCPAPI):
         product_category_code: Optional[str] = None,
         product_code: Optional[str] = None,
         product_name: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         서비스 목록을 조회합니다.
-        
+
         Args:
 
             pageNo	Integer	Optional	페이지 번호
@@ -145,7 +146,7 @@ class PlatformAPI(BaseNCPAPI):
             productCode	String	Optional	상품 코드
             productName	String	Optional	상품명
             responseFormatType	String	Optional	응답 결과의 형식            xml (기본값) | json
-       
+
         Returns:
             Dict: 상품 목록 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -158,27 +159,25 @@ class PlatformAPI(BaseNCPAPI):
                     softwareType	CommonCode	Required	소프트웨어 유형 코드
                     productCategory	CommonCode	Required	상품 카테고리
         """
-        params = {
-            'regionCode': region_code
-        }
-        
-        if page_no is not None:
-            params['pageNo'] = page_no
-        if page_size is not None:
-            params['pageSize'] = page_size
-        if product_item_kind_code is not None:
-            params['productItemKindCode'] = product_item_kind_code
-        if product_code is not None:
-            params['productCode'] = product_code
-        if product_name is not None:
-            params['productName'] = product_name
-        if product_category_code is not None:
-            params['productCategoryCode'] = product_category_code
-        if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+        params = {"regionCode": region_code}
 
-        return self.client.get('/product/getProductList', params=params)
-    
+        if page_no is not None:
+            params["pageNo"] = page_no
+        if page_size is not None:
+            params["pageSize"] = page_size
+        if product_item_kind_code is not None:
+            params["productItemKindCode"] = product_item_kind_code
+        if product_code is not None:
+            params["productCode"] = product_code
+        if product_name is not None:
+            params["productName"] = product_name
+        if product_category_code is not None:
+            params["productCategoryCode"] = product_category_code
+        if responseFormatType is not None:
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/product/getProductList", params=params)
+
     def get_product_price_list(
         self,
         region_code: str,
@@ -188,12 +187,12 @@ class PlatformAPI(BaseNCPAPI):
         product_category_code: Optional[str] = None,
         product_code: Optional[str] = None,
         product_name: Optional[str] = None,
-        pay_currency_code: Optional[str] = None,        
-        responseFormatType: Optional[str] = 'json'
+        pay_currency_code: Optional[str] = None,
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         서비스 및 가격 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기             1,000 이하(기본값: 1,000)
@@ -206,7 +205,7 @@ class PlatformAPI(BaseNCPAPI):
             productName	String	Optional	상품명
             payCurrencyCode	String	Optional	결제 통화 코드             KRW | USD | JPY
             responseFormatType	String	Optional	응답 결과의 형식             xml (기본값) | json
-        
+
         Returns:
             Dict: 상품 가격 목록 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수   페이징 처리 요청의 경우 전체 개수
@@ -259,30 +258,26 @@ class PlatformAPI(BaseNCPAPI):
                         packageUnitList	List<PackageUnit>	Required	패키지 단위 목록
 
         """
-        params = {
-            'regionCode': region_code
-            
-        }
+        params = {"regionCode": region_code}
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if product_item_kind_code is not None:
-            params['productItemKindCode'] = product_item_kind_code
+            params["productItemKindCode"] = product_item_kind_code
         if product_category_code is not None:
-            params['productCategoryCode'] = product_category_code
+            params["productCategoryCode"] = product_category_code
         if product_code is not None:
-            params['productCode'] = product_code
+            params["productCode"] = product_code
         if product_name is not None:
-            params['productName'] = product_name
+            params["productName"] = product_name
         if pay_currency_code is not None:
-            params['payCurrencyCode'] = pay_currency_code
+            params["payCurrencyCode"] = pay_currency_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/product/getProductPriceList', params=params)
-    
+        return self.client.get("/product/getProductPriceList", params=params)
+
     """
     ================================================================
     COST AND USE APIs
@@ -293,8 +288,8 @@ class PlatformAPI(BaseNCPAPI):
         self,
         start_month: str,
         end_month: str,
-        page_no : Optional[int] = None,
-        page_size : Optional[int] = None,
+        page_no: Optional[int] = None,
+        page_size: Optional[int] = None,
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
@@ -302,11 +297,11 @@ class PlatformAPI(BaseNCPAPI):
         demand_type_code: Optional[str] = None,
         demand_type_detail_code: Optional[str] = None,
         region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         설정 기간에 따라 월 계약 청구 비용 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -317,10 +312,10 @@ class PlatformAPI(BaseNCPAPI):
             startMonth	String	Required	조회 시작 월(yyyyMM) 최대 3개월 조회 가능 <예시> 202401
             endMonth	String	Required	조회 마지막 월(yyyyMM) 최대 3개월 조회 가능 <예시> 202403
             demandTypeCode	String	Optional	청구 유형 코드
-            demandTypeDetailCode	String	Optional	청구 유형 상세 코드 
+            demandTypeDetailCode	String	Optional	청구 유형 상세 코드
             regionCode	String	Optional	리전 코드  getRegionList 액션을 통해 확인
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-        
+
         Returns:
             Dict: 계약별 청구 내역 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -347,35 +342,32 @@ class PlatformAPI(BaseNCPAPI):
                     payCurrency	CommonCode	Required	결제 통화
                     thisMonthAppliedExchangeRate	Double	Required	이번 달 적용 환율
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-        }
+        params = {"startMonth": start_month, "endMonth": end_month}
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if contract_no is not None:
-            params['contractNo'] = contract_no
+            params["contractNo"] = contract_no
         if demand_type_code is not None:
-            params['demandTypeCode'] = demand_type_code
+            params["demandTypeCode"] = demand_type_code
         if demand_type_detail_code is not None:
-            params['demandTypeDetailCode'] = demand_type_detail_code
-        if region_code is not None: 
-            params['regionCode'] = region_code
+            params["demandTypeDetailCode"] = demand_type_detail_code
+        if region_code is not None:
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-                
-        return self.client.get('/cost/getContractDemandCostList', params=params)
-    
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/cost/getContractDemandCostList", params=params)
+
     def get_contract_summary_list(
         self,
         contract_month: str,
@@ -387,11 +379,11 @@ class PlatformAPI(BaseNCPAPI):
         contract_type_code: Optional[str] = None,
         contract_status_code: Optional[str] = None,
         region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         사용자 계약 요약 목록을 조회합니다. 계약 요약은 리전 코드, 계약 구분 코드, 계약 수로 구성되어 있습니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -403,7 +395,7 @@ class PlatformAPI(BaseNCPAPI):
             contractStatusCode	String	Optional	계약 상태 코드 ALL (기본값) | NOML | NLEND ALL: 모두 NOML: 정상 NLEND: 종료
             regionCode	String	Optional	리전 코드 regionCode는 getRegionList 액션을 통해서 획득 가능
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-                    
+
         Returns:
             Dict: 계약별 요약 내역 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -415,33 +407,29 @@ class PlatformAPI(BaseNCPAPI):
                     contractStatus	CommonCode	Required	계약 상태
 
         """
-        params = {
-            'contractMonth': contract_month
-            
-        }
+        params = {"contractMonth": contract_month}
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if contract_type_code:
-            params['contractTypeCode'] = contract_type_code
+            params["contractTypeCode"] = contract_type_code
         if contract_status_code:
-            params['contractStatusCode'] = contract_status_code
+            params["contractStatusCode"] = contract_status_code
         if region_code:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-                
-        return self.client.get('/cost/getContractSummaryList', params=params
-    )
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/cost/getContractSummaryList", params=params)
 
     def get_contract_usage_list(
         self,
@@ -456,11 +444,11 @@ class PlatformAPI(BaseNCPAPI):
         contract_type_code: Optional[str] = None,
         contract_status_code: Optional[str] = None,
         region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         계약 사용량 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -475,7 +463,7 @@ class PlatformAPI(BaseNCPAPI):
             regionCode	String	Optional	리전 코드
             getRegionList 액션을 통해서 획득 가능
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-                    
+
         Returns:
             Dict: 계약별 사용량 내역 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -492,36 +480,31 @@ class PlatformAPI(BaseNCPAPI):
                     platformType	CommonCode	Required	플랫폼 구분
                     contractProductList	List<ContractProduct>	Required	계약 상품 목록
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-           
-        }
+        params = {"startMonth": start_month, "endMonth": end_month}
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if contract_no:
-            params['contractNo'] = contract_no
+            params["contractNo"] = contract_no
         if contract_type_code:
-            params['contractTypeCode'] = contract_type_code
+            params["contractTypeCode"] = contract_type_code
         if contract_status_code:
-            params['contractStatusCode'] = contract_status_code
+            params["contractStatusCode"] = contract_status_code
         if region_code:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-                
-        return self.client.get('/cost/getContractUsageList', params=params
-    )
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/cost/getContractUsageList", params=params)
 
     def get_contract_usage_list_by_daily(
         self,
@@ -536,11 +519,11 @@ class PlatformAPI(BaseNCPAPI):
         contract_type_code: Optional[str] = None,
         product_item_kind_code: Optional[str] = None,
         region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         설정 기간에 따라 일별 서비스 사용량을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -554,7 +537,7 @@ class PlatformAPI(BaseNCPAPI):
             productItemKindCode	String	Optional	서비스 품목 종류 코드
             regionCode	String	Optional	리전 코드 getRegionList 액션을 통해 확인
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-        
+
         Returns:
             Dict: 계약별 일별 사용량 내역 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -565,36 +548,31 @@ class PlatformAPI(BaseNCPAPI):
                     contractProduct	ContractProduct	Required	계약 상품
                     usage	Usage	Required	사용량
         """
-        params = {
-            'useStartDay': use_start_date,
-            'useEndDay': use_end_date
-            
-        }
+        params = {"useStartDay": use_start_date, "useEndDay": use_end_date}
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if is_organization and is_parent:
-            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")  
+            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if contract_no:
-            params['contractNo'] = contract_no
+            params["contractNo"] = contract_no
         if contract_type_code:
-            params['contractTypeCode'] = contract_type_code
+            params["contractTypeCode"] = contract_type_code
         if product_item_kind_code:
-            params['productItemKindCode'] = product_item_kind_code     
+            params["productItemKindCode"] = product_item_kind_code
         if region_code:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-                
-        return self.client.get('/cost/getContractUsageListByDaily', params=params
-    )
+            params["responseFormatType"] = responseFormatType
+
+        return self.client.get("/cost/getContractUsageListByDaily", params=params)
 
     def get_cost_relation_code_list(
         self,
@@ -603,16 +581,16 @@ class PlatformAPI(BaseNCPAPI):
         product_rating_type_code: Optional[str] = None,
         metering_type_code: Optional[str] = None,
         product_category_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         비용 연관 코드 목록을 조회합니다.
-        비용 연관 코드는 
-        사용량(getContractUsageList, 
-        getContractUsageListByDaily) 또는 
-        비용(getContractDemandCostList, 
+        비용 연관 코드는
+        사용량(getContractUsageList,
+        getContractUsageListByDaily) 또는
+        비용(getContractDemandCostList,
         getProductDemandCostList) 조회 API에서 사용할 수 있습니다.
-        
+
         Args:
             contractTypeCode	String	Optional	계약 유형 코드
             productItemKindCode	String	Optional	상품 품목 종류 코드
@@ -622,7 +600,7 @@ class PlatformAPI(BaseNCPAPI):
             getProductCategoryList 액션을 통해 확인
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
 
-        
+
         Returns:
             Dict: 비용 관련 코드 목록 응답 데이터
             totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -638,19 +616,19 @@ class PlatformAPI(BaseNCPAPI):
         """
         params = {}
         if contract_type_code:
-            params['contractTypeCode'] = contract_type_code
+            params["contractTypeCode"] = contract_type_code
         if product_item_kind_code:
-            params['productItemKindCode'] = product_item_kind_code
+            params["productItemKindCode"] = product_item_kind_code
         if product_rating_type_code:
-            params['productRatingTypeCode'] = product_rating_type_code
+            params["productRatingTypeCode"] = product_rating_type_code
         if metering_type_code:
-            params['meteringTypeCode'] = metering_type_code
+            params["meteringTypeCode"] = metering_type_code
         if product_category_code:
-            params['productCategoryCode'] = product_category_code
+            params["productCategoryCode"] = product_category_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/cost/getCostRelationCodeList', params=params)
+        return self.client.get("/cost/getCostRelationCodeList", params=params)
 
     def get_demand_cost_list(
         self,
@@ -661,11 +639,11 @@ class PlatformAPI(BaseNCPAPI):
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         설정 기간에 따라 월 청구 비용에 대한 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기             1,000 이하(기본값: 1,000)
@@ -675,7 +653,7 @@ class PlatformAPI(BaseNCPAPI):
             startMonth	String	Required	조회 시작 월(yyyyMM)            최대 3개월 조회 가능            <예시> 202401
             endMonth	String	Required	조회 마지막 월(yyyyMM)            최대 3개월 조회 가능            <예시> 202403
             responseFormatType	String	Optional	응답 결과의 형식            xml (기본값) | json
-        
+
         Returns:
             Dict: 상품별 청구 내역 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -715,28 +693,24 @@ class PlatformAPI(BaseNCPAPI):
                     payCurrency	CommonCode	Required	결제 통화
                     thisMonthAppliedExchangeRate	Double	Required	이번 달 적용 환율
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-            
-        }
+        params = {"startMonth": start_month, "endMonth": end_month}
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/cost/getDemandCostList', params=params)
-     
+        return self.client.get("/cost/getDemandCostList", params=params)
+
     def get_product_demand_cost_list(
         self,
         start_month: str,
@@ -747,11 +721,11 @@ class PlatformAPI(BaseNCPAPI):
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
         product_demand_type_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         설정 기간에 따라 서비스별 청구 비용 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기            1,000 이하(기본값: 1,000)
@@ -762,7 +736,7 @@ class PlatformAPI(BaseNCPAPI):
             endMonth	String	Required	조회 마지막 월(yyyyMM)            최대 3개월 조회 가능            <예시> 202403
             productDemandTypeCode	String	Optional	서비스 청구 유형 코드
             responseFormatType	String	Optional	응답 결과의 형식            xml (기본값) | json
-        
+
         Returns:
             Dict: 서비스별 청구 비용 목록 응답 데이터
                 totalRows	Integer	Required	조회된 목록의 총 개수페이징 처리 요청의 경우 전체 개수
@@ -786,48 +760,43 @@ class PlatformAPI(BaseNCPAPI):
 
         """
 
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-            
-        }
+        params = {"startMonth": start_month, "endMonth": end_month}
 
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if product_demand_type_code:
-            params['productDemandTypeCode'] = product_demand_type_code
+            params["productDemandTypeCode"] = product_demand_type_code
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/cost/getProductDemandCostList', params=params)
+        return self.client.get("/cost/getProductDemandCostList", params=params)
 
         """
         ================================================================
          Region APIs
         ================================================================
         """
+
     def get_region_list(
-        self,
-        region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        self, region_code: Optional[str] = None, responseFormatType: Optional[str] = "json"
     ) -> Dict:
         """
         사용 가능한 리전 목록을 조회합니다.
-        
+
         Args:
             regionCode	String	Optional	조회할 리전 코드 getRegionList 액션을 통해 확인
             responseFormatType: 응답 포맷 타입 (json 또는 xml, 기본값: json)
-        
+
         Returns:
             Dict: 지역 목록 응답 데이터
             totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -839,11 +808,11 @@ class PlatformAPI(BaseNCPAPI):
         params = {}
 
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        return self.client.get('/region/getRegionList', params=params)
-    
+            params["responseFormatType"] = responseFormatType
+        return self.client.get("/region/getRegionList", params=params)
+
     """
     ===============================================================
     Discount APIs
@@ -856,13 +825,13 @@ class PlatformAPI(BaseNCPAPI):
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
-        responseFormatType: Optional[str] = 'json',
+        responseFormatType: Optional[str] = "json",
         page_no: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> Dict:
         """
         계정에 부여된 코인의 현황과 사용 이력을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -888,25 +857,25 @@ class PlatformAPI(BaseNCPAPI):
 
         """
         params = {}
-        self._add_numbered_params(params, 'discountNoList', discount_no_list)
+        self._add_numbered_params(params, "discountNoList", discount_no_list)
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if is_organization and is_parent:
-            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")  
+            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list:
             for idx, member_no in enumerate(member_no_list, start=1):
-                params[f'memberNoList.{idx}'] = member_no
+                params[f"memberNoList.{idx}"] = member_no
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/discount/getCoinHistoryList', params=params)
-    
+        return self.client.get("/discount/getCoinHistoryList", params=params)
+
     def get_credit_history_list(
         self,
         start_month: Optional[str] = None,
@@ -917,11 +886,11 @@ class PlatformAPI(BaseNCPAPI):
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         크레딧 이력 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -929,10 +898,10 @@ class PlatformAPI(BaseNCPAPI):
             isOrganization	Boolean	Optional	Organization 서비스 계정 통합 조회 여부 마스터만 사용 가능 isOrganization, isPartner 모두 true이면 에러 응답
             isPartner	Boolean	Optional	파트너 계정 조회 여부 파트너 대표만 사용 가능 isOrganization, isPartner 모두 true이면 에러 응답
             memberNoList	List<String>	Optional	회원 번호 목록 마스터 또는 파트너 대표만 사용 가능
-            startMonth	String	Optional	조회 시작 월(yyyyMM) <예시> 202401 
+            startMonth	String	Optional	조회 시작 월(yyyyMM) <예시> 202401
             endMonth	String	Optional	조회 마지막 월(yyyyMM) <예시> 202403
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-        
+
         Returns:
             Dict: 크레딧 사용 내역 응답 데이터
             totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -948,28 +917,28 @@ class PlatformAPI(BaseNCPAPI):
         """
         params = {}
         if start_month is not None:
-            params['startMonth'] = start_month
+            params["startMonth"] = start_month
         if end_month is not None:
-            params['endMonth'] = end_month
+            params["endMonth"] = end_month
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if discount_no_list:
             for idx, discount_no in enumerate(discount_no_list, start=1):
-                params[f'discountNoList.{idx}'] = discount_no
+                params[f"discountNoList.{idx}"] = discount_no
         if is_organization and is_parent:
-            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")  
+            raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/discount/getCreditHistoryList', params=params)
+        return self.client.get("/discount/getCreditHistoryList", params=params)
 
     def get_discount_list(
         self,
@@ -982,11 +951,11 @@ class PlatformAPI(BaseNCPAPI):
         member_no_list: Optional[List[str]] = None,
         discount_type_code: Optional[str] = None,
         is_valid_discount: Optional[bool] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         계정이 보유하고 있는 할인 목록을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기 1,000 이하(기본값: 1,000)
@@ -998,10 +967,10 @@ class PlatformAPI(BaseNCPAPI):
             endMonth	String	Optional	조회 마지막 월(yyyyMM) 최대 3개월 조회 가능 <예시> 202403
             isValidDiscount	Boolean	Optional	유효한 할인만 조회 여부 true | false true: 유효한 할인만 조회 false: 모든 할인 조회
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-        
+
         Returns:
             Dict: 할인 목록 응답 데이터
-            totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수 
+            totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
             demandCostList	List<Discount>	Required	List<Discount> 데이터 타입
                 memberNo	String	Required	회원 번호
                 discountNo	String	Required	할인 번호
@@ -1015,30 +984,30 @@ class PlatformAPI(BaseNCPAPI):
         """
         params = {}
         if start_month is not None:
-            params['startMonth'] = start_month
+            params["startMonth"] = start_month
         if end_month is not None:
-            params['endMonth'] = end_month
+            params["endMonth"] = end_month
 
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if discount_type_code:
-            params['discountTypeCode'] = discount_type_code
+            params["discountTypeCode"] = discount_type_code
         if is_valid_discount is not None:
-            params['isValidDiscount'] = str(is_valid_discount).lower()
+            params["isValidDiscount"] = str(is_valid_discount).lower()
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/discount/getDiscountList', params=params)
+        return self.client.get("/discount/getDiscountList", params=params)
 
     def get_product_demand_cost_by_discount_list(
         self,
@@ -1050,7 +1019,7 @@ class PlatformAPI(BaseNCPAPI):
         is_organization: Optional[bool] = None,
         is_parent: Optional[bool] = None,
         member_no_list: Optional[List[str]] = None,
-        responseFormatType: Optional[str] = 'json'  
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         할인이 반영된 청구 내역을 조회합니다.
@@ -1065,7 +1034,7 @@ class PlatformAPI(BaseNCPAPI):
             isPartner	Boolean	Optional	파트너 계정 조회 여부 파트너 대표만 사용 가능 isOrganization, isPartner 모두 true이면 에러 응답
             memberNoList	List<String>	Optional	회원 번호 목록 마스터 또는 파트너 대표만 사용 가능
             responseFormatType	String	Optional	응답 결과의 형식 xml (기본값) | json
-        
+
         Returns:
             Dict: 할인이 반영된 청구 내역 응답 데이터
             totalRows	Integer	Required	조회된 목록의 총 개수 페이징 처리 요청의 경우 전체 개수
@@ -1111,29 +1080,26 @@ class PlatformAPI(BaseNCPAPI):
                     eligibleProductDemandTypeList	List<ProductDemandType>	Required	할인 가능한 상품 청구 유형 목록
                 payCurrency	CommonCode	Required	결제 통화
         """
-        params = {
-            'startMonth': start_month,
-            'endMonth': end_month
-        }
+        params = {"startMonth": start_month, "endMonth": end_month}
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if product_demand_type_code_list:
             for idx, product_demand_type_code in enumerate(product_demand_type_code_list, start=1):
-                params[f'productDemandTypeCodeList.{idx}'] = product_demand_type_code
+                params[f"productDemandTypeCodeList.{idx}"] = product_demand_type_code
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/discount/getProductDemandCostByDiscountList', params=params)
+        return self.client.get("/discount/getProductDemandCostByDiscountList", params=params)
 
     def get_product_discount_history_list(
         self,
@@ -1145,11 +1111,11 @@ class PlatformAPI(BaseNCPAPI):
         member_no_list: Optional[List[str]] = None,
         start_month: Optional[str] = None,
         end_month: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
-    ) -> Dict: 
+        responseFormatType: Optional[str] = "json",
+    ) -> Dict:
         """
         계정에 부여된 서비스 요금 할인의 현황과 사용 이력을 조회합니다.
-        
+
         Args:
             pageNo	Integer	Optional	페이지 번호
             pageSize	Integer	Optional	페이지 크기             1,000 이하(기본값: 1,000)
@@ -1158,9 +1124,9 @@ class PlatformAPI(BaseNCPAPI):
             isPartner	Boolean	Optional	파트너 계정 조회 여부            파트너 대표만 사용 가능            isOrganization, isPartner 모두 true이면 에러 응답
             memberNoList	List<String>	Optional	회원 번호 목록            마스터 또는 파트너 대표만 사용 가능
             startMonth	String	Optional	조회 시작 월(yyyyMM)            <예시> 202401
-            endMonth	String	Optional	조회 마지막 월(yyyyMM)            <예시> 202403            
+            endMonth	String	Optional	조회 마지막 월(yyyyMM)            <예시> 202403
             responseFormatType	String	Optional	응답 결과의 형식            xml (기본값) | json
-        
+
         Returns:
             Dict: 서비스 요금 할인 현황과 사용 이력 응답 데이터
             private Integer totalRows;
@@ -1169,28 +1135,26 @@ class PlatformAPI(BaseNCPAPI):
                 private ProductDiscount productDiscount;
                 private ArrayList<ProductDiscountUseHistory> productDiscountUseHistoryList;
         """
-        params = {
-            'responseFormatType': responseFormatType
-        }
+        params = {"responseFormatType": responseFormatType}
         if discount_no_list:
             for idx, discount_no in enumerate(discount_no_list, start=1):
-                params[f'discountNoList.{idx}'] = discount_no   
+                params[f"discountNoList.{idx}"] = discount_no
         if is_organization and is_parent:
             raise ValueError("is_organization과 is_parent는 함께 사용할 수 없습니다.")
         if is_organization is not None:
-            params['isOrganization'] = str(is_organization).lower()
+            params["isOrganization"] = str(is_organization).lower()
         if is_parent is not None:
-            params['isPartner'] = str(is_parent).lower()
+            params["isPartner"] = str(is_parent).lower()
         if member_no_list is not None:
-            params['memberNoList'] = member_no_list
+            params["memberNoList"] = member_no_list
         if start_month:
-            params['startMonth'] = start_month
+            params["startMonth"] = start_month
         if end_month:
-            params['endMonth'] = end_month
+            params["endMonth"] = end_month
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        return self.client.get('/discount/getProductDiscountHistoryList', params=params)
+            params["responseFormatType"] = responseFormatType
+        return self.client.get("/discount/getProductDiscountHistoryList", params=params)

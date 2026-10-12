@@ -86,9 +86,7 @@ class CredentialCipher:
     def __init__(self, provider: KeyEncryptionProvider):
         self.provider = provider
 
-    def encrypt(
-        self, account_id: str, access_key: str, secret_key: str
-    ) -> EncryptedCredential:
+    def encrypt(self, account_id: str, access_key: str, secret_key: str) -> EncryptedCredential:
         access_key = access_key.strip()
         secret_key = secret_key.strip()
         if not access_key or not secret_key:

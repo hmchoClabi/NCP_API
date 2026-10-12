@@ -49,8 +49,7 @@ class NCPBaseClientTests(unittest.TestCase):
         url = request_call.args[1]
         self.assertEqual(
             url,
-            "https://api.example.test/base/resource"
-            "?existing=one&privateKey=PRIVATE-VALUE&page=2",
+            "https://api.example.test/base/resource?existing=one&privateKey=PRIVATE-VALUE&page=2",
         )
         client.auth.get_auth_headers.assert_called_once_with(
             "GET",
@@ -92,9 +91,7 @@ class NCPBaseClientTests(unittest.TestCase):
         with self.assertRaisesRegex(requests.HTTPError, "redirect"):
             client.get("/resource")
 
-        self.assertFalse(
-            client.session.request.call_args.kwargs["allow_redirects"]
-        )
+        self.assertFalse(client.session.request.call_args.kwargs["allow_redirects"])
         self.assertEqual(client.session.request.call_count, 1)
 
     def test_not_modified_response_keeps_existing_non_redirect_behavior(self):
@@ -110,9 +107,7 @@ class NCPBaseClientTests(unittest.TestCase):
             client.get("/resource"),
             {"status_code": 304, "empty": True},
         )
-        self.assertFalse(
-            client.session.request.call_args.kwargs["allow_redirects"]
-        )
+        self.assertFalse(client.session.request.call_args.kwargs["allow_redirects"])
 
     def test_validates_timeout_retry_count_and_body_modes(self):
         for timeout in (0, -1, True, "10"):
@@ -197,9 +192,7 @@ class NCPBaseClientTests(unittest.TestCase):
         self.assertEqual(client.get("/resource"), {"ok": True})
         self.assertEqual(client.session.request.call_count, 2)
 
-        client.session.request = Mock(
-            side_effect=requests.ConnectionError("do not retry post")
-        )
+        client.session.request = Mock(side_effect=requests.ConnectionError("do not retry post"))
         with self.assertRaises(requests.ConnectionError):
             client.post("/resource", json_data={"name": "new"})
         self.assertEqual(client.session.request.call_count, 1)
@@ -256,10 +249,7 @@ class NCPBaseClientTests(unittest.TestCase):
         ).encode()
         response = make_response(
             body=response_body,
-            url=(
-                "https://api.example.test/resource"
-                "?privateKey=RESPONSE-QUERY-SECRET"
-            ),
+            url=("https://api.example.test/resource?privateKey=RESPONSE-QUERY-SECRET"),
         )
         response.headers["Set-Cookie"] = "RESPONSE-COOKIE"
         client.session.request = Mock(return_value=response)
@@ -293,9 +283,7 @@ class NCPBaseClientTests(unittest.TestCase):
             with self.subTest(secret=secret):
                 self.assertNotIn(secret, logs)
         self.assertIn("page=1", logs)
-        info_request_lines = [
-            line for line in captured.output if "[API Request]" in line
-        ]
+        info_request_lines = [line for line in captured.output if "[API Request]" in line]
         self.assertEqual(len(info_request_lines), 1)
         self.assertNotIn("?", info_request_lines[0])
 

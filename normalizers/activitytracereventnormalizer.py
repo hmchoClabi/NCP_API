@@ -25,11 +25,7 @@ class ActivityTracerEventNormalizer(_EventNormalizerBase):
             )
 
         if group_by == "product":
-            return (
-                event.get("product_display_name")
-                or event.get("product_name")
-                or "unknown"
-            )
+            return event.get("product_display_name") or event.get("product_name") or "unknown"
 
         if group_by == "action":
             return event.get("action_name") or "unknown"
@@ -63,36 +59,26 @@ class ActivityTracerEventNormalizer(_EventNormalizerBase):
             "nrn": event.get("nrn"),
             "event_time": event_time,
             "event_time_kst": self._format_event_time_kst(event_time),
-
             "platform_type": event.get("platformType"),
-
             "product_name": event.get("productName"),
             "product_display_name": event.get("productDisplayName"),
-
             "region_code": event.get("regionCode"),
             "region_display_name": event.get("regionDisplayName"),
-
             "resource_type": event.get("resourceType"),
             "resource_id": event.get("resourceId"),
             "resource_name": event.get("resourceName"),
-
             "action_name": event.get("actionDisplayName"),
             "result": event.get("actionResultType"),
-
             "user_type": event.get("actionUserType"),
             "sub_account_no": event.get("actionSubAccountNo"),
-
             "source_type": event.get("sourceType"),
             "source_ip": event.get("sourceIp"),
-
             "product_data": product_data,
-
             # productData 안에 자주 들어오는 보조 필드
             "member_no": product_data.get("memberNo"),
             "instance_no": product_data.get("instanceNo"),
             "user_name": product_data.get("userName"),
             "client_ip": product_data.get("clientIp"),
-
             # 원본 보존
             "raw": event,
         }
@@ -117,7 +103,4 @@ class ActivityTracerEventNormalizer(_EventNormalizerBase):
             return None
 
         milliseconds = event_dt.microsecond // 1000
-        return (
-            event_dt.strftime("%Y-%m-%d %H:%M:%S")
-            + f".{milliseconds:03d} KST"
-        )
+        return event_dt.strftime("%Y-%m-%d %H:%M:%S") + f".{milliseconds:03d} KST"

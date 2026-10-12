@@ -32,9 +32,7 @@ class WMSNormalizer:
         raw_results = result.get("results")
         if isinstance(raw_results, list):
             normalized_results = [
-                self._normalize_result(item)
-                for item in raw_results
-                if isinstance(item, Mapping)
+                self._normalize_result(item) for item in raw_results if isinstance(item, Mapping)
             ]
 
         return {
@@ -48,13 +46,9 @@ class WMSNormalizer:
             "enabled": self._boolean(scenario.get("serviceYn")),
             "method_type": self._text(scenario.get("methodType"), 20),
             "interval_minutes": self._number(scenario.get("interval")),
-            "request_timeout_ms": self._number(
-                scenario.get("requestTimeout")
-            ),
+            "request_timeout_ms": self._number(scenario.get("requestTimeout")),
             "run_timeout_ms": self._number(scenario.get("runTimeout")),
-            "availability_percent": self._number(
-                result.get("availability")
-            ),
+            "availability_percent": self._number(result.get("availability")),
             "avg_load_time_ms": self._number(result.get("avgLoadTime")),
             "avg_run_time_ms": self._number(result.get("avgRunTime")),
             "success_count": self._integer(result.get("successCount")),

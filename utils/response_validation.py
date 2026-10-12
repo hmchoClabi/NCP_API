@@ -24,14 +24,10 @@ def validate_collection_response(
     if isinstance(response, list):
         if allow_list:
             return
-        raise APIResponseValidationError(
-            f"{api_name} 응답이 예상한 object 형식이 아닙니다."
-        )
+        raise APIResponseValidationError(f"{api_name} 응답이 예상한 object 형식이 아닙니다.")
 
     if not isinstance(response, dict):
-        raise APIResponseValidationError(
-            f"{api_name} 응답이 object 형식이 아닙니다."
-        )
+        raise APIResponseValidationError(f"{api_name} 응답이 object 형식이 아닙니다.")
 
     _raise_for_nested_error_envelopes(response, api_name=api_name)
 
@@ -45,9 +41,7 @@ def validate_collection_response(
         return
 
     expected_text = ", ".join(expected)
-    raise APIResponseValidationError(
-        f"{api_name} 응답에 예상 필드가 없습니다: {expected_text}"
-    )
+    raise APIResponseValidationError(f"{api_name} 응답에 예상 필드가 없습니다: {expected_text}")
 
 
 def _contains_expected_key(
@@ -109,39 +103,24 @@ def _raise_for_error_envelope(
 
     if error:
         if isinstance(error, dict):
-            error_code = (
-                error.get("errorCode")
-                or error.get("code")
-                or error_code
-            )
-        raise APIResponseValidationError(
-            _error_message(api_name, error_code)
-        )
+            error_code = error.get("errorCode") or error.get("code") or error_code
+        raise APIResponseValidationError(_error_message(api_name, error_code))
 
     if error_code not in (None, "", 0, "0"):
-        raise APIResponseValidationError(
-            _error_message(api_name, error_code)
-        )
+        raise APIResponseValidationError(_error_message(api_name, error_code))
 
     return_code = response.get("returnCode")
     if return_code not in (None, "", 0, "0", 200, "200"):
-        raise APIResponseValidationError(
-            _error_message(api_name, return_code)
-        )
+        raise APIResponseValidationError(_error_message(api_name, return_code))
 
     status_code = response.get("status_code", response.get("statusCode"))
     try:
-        is_error_status = (
-            status_code is not None
-            and int(status_code) >= 400
-        )
+        is_error_status = status_code is not None and int(status_code) >= 400
     except (TypeError, ValueError):
         is_error_status = False
 
     if is_error_status:
-        raise APIResponseValidationError(
-            _error_message(api_name, status_code)
-        )
+        raise APIResponseValidationError(_error_message(api_name, status_code))
 
 
 def _error_message(api_name: str, code: Any) -> str:

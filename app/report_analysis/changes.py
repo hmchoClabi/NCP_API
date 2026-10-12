@@ -12,22 +12,64 @@ from .support import field, flatten_records
 
 _SUCCESS_RESULTS = {"SUCCESS", "SUCCEEDED", "OK", "성공", "완료"}
 _FAILURE_RESULTS = {
-    "FAIL", "FAILED", "FAILURE", "ERROR", "DENIED", "REJECTED",
-    "실패", "오류", "거부", "거절",
+    "FAIL",
+    "FAILED",
+    "FAILURE",
+    "ERROR",
+    "DENIED",
+    "REJECTED",
+    "실패",
+    "오류",
+    "거부",
+    "거절",
 }
 _CREATE_ACTIONS = {"create", "add", "attach", "register", "associate", "assign"}
 _DELETE_ACTIONS = {
-    "delete", "remove", "detach", "terminate", "deregister",
-    "disassociate", "unassign",
+    "delete",
+    "remove",
+    "detach",
+    "terminate",
+    "deregister",
+    "disassociate",
+    "unassign",
 }
 _READ_PREFIXES = (
-    "get", "list", "search", "describe", "download", "read", "view",
+    "get",
+    "list",
+    "search",
+    "describe",
+    "download",
+    "read",
+    "view",
 )
 _CHANGE_PREFIXES = (
-    "create", "delete", "remove", "terminate", "update", "set", "change",
-    "add", "attach", "detach", "start", "stop", "restart", "reboot",
-    "assign", "unassign", "associate", "disassociate", "enable", "disable",
-    "put", "register", "deregister", "modify", "reset", "cancel", "reissue",
+    "create",
+    "delete",
+    "remove",
+    "terminate",
+    "update",
+    "set",
+    "change",
+    "add",
+    "attach",
+    "detach",
+    "start",
+    "stop",
+    "restart",
+    "reboot",
+    "assign",
+    "unassign",
+    "associate",
+    "disassociate",
+    "enable",
+    "disable",
+    "put",
+    "register",
+    "deregister",
+    "modify",
+    "reset",
+    "cancel",
+    "reissue",
 )
 
 
@@ -42,9 +84,7 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
 
     for event in events:
         product = str(
-            event.get("product_display_name")
-            or event.get("product_name")
-            or "상품 미확인"
+            event.get("product_display_name") or event.get("product_name") or "상품 미확인"
         )
         action = str(event.get("action_name") or "작업 미확인")
         operation_kind = _operation_kind(action)
@@ -61,20 +101,22 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
 
         resource_id = event.get("resource_id")
         resource_name = event.get("resource_name") or resource_id or "대상 미확인"
-        items.append({
-            "source_state": OBSERVED,
-            "event_id": event.get("event_id"),
-            "event_time": event.get("event_time"),
-            "event_time_kst": event.get("event_time_kst"),
-            "product": product,
-            "action": action,
-            "operation_kind": operation_kind,
-            "result": result,
-            "resource_id": resource_id,
-            "resource_name": resource_name,
-            "user_type": event.get("user_type"),
-            "source_type": event.get("source_type"),
-        })
+        items.append(
+            {
+                "source_state": OBSERVED,
+                "event_id": event.get("event_id"),
+                "event_time": event.get("event_time"),
+                "event_time_kst": event.get("event_time_kst"),
+                "product": product,
+                "action": action,
+                "operation_kind": operation_kind,
+                "result": result,
+                "resource_id": resource_id,
+                "resource_name": resource_name,
+                "user_type": event.get("user_type"),
+                "source_type": event.get("source_type"),
+            }
+        )
         if result_kind == "FAILURE":
             if operation_kind == "CHANGE":
                 rule_id = "ACTIVITY_CHANGE_FAILED"
@@ -91,25 +133,30 @@ def analyze_changes(report: Any) -> tuple[dict[str, Any], list[Finding]]:
                 category = "EVENT"
                 title = f"{product} {action} 활동이 실패했습니다."
                 impact = "액션명만으로 조회·변경 여부를 확정할 수 없습니다."
-            findings.append(Finding(
-                rule_id=rule_id,
-                severity="WARNING",
-                category=category,
-                title=title,
-                evidence=[
-                    {"label": "대상", "value": resource_name},
-                    {"label": "결과", "value": result},
-                    {"label": "시각", "value": event.get("event_time_kst") or event.get("event_time")},
-                ],
-                impact=impact,
-                recommendation="Activity Tracer 원본 이력과 대상 자원의 현재 상태를 확인하세요.",
-                resource={"id": resource_id, "name": resource_name, "type": product},
-                occurrence_key=(
-                    event.get("event_id") or event.get("history_id"),
-                    action,
-                    event.get("event_time"),
-                ),
-            ))
+            findings.append(
+                Finding(
+                    rule_id=rule_id,
+                    severity="WARNING",
+                    category=category,
+                    title=title,
+                    evidence=[
+                        {"label": "대상", "value": resource_name},
+                        {"label": "결과", "value": result},
+                        {
+                            "label": "시각",
+                            "value": event.get("event_time_kst") or event.get("event_time"),
+                        },
+                    ],
+                    impact=impact,
+                    recommendation="Activity Tracer 원본 이력과 대상 자원의 현재 상태를 확인하세요.",
+                    resource={"id": resource_id, "name": resource_name, "type": product},
+                    occurrence_key=(
+                        event.get("event_id") or event.get("history_id"),
+                        action,
+                        event.get("event_time"),
+                    ),
+                )
+            )
 
     items.sort(
         key=lambda item: (
@@ -165,10 +212,7 @@ def summarize_activity_events(value: Any) -> dict[str, int]:
     """담당자가 확인할 Activity 작업을 보수적으로 집계한다."""
     groups = group_activity_events(value)
     return {
-        "total_count": sum(
-            len(groups[key])
-            for key in ("success", "failure", "unknown_result")
-        ),
+        "total_count": sum(len(groups[key]) for key in ("success", "failure", "unknown_result")),
         "success_count": len(groups["success"]),
         "failure_count": len(groups["failure"]),
         "unknown_result_count": len(groups["unknown_result"]),
@@ -225,10 +269,7 @@ def _lifecycle_kind(value: Any) -> str:
         first in _DELETE_ACTIONS
         or "".join(character for character in action.casefold() if character.isalnum())
         == "servertermination"
-        or any(
-            part in {"삭제", "제거", "반납", "분리"}
-            for part in last.split("/")
-        )
+        or any(part in {"삭제", "제거", "반납", "분리"} for part in last.split("/"))
     ):
         return "DELETE"
     return "OTHER"
@@ -237,9 +278,7 @@ def _lifecycle_kind(value: Any) -> str:
 def _is_login_action(value: Any) -> bool:
     if not isinstance(value, str):
         return False
-    normalized = "".join(
-        character for character in value.casefold() if character.isalnum()
-    )
+    normalized = "".join(character for character in value.casefold() if character.isalnum())
     return normalized in {"login", "signin", "로그인"}
 
 

@@ -148,8 +148,7 @@ class SecurityMonitoringCollector:
                         service=service,
                         page=page,
                         message=(
-                            f"형식이 올바르지 않은 보안 이벤트 "
-                            f"{invalid_count}건을 제외했습니다."
+                            f"형식이 올바르지 않은 보안 이벤트 {invalid_count}건을 제외했습니다."
                         ),
                     )
             except Exception as exc:
@@ -299,7 +298,8 @@ class SecurityMonitoringCollector:
             "target": service,
             "platform": "VPC",
             "api": api,
-            "message": message or (
+            "message": message
+            or (
                 safe_exception_message(exc)[:500]
                 if exc is not None
                 else "알 수 없는 Security Monitoring 수집 오류"
@@ -319,5 +319,6 @@ class SecurityMonitoringCollector:
         if required_actions:
             issue["required_actions"] = list(required_actions)
         self.last_errors.append(issue)
+
 
 __all__ = ["SecurityMonitoringCollector"]

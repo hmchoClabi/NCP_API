@@ -45,11 +45,11 @@ class FakePortalRepository:
         self.deleted_logos = []
         self.report_artifact = None
         self.report_detail_snapshot_requests = []
-        self.insight_alarms = summarize_insight_alarms([], datetime(2026, 9, 21, tzinfo=timezone.utc))
+        self.insight_alarms = summarize_insight_alarms(
+            [], datetime(2026, 9, 21, tzinfo=timezone.utc)
+        )
         self.recent_review = {
-            "window_started_at": datetime(
-                2026, 8, 22, 15, 0, tzinfo=timezone.utc
-            ),
+            "window_started_at": datetime(2026, 8, 22, 15, 0, tzinfo=timezone.utc),
             "report_count": 2,
             "customer_count": 1,
             "analyzed_report_count": 2,
@@ -58,38 +58,36 @@ class FakePortalRepository:
             "critical_count": 0,
             "warning_count": 1,
             "review_count": 0,
-            "items": [{
-                "tenant_id": "tenant-1",
-                "customer_code": "customer",
-                "customer_name": "Customer",
-                "environment": "public",
-                "account_name": "Primary",
-                "report_id": "report-review",
-                "report_type": "DAILY",
-                "report_status": "SUCCESS",
-                "completed_at": datetime(
-                    2026, 8, 23, 1, 30, tzinfo=timezone.utc
-                ),
-                "period_start": datetime(
-                    2026, 8, 22, 15, 0, tzinfo=timezone.utc
-                ),
-                "period_end": datetime(
-                    2026, 8, 23, 15, 0, tzinfo=timezone.utc
-                ),
-                "end_exclusive": True,
-                "severity": "WARNING",
-                "category": "METRIC",
-                "title": "web-1 CPU 사용률이 기준을 초과했습니다.",
-                "resource_name": "web-1",
-                "impact": "응답 지연 가능성이 있어 확인이 필요합니다.",
-                "recommendation": "같은 시간대의 프로세스와 부하를 확인하세요.",
-                "evidence": [{
-                    "label": "최대",
-                    "value": 92.4,
-                    "unit": "%",
-                }],
-                "report_count": 2,
-            }],
+            "items": [
+                {
+                    "tenant_id": "tenant-1",
+                    "customer_code": "customer",
+                    "customer_name": "Customer",
+                    "environment": "public",
+                    "account_name": "Primary",
+                    "report_id": "report-review",
+                    "report_type": "DAILY",
+                    "report_status": "SUCCESS",
+                    "completed_at": datetime(2026, 8, 23, 1, 30, tzinfo=timezone.utc),
+                    "period_start": datetime(2026, 8, 22, 15, 0, tzinfo=timezone.utc),
+                    "period_end": datetime(2026, 8, 23, 15, 0, tzinfo=timezone.utc),
+                    "end_exclusive": True,
+                    "severity": "WARNING",
+                    "category": "METRIC",
+                    "title": "web-1 CPU 사용률이 기준을 초과했습니다.",
+                    "resource_name": "web-1",
+                    "impact": "응답 지연 가능성이 있어 확인이 필요합니다.",
+                    "recommendation": "같은 시간대의 프로세스와 부하를 확인하세요.",
+                    "evidence": [
+                        {
+                            "label": "최대",
+                            "value": 92.4,
+                            "unit": "%",
+                        }
+                    ],
+                    "report_count": 2,
+                }
+            ],
         }
 
     def session_user(self, session_token):
@@ -105,7 +103,11 @@ class FakePortalRepository:
         }
 
     def report_detail(
-        self, report_id, allowed_tenants, *, include_snapshot=True,
+        self,
+        report_id,
+        allowed_tenants,
+        *,
+        include_snapshot=True,
     ):
         self.allowed_tenants = allowed_tenants
         self.report_detail_snapshot_requests.append(include_snapshot)
@@ -148,18 +150,32 @@ class FakePortalRepository:
         return "tenant-1" if account_id == "account-1" else None
 
     def update_tenant_report_settings(
-        self, tenant_id, options, actor_id, retention_policies=None,
+        self,
+        tenant_id,
+        options,
+        actor_id,
+        retention_policies=None,
     ):
         self.updated_report_settings.append((tenant_id, options, actor_id))
         self.updated_retention_policies.append(retention_policies)
         return options
 
     def bulk_update_report_retention(
-        self, tenant_ids, policies, actor_id, *, allowed_environments=None,
+        self,
+        tenant_ids,
+        policies,
+        actor_id,
+        *,
+        allowed_environments=None,
     ):
-        self.bulk_retention_updates.append((
-            tenant_ids, policies, actor_id, allowed_environments,
-        ))
+        self.bulk_retention_updates.append(
+            (
+                tenant_ids,
+                policies,
+                actor_id,
+                allowed_environments,
+            )
+        )
         return len(tenant_ids)
 
     def update_tenant_logo(self, tenant_id, logo, actor_id):
@@ -185,67 +201,80 @@ class FakePortalRepository:
                 "WEEKLY": {"mode": "DAYS", "days": 180},
                 "MONTHLY": {"mode": "FOREVER", "days": None},
             },
-            "accounts": [{
-                "id": "account-1",
-                "account_code": "primary",
-                "display_name": "Primary",
-                "status": "ACTIVE",
-                "credential_status": "VALID",
-                "access_key_hint": "***-KEY",
-                "credential_version": 1,
-                "rotated_at": datetime(2026, 8, 4, 0, 0, tzinfo=timezone.utc),
-                "schedules": [],
-            }],
-            "reports": [{
-                "id": "report-1",
-                "report_type": "DAILY",
-                "period_start": datetime(2026, 8, 2),
-                "period_end": datetime(2026, 8, 3),
-                "account_name": "Primary",
-                "status": "SUCCESS",
-                "error_count": 0,
-                "created_at": datetime(2026, 8, 3, 0, 5, tzinfo=timezone.utc),
-                "completed_at": datetime(
-                    2026, 8, 3, 0, 7, 5, tzinfo=timezone.utc
-                ),
-                "execution_seconds": 125,
-            }],
+            "accounts": [
+                {
+                    "id": "account-1",
+                    "account_code": "primary",
+                    "display_name": "Primary",
+                    "status": "ACTIVE",
+                    "credential_status": "VALID",
+                    "access_key_hint": "***-KEY",
+                    "credential_version": 1,
+                    "rotated_at": datetime(2026, 8, 4, 0, 0, tzinfo=timezone.utc),
+                    "schedules": [],
+                }
+            ],
+            "reports": [
+                {
+                    "id": "report-1",
+                    "report_type": "DAILY",
+                    "period_start": datetime(2026, 8, 2),
+                    "period_end": datetime(2026, 8, 3),
+                    "account_name": "Primary",
+                    "status": "SUCCESS",
+                    "error_count": 0,
+                    "created_at": datetime(2026, 8, 3, 0, 5, tzinfo=timezone.utc),
+                    "completed_at": datetime(2026, 8, 3, 0, 7, 5, tzinfo=timezone.utc),
+                    "execution_seconds": 125,
+                }
+            ],
         }
 
     def users_for_tenant(self, tenant_id):
-        return [{
-            "id": "customer-user-1",
-            "email": "customer@example.com",
-            "display_name": "Customer User",
-            "user_status": "ACTIVE",
-            "role": "CUSTOMER_VIEWER",
-            "membership_status": "ACTIVE",
-        }]
+        return [
+            {
+                "id": "customer-user-1",
+                "email": "customer@example.com",
+                "display_name": "Customer User",
+                "user_status": "ACTIVE",
+                "role": "CUSTOMER_VIEWER",
+                "membership_status": "ACTIVE",
+            }
+        ]
 
     def customer_users(self, allowed_environments=None):
-        return [{
-            "id": "customer-user-1",
-            "email": "customer@example.com",
-            "display_name": "Customer User",
-            "user_status": "ACTIVE",
-            "last_login_at": None,
-            "created_at": datetime(2026, 8, 1),
-            "can_delete": True,
-            "memberships": [{
-                "tenant_id": "tenant-1",
-                "customer_name": "Customer",
-                "environment": "public",
-                "role": "CUSTOMER_VIEWER",
-                "status": "ACTIVE",
-            }],
-        }]
+        return [
+            {
+                "id": "customer-user-1",
+                "email": "customer@example.com",
+                "display_name": "Customer User",
+                "user_status": "ACTIVE",
+                "last_login_at": None,
+                "created_at": datetime(2026, 8, 1),
+                "can_delete": True,
+                "memberships": [
+                    {
+                        "tenant_id": "tenant-1",
+                        "customer_name": "Customer",
+                        "environment": "public",
+                        "role": "CUSTOMER_VIEWER",
+                        "status": "ACTIVE",
+                    }
+                ],
+            }
+        ]
 
     def create_portal_user(self, email, password, display_name):
         self.created_portal_users.append((email, password, display_name))
         return "customer-user-1"
 
     def create_msp_user(
-        self, email, password, display_name, role, environment_scope=None,
+        self,
+        email,
+        password,
+        display_name,
+        role,
+        environment_scope=None,
         actor_id=None,
     ):
         self.created_msp_users.append(
@@ -260,36 +289,44 @@ class FakePortalRepository:
         return "MSP Operator"
 
     def delete_user_account(
-        self, user_id, actor_id, confirmation_email,
+        self,
+        user_id,
+        actor_id,
+        confirmation_email,
         allowed_environments=None,
     ):
         if self.delete_user_error:
             raise self.delete_user_error
-        self.deleted_users.append((
-            user_id, actor_id, confirmation_email, allowed_environments,
-        ))
+        self.deleted_users.append(
+            (
+                user_id,
+                actor_id,
+                confirmation_email,
+                allowed_environments,
+            )
+        )
         if user_id.startswith("msp-"):
             return "MSP User", "MSP"
         return "Customer User", "CUSTOMER"
 
     def msp_users(self, allowed_environments=None):
-        return [{
-            "id": "msp-user-1",
-            "email": "admin@example.com",
-            "display_name": "MSP Admin",
-            "user_status": "ACTIVE",
-            "role": "MSP_ADMIN",
-            "environment_scope": None,
-            "last_login_at": None,
-            "created_at": datetime(2026, 8, 1),
-        }]
+        return [
+            {
+                "id": "msp-user-1",
+                "email": "admin@example.com",
+                "display_name": "MSP Admin",
+                "user_status": "ACTIVE",
+                "role": "MSP_ADMIN",
+                "environment_scope": None,
+                "last_login_at": None,
+                "created_at": datetime(2026, 8, 1),
+            }
+        ]
 
     def assign_customer_membership(self, user_id, tenant_id, role):
         self.assigned_memberships.append((user_id, tenant_id, role))
 
-    def customer_user_accessible_in_environments(
-        self, user_id, allowed_environments
-    ):
+    def customer_user_accessible_in_environments(self, user_id, allowed_environments):
         return user_id == "customer-user-1" and "public" in allowed_environments
 
     def jobs_for_tenants(self, tenant_ids):
@@ -297,14 +334,16 @@ class FakePortalRepository:
 
     def notification_events(self, tenant_ids, after):
         self.notification_tenants = tenant_ids
-        return [{
-            "id": "job-1",
-            "status": "SUCCESS",
-            "occurred_at": datetime(2026, 8, 4, 1, 0, tzinfo=timezone.utc),
-            "report_type": "DAILY",
-            "customer_name": "Customer",
-            "account_name": "Primary",
-        }]
+        return [
+            {
+                "id": "job-1",
+                "status": "SUCCESS",
+                "occurred_at": datetime(2026, 8, 4, 1, 0, tzinfo=timezone.utc),
+                "report_type": "DAILY",
+                "customer_name": "Customer",
+                "account_name": "Primary",
+            }
+        ]
 
     def delete_account_credential(self, tenant_id, account_id, actor_id):
         self.deleted_credentials.append((tenant_id, account_id, actor_id))
@@ -323,13 +362,14 @@ class FakePortalRepository:
         return "익명 고객 12345678"
 
     def permanently_delete_tenant(
-        self, tenant_id, actor_id, archive_reference="",
+        self,
+        tenant_id,
+        actor_id,
+        archive_reference="",
     ):
         if not archive_reference:
             raise ValueError("보고서가 있는 고객은 외부 보관 참조가 필요합니다.")
-        self.permanently_deleted_tenants.append(
-            (tenant_id, actor_id, archive_reference)
-        )
+        self.permanently_deleted_tenants.append((tenant_id, actor_id, archive_reference))
         return "Customer", 1
 
     def delete_report(self, report_id, actor_id, *, protect_latest=False):
@@ -344,49 +384,61 @@ class FakePortalRepository:
 
     def report_cleanup_candidates(self, allowed_environments=None):
         self.cleanup_candidate_scopes.append(allowed_environments)
-        return [{
-            "id": "report-old",
-            "tenant_id": "tenant-1",
-            "customer_name": "Customer",
-            "environment": "public",
-            "account_name": "Primary",
-            "report_type": "DAILY",
-            "status": "SUCCESS",
-            "period_start": datetime(2026, 7, 1, tzinfo=timezone.utc),
-            "period_end": datetime(2026, 7, 2, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
-            "completed_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
-            "artifact_count": 2,
-            "artifact_bytes": 1_572_864,
-            "retention_until": None,
-            "protection_reason": None,
-            "eligible": True,
-        }, {
-            "id": "report-1",
-            "tenant_id": "tenant-1",
-            "customer_name": "Customer",
-            "environment": "public",
-            "account_name": "Primary",
-            "report_type": "DAILY",
-            "status": "SUCCESS",
-            "period_start": datetime(2026, 8, 1, tzinfo=timezone.utc),
-            "period_end": datetime(2026, 8, 2, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
-            "completed_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
-            "artifact_count": 1,
-            "artifact_bytes": 524_288,
-            "retention_until": None,
-            "protection_reason": "LATEST",
-            "eligible": False,
-        }]
+        return [
+            {
+                "id": "report-old",
+                "tenant_id": "tenant-1",
+                "customer_name": "Customer",
+                "environment": "public",
+                "account_name": "Primary",
+                "report_type": "DAILY",
+                "status": "SUCCESS",
+                "period_start": datetime(2026, 7, 1, tzinfo=timezone.utc),
+                "period_end": datetime(2026, 7, 2, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+                "artifact_count": 2,
+                "artifact_bytes": 1_572_864,
+                "retention_until": None,
+                "protection_reason": None,
+                "eligible": True,
+            },
+            {
+                "id": "report-1",
+                "tenant_id": "tenant-1",
+                "customer_name": "Customer",
+                "environment": "public",
+                "account_name": "Primary",
+                "report_type": "DAILY",
+                "status": "SUCCESS",
+                "period_start": datetime(2026, 8, 1, tzinfo=timezone.utc),
+                "period_end": datetime(2026, 8, 2, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
+                "completed_at": datetime(2026, 8, 2, tzinfo=timezone.utc),
+                "artifact_count": 1,
+                "artifact_bytes": 524_288,
+                "retention_until": None,
+                "protection_reason": "LATEST",
+                "eligible": False,
+            },
+        ]
 
     def request_report_cleanup(
-        self, report_ids, actor_id, *, allowed_environments=None,
+        self,
+        report_ids,
+        actor_id,
+        *,
+        allowed_environments=None,
         all_eligible=False,
     ):
-        self.cleanup_requests.append((
-            report_ids, actor_id, allowed_environments, all_eligible,
-        ))
+        self.cleanup_requests.append(
+            (
+                report_ids,
+                actor_id,
+                allowed_environments,
+                all_eligible,
+            )
+        )
         if all_eligible:
             return {
                 "queued_count": 1,
@@ -410,27 +462,31 @@ class FakePortalRepository:
         return []
 
     def schedulable_accounts(self, allowed_environments=None):
-        return [{
-            "id": "11111111-1111-1111-1111-111111111111",
-            "tenant_id": "tenant-1",
-            "account_code": "primary",
-            "account_name": "Primary",
-            "customer_code": "customer",
-            "customer_name": "Customer",
-            "environment": "public",
-        }]
+        return [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "tenant_id": "tenant-1",
+                "account_code": "primary",
+                "account_name": "Primary",
+                "customer_code": "customer",
+                "customer_name": "Customer",
+                "environment": "public",
+            }
+        ]
 
     def tenants(self, environment=None, allowed_environments=None):
-        return [{
-            "id": "tenant-1",
-            "customer_code": "customer",
-            "customer_name": "Customer",
-            "environment": "public",
-            "region": "KR",
-            "status": "ACTIVE",
-            "account_count": 1,
-            "report_count": 1,
-        }]
+        return [
+            {
+                "id": "tenant-1",
+                "customer_code": "customer",
+                "customer_name": "Customer",
+                "environment": "public",
+                "region": "KR",
+                "status": "ACTIVE",
+                "account_count": 1,
+                "report_count": 1,
+            }
+        ]
 
     def tenant_ids_for_environments(self, allowed_environments):
         return ["tenant-1"] if "public" in allowed_environments else []
@@ -441,9 +497,7 @@ class FakePortalRepository:
                 "customer_count": 1,
                 "public_count": 1,
                 "gov_count": 0,
-                "issue_count": self.recent_review[
-                    "affected_customer_count"
-                ],
+                "issue_count": self.recent_review["affected_customer_count"],
             },
             "artifact_storage": {
                 "status": "CRITICAL",
@@ -476,36 +530,76 @@ class FakeReportJobRepository:
         self.bulk_deletes = []
 
     def enqueue(
-        self, account_id, report_type, target_value, requested_by,
-        start_datetime=None, end_datetime=None,
+        self,
+        account_id,
+        report_type,
+        target_value,
+        requested_by,
+        start_datetime=None,
+        end_datetime=None,
     ):
-        self.enqueued.append((
-            account_id, report_type, target_value, requested_by,
-            start_datetime, end_datetime,
-        ))
+        self.enqueued.append(
+            (
+                account_id,
+                report_type,
+                target_value,
+                requested_by,
+                start_datetime,
+                end_datetime,
+            )
+        )
         return "job-1"
 
     def set_schedule_enabled(self, schedule_id, enabled):
         return schedule_id == "schedule-1"
 
     def upsert_schedule(
-        self, account_id, report_type, run_hour, run_minute, monthly_day,
-        actor_id, timezone_name="Asia/Seoul", weekly_day=None,
+        self,
+        account_id,
+        report_type,
+        run_hour,
+        run_minute,
+        monthly_day,
+        actor_id,
+        timezone_name="Asia/Seoul",
+        weekly_day=None,
     ):
-        self.schedule_upserts.append((
-            account_id, report_type, run_hour, run_minute, monthly_day,
-            actor_id, timezone_name, weekly_day,
-        ))
+        self.schedule_upserts.append(
+            (
+                account_id,
+                report_type,
+                run_hour,
+                run_minute,
+                monthly_day,
+                actor_id,
+                timezone_name,
+                weekly_day,
+            )
+        )
         return "schedule-1"
 
     def bulk_upsert_schedules(
-        self, account_ids, report_type, run_hour, run_minute,
-        monthly_day, actor_id, timezone_name="Asia/Seoul", weekly_day=None,
+        self,
+        account_ids,
+        report_type,
+        run_hour,
+        run_minute,
+        monthly_day,
+        actor_id,
+        timezone_name="Asia/Seoul",
+        weekly_day=None,
     ):
-        self.bulk_upserts.append((
-            account_ids, report_type, run_hour, run_minute,
-            monthly_day, actor_id, weekly_day,
-        ))
+        self.bulk_upserts.append(
+            (
+                account_ids,
+                report_type,
+                run_hour,
+                run_minute,
+                monthly_day,
+                actor_id,
+                weekly_day,
+            )
+        )
         return len(account_ids)
 
     def bulk_delete_schedules(self, account_ids, report_type):
@@ -517,10 +611,12 @@ class MspEnvironmentScopeTests(unittest.TestCase):
     def test_scoped_msp_can_only_access_matching_environment(self):
         user = {
             "platform_roles": ["MSP_OPERATOR"],
-            "platform_role_bindings": [{
-                "role": "MSP_OPERATOR",
-                "environment_scope": "public",
-            }],
+            "platform_role_bindings": [
+                {
+                    "role": "MSP_OPERATOR",
+                    "environment_scope": "public",
+                }
+            ],
             "memberships": [],
         }
 
@@ -698,9 +794,12 @@ class WebAppTests(unittest.TestCase):
     def test_customer_can_open_stored_html_artifact(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
         content = b"<html><script>console.log('report')</script>web-1</html>"
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ,
-            {"REPORT_OUTPUT_DIR": directory},
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                os.environ,
+                {"REPORT_OUTPUT_DIR": directory},
+            ),
         ):
             path = Path(directory) / "report.html"
             path.write_bytes(content)
@@ -720,9 +819,7 @@ class WebAppTests(unittest.TestCase):
         self.assertIn(b"web-1", response_data)
         policy = response.headers["Content-Security-Policy"]
         self.assertIn("frame-ancestors 'self'", policy)
-        script_hash = base64.b64encode(
-            sha256(b"console.log('report')").digest()
-        ).decode("ascii")
+        script_hash = base64.b64encode(sha256(b"console.log('report')").digest()).decode("ascii")
         self.assertIn(f"script-src 'sha256-{script_hash}'", policy)
         self.assertIn("img-src data: blob:", policy)
 
@@ -794,9 +891,7 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.jobs.enqueued[0][1], "CUSTOM")
-        self.assertEqual(self.jobs.enqueued[0][4:], (
-            "2026-08-03T08:00", "2026-08-03T09:00"
-        ))
+        self.assertEqual(self.jobs.enqueued[0][4:], ("2026-08-03T08:00", "2026-08-03T09:00"))
 
     def test_customer_viewer_cannot_change_schedule(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
@@ -985,7 +1080,10 @@ class WebAppTests(unittest.TestCase):
         response = self.client.get("/history?tenant_id=tenant-1&q=web&status=FAILED&page=2")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.history_tenants, ["tenant-1"])
-        self.assertEqual(self.repository.history_filters, {"query": "web", "status": "FAILED", "limit": 51, "offset": 50})
+        self.assertEqual(
+            self.repository.history_filters,
+            {"query": "web", "status": "FAILED", "limit": 51, "offset": 50},
+        )
         self.assertIn(b"tenant_id=tenant-1", response.data)
         self.assertEqual(self.client.get("/history?tenant_id=tenant-gov").status_code, 404)
         for query in ("page=0", "page=abc", "page=100001", "status=INVALID"):
@@ -996,36 +1094,52 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/login").status_code, 302)
         response = self.client.get("/history")
         self.assertIn(b'href="/history" class="is-current" aria-current="page"', response.data)
-        self.assertIn('본문 바로가기'.encode(), response.data)
+        self.assertIn("본문 바로가기".encode(), response.data)
 
     def test_insight_dashboard_renders_repeat_count_and_escapes_event_text(self):
         from tests.test_insight_dashboard import TODAY, event, report
+
         user = self.repository.session_user("session-token")
         user["platform_roles"] = ["MSP_ADMIN"]
         self.repository.session_user = lambda token: user if token else None
         self.client.set_cookie(SESSION_COOKIE, "session-token")
-        dimension = {"clusterUUID": "cluster-1", "namespace": "clabi", "controller": "cronjob:back-sched"}
-        self.repository.insight_alarms = summarize_insight_alarms([
-            report(events=[event(rule_name='<script>alert(1)</script>', dimension={**dimension, "pod": '<img src=x onerror=alert(2)>'}),
-                           event('two', rule_name='<script>alert(1)</script>', dimension={**dimension, "pod": 'back-sched-second'})])
-        ], TODAY)
+        dimension = {
+            "clusterUUID": "cluster-1",
+            "namespace": "clabi",
+            "controller": "cronjob:back-sched",
+        }
+        self.repository.insight_alarms = summarize_insight_alarms(
+            [
+                report(
+                    events=[
+                        event(
+                            rule_name="<script>alert(1)</script>",
+                            dimension={**dimension, "pod": "<img src=x onerror=alert(2)>"},
+                        ),
+                        event(
+                            "two",
+                            rule_name="<script>alert(1)</script>",
+                            dimension={**dimension, "pod": "back-sched-second"},
+                        ),
+                    ]
+                )
+            ],
+            TODAY,
+        )
         response = self.client.get("/msp")
         self.assertEqual(response.status_code, 200)
-        self.assertIn('금일 수집 Cloud Insight 알람'.encode(), response.data)
-        self.assertIn('2회'.encode(), response.data)
-        self.assertIn(b'&lt;script&gt;alert(1)&lt;/script&gt;', response.data)
-        self.assertNotIn(b'<script>alert(1)</script>', response.data)
-        self.assertIn('발생 내역 (2건)'.encode(), response.data)
-        self.assertIn(b'back-sched-second', response.data)
-        self.assertIn(b'&lt;img src=x onerror=alert(2)&gt;', response.data)
-        self.assertNotIn(b'<img src=x onerror=alert(2)>', response.data)
-
+        self.assertIn("금일 수집 Cloud Insight 알람".encode(), response.data)
+        self.assertIn("2회".encode(), response.data)
+        self.assertIn(b"&lt;script&gt;alert(1)&lt;/script&gt;", response.data)
+        self.assertNotIn(b"<script>alert(1)</script>", response.data)
+        self.assertIn("발생 내역 (2건)".encode(), response.data)
+        self.assertIn(b"back-sched-second", response.data)
+        self.assertIn(b"&lt;img src=x onerror=alert(2)&gt;", response.data)
+        self.assertNotIn(b"<img src=x onerror=alert(2)>", response.data)
 
     def test_notification_feed_is_scoped_and_uses_kst(self):
         self.client.set_cookie(SESSION_COOKIE, "session-token")
-        response = self.client.get(
-            "/notifications?after=2026-08-04T00:00:00%2B00:00"
-        )
+        response = self.client.get("/notifications?after=2026-08-04T00:00:00%2B00:00")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.repository.notification_tenants, ["tenant-1"])
@@ -1049,17 +1163,15 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(formatter(3_661), "1시간 1분 1초")
 
     def test_status_labels_keep_unknown_values_and_do_not_change_stored_codes(self):
-        formatter = self.app.jinja_env.filters['status_label']
-        self.assertEqual(formatter('PARTIAL_SUCCESS'), '부분 수집')
-        self.assertEqual(formatter('FUTURE_STATUS'), 'FUTURE_STATUS')
-        self.assertEqual(formatter(None), '-')
+        formatter = self.app.jinja_env.filters["status_label"]
+        self.assertEqual(formatter("PARTIAL_SUCCESS"), "부분 수집")
+        self.assertEqual(formatter("FUTURE_STATUS"), "FUTURE_STATUS")
+        self.assertEqual(formatter(None), "-")
 
     def test_inclusive_end_filter_converts_exclusive_month_boundary(self):
         formatter = self.app.jinja_env.filters["inclusive_end"]
 
-        converted = formatter(
-            datetime(2026, 8, 1, tzinfo=timezone.utc), True
-        )
+        converted = formatter(datetime(2026, 8, 1, tzinfo=timezone.utc), True)
 
         self.assertEqual(converted.date().isoformat(), "2026-07-31")
 
@@ -1077,11 +1189,13 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.repository.session_user = msp_user
         self.jobs = FakeReportJobRepository()
-        self.app = create_app({
-            "TESTING": True,
-            "PORTAL_REPOSITORY": self.repository,
-            "REPORT_JOB_REPOSITORY": self.jobs,
-        })
+        self.app = create_app(
+            {
+                "TESTING": True,
+                "PORTAL_REPOSITORY": self.repository,
+                "REPORT_JOB_REPOSITORY": self.jobs,
+            }
+        )
         self.client = self.app.test_client()
         self.client.set_cookie(SESSION_COOKIE, "session-token")
 
@@ -1094,10 +1208,12 @@ class MspCustomerDetailTests(unittest.TestCase):
                 "email": "scoped@example.com",
                 "display_name": "Scoped MSP",
                 "platform_roles": [role],
-                "platform_role_bindings": [{
-                    "role": role,
-                    "environment_scope": environment,
-                }],
+                "platform_role_bindings": [
+                    {
+                        "role": role,
+                        "environment_scope": environment,
+                    }
+                ],
                 "memberships": [],
                 "csrf_token_hash": token_hash("csrf-token"),
             }
@@ -1226,12 +1342,8 @@ class MspCustomerDetailTests(unittest.TestCase):
                     "account_name": "Primary",
                     "status": "SUCCESS",
                     "error_count": 0,
-                    "created_at": datetime(
-                        2026, 8, 12 - index, tzinfo=timezone.utc
-                    ),
-                    "completed_at": datetime(
-                        2026, 8, 12 - index, 0, 1, tzinfo=timezone.utc
-                    ),
+                    "created_at": datetime(2026, 8, 12 - index, tzinfo=timezone.utc),
+                    "completed_at": datetime(2026, 8, 12 - index, 0, 1, tzinfo=timezone.utc),
                     "execution_seconds": 60,
                 }
                 for index in range(1, 12)
@@ -1249,9 +1361,7 @@ class MspCustomerDetailTests(unittest.TestCase):
                 "trigger_type": "MANUAL",
                 "status": "SUCCESS",
                 "last_error": None,
-                "requested_at": datetime(
-                    2026, 8, 12 - index, tzinfo=timezone.utc
-                ),
+                "requested_at": datetime(2026, 8, 12 - index, tzinfo=timezone.utc),
             }
             for index in range(1, 12)
         ]
@@ -1292,20 +1402,27 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         tenant_id, options, actor_id = self.repository.updated_report_settings[0]
         self.assertEqual((tenant_id, actor_id), ("tenant-1", "user-1"))
-        self.assertEqual(options["sections"], [
-            "billing", "infrastructure_inventory",
-        ])
+        self.assertEqual(
+            options["sections"],
+            [
+                "billing",
+                "infrastructure_inventory",
+            ],
+        )
         self.assertEqual(
             options["section_order"],
             ["infrastructure_inventory", "billing"],
         )
         self.assertEqual(options["resource_categories"], ["SERVER", "VPC"])
         self.assertEqual(options["monitoring_categories"], ["SERVER"])
-        self.assertEqual(self.repository.updated_retention_policies[-1], {
-            "DAILY": {"mode": "DAYS", "days": "45"},
-            "WEEKLY": {"mode": "DAYS", "days": "180"},
-            "MONTHLY": {"mode": "FOREVER", "days": None},
-        })
+        self.assertEqual(
+            self.repository.updated_retention_policies[-1],
+            {
+                "DAILY": {"mode": "DAYS", "days": "45"},
+                "WEEKLY": {"mode": "DAYS", "days": "180"},
+                "MONTHLY": {"mode": "FOREVER", "days": None},
+            },
+        )
 
     def test_customer_detail_omits_action_cases_and_policy_exceptions(self):
         detail = self.client.get("/msp/customer/tenant-1")
@@ -1376,9 +1493,7 @@ class MspCustomerDetailTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 302)
-        fetch_logo.assert_called_once_with(
-            "https://assets.example.com/customer.png"
-        )
+        fetch_logo.assert_called_once_with("https://assets.example.com/customer.png")
         self.assertEqual(
             self.repository.updated_logos[0],
             ("tenant-1", fetched_logo, "user-1"),
@@ -1515,16 +1630,18 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
     def test_user_management_hides_current_and_cross_environment_deletion(self):
-        self.repository.msp_users = lambda _scope=None: [{
-            "id": "user-1",
-            "email": "viewer@example.com",
-            "display_name": "Current Admin",
-            "user_status": "ACTIVE",
-            "role": "MSP_ADMIN",
-            "environment_scope": None,
-            "last_login_at": None,
-            "created_at": datetime(2026, 8, 1),
-        }]
+        self.repository.msp_users = lambda _scope=None: [
+            {
+                "id": "user-1",
+                "email": "viewer@example.com",
+                "display_name": "Current Admin",
+                "user_status": "ACTIVE",
+                "role": "MSP_ADMIN",
+                "environment_scope": None,
+                "last_login_at": None,
+                "created_at": datetime(2026, 8, 1),
+            }
+        ]
         users = self.repository.customer_users()
         users[0]["can_delete"] = False
         self.repository.customer_users = lambda _scope=None: users
@@ -1560,15 +1677,18 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(msp_response.status_code, 302)
         self.assertEqual(customer_response.status_code, 302)
-        self.assertEqual(self.repository.deleted_users, [
-            ("msp-user-2", "user-1", "operator@example.com", None),
-            (
-                "customer-user-1",
-                "user-1",
-                "customer@example.com",
-                None,
-            ),
-        ])
+        self.assertEqual(
+            self.repository.deleted_users,
+            [
+                ("msp-user-2", "user-1", "operator@example.com", None),
+                (
+                    "customer-user-1",
+                    "user-1",
+                    "customer@example.com",
+                    None,
+                ),
+            ],
+        )
 
     def test_msp_admin_cannot_delete_current_account(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1611,12 +1731,17 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(denied.status_code, 404)
-        self.assertEqual(self.repository.deleted_users, [(
-            "customer-user-1",
-            "user-1",
-            "customer@example.com",
-            {"public"},
-        )])
+        self.assertEqual(
+            self.repository.deleted_users,
+            [
+                (
+                    "customer-user-1",
+                    "user-1",
+                    "customer@example.com",
+                    {"public"},
+                )
+            ],
+        )
 
     def test_msp_admin_cleanup_preview_marks_current_report_as_protected(self):
         response = self.client.get("/msp/data-cleanup")
@@ -1642,28 +1767,28 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn("백그라운드".encode("utf-8"), response.data)
 
     def test_cleanup_preview_shows_safe_retry_status(self):
-        self.repository.report_cleanup_candidates = lambda _scope=None: [{
-            "id": "report-queued",
-            "tenant_id": "tenant-1",
-            "customer_name": "Customer",
-            "environment": "public",
-            "account_name": "Primary",
-            "report_type": "WEEKLY",
-            "status": "SUCCESS",
-            "period_start": datetime(2026, 8, 10, tzinfo=timezone.utc),
-            "period_end": datetime(2026, 8, 17, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 8, 17, tzinfo=timezone.utc),
-            "artifact_count": 1,
-            "artifact_bytes": 1024,
-            "retention_until": None,
-            "protection_reason": "CLEANUP_QUEUED",
-            "cleanup_attempt_count": 2,
-            "cleanup_next_attempt_at": datetime(
-                2026, 8, 24, 0, 30, tzinfo=timezone.utc
-            ),
-            "cleanup_last_error_code": "DELETE_FAILED",
-            "eligible": False,
-        }]
+        self.repository.report_cleanup_candidates = lambda _scope=None: [
+            {
+                "id": "report-queued",
+                "tenant_id": "tenant-1",
+                "customer_name": "Customer",
+                "environment": "public",
+                "account_name": "Primary",
+                "report_type": "WEEKLY",
+                "status": "SUCCESS",
+                "period_start": datetime(2026, 8, 10, tzinfo=timezone.utc),
+                "period_end": datetime(2026, 8, 17, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 8, 17, tzinfo=timezone.utc),
+                "artifact_count": 1,
+                "artifact_bytes": 1024,
+                "retention_until": None,
+                "protection_reason": "CLEANUP_QUEUED",
+                "cleanup_attempt_count": 2,
+                "cleanup_next_attempt_at": datetime(2026, 8, 24, 0, 30, tzinfo=timezone.utc),
+                "cleanup_last_error_code": "DELETE_FAILED",
+                "eligible": False,
+            }
+        ]
 
         response = self.client.get("/msp/data-cleanup")
         page = response.get_data(as_text=True)
@@ -1761,9 +1886,16 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.created_portal_users, [(
-            "new-user@example.com", "temporary-password", "New User",
-        )])
+        self.assertEqual(
+            self.repository.created_portal_users,
+            [
+                (
+                    "new-user@example.com",
+                    "temporary-password",
+                    "New User",
+                )
+            ],
+        )
 
     def test_msp_admin_can_register_another_msp_admin(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1780,10 +1912,19 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.created_msp_users, [(
-            "admin-2@example.com", "temporary-password", "Second Admin",
-            "MSP_ADMIN", None, "user-1",
-        )])
+        self.assertEqual(
+            self.repository.created_msp_users,
+            [
+                (
+                    "admin-2@example.com",
+                    "temporary-password",
+                    "Second Admin",
+                    "MSP_ADMIN",
+                    None,
+                    "user-1",
+                )
+            ],
+        )
 
     def test_msp_admin_can_explicitly_scope_new_msp_user(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1801,14 +1942,19 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.created_msp_users, [(
-            "public-operator@example.com",
-            "temporary-password",
-            "Public Operator",
-            "MSP_OPERATOR",
-            "public",
-            "user-1",
-        )])
+        self.assertEqual(
+            self.repository.created_msp_users,
+            [
+                (
+                    "public-operator@example.com",
+                    "temporary-password",
+                    "Public Operator",
+                    "MSP_OPERATOR",
+                    "public",
+                    "user-1",
+                )
+            ],
+        )
 
     def test_public_scoped_admin_cannot_access_gov_tenant_or_report(self):
         self.use_scoped_msp("MSP_ADMIN", "public")
@@ -1887,10 +2033,13 @@ class MspCustomerDetailTests(unittest.TestCase):
 
         self.assertEqual(disabled.status_code, 302)
         self.assertEqual(enabled.status_code, 302)
-        self.assertEqual(self.repository.updated_msp_users, [
-            ("msp-user-2", "user-1", False),
-            ("msp-user-2", "user-1", True),
-        ])
+        self.assertEqual(
+            self.repository.updated_msp_users,
+            [
+                ("msp-user-2", "user-1", False),
+                ("msp-user-2", "user-1", True),
+            ],
+        )
 
     def test_msp_admin_cannot_change_own_account_status(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1931,9 +2080,16 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.assigned_memberships, [(
-            "customer-user-1", "tenant-1", "CUSTOMER_ADMIN",
-        )])
+        self.assertEqual(
+            self.repository.assigned_memberships,
+            [
+                (
+                    "customer-user-1",
+                    "tenant-1",
+                    "CUSTOMER_ADMIN",
+                )
+            ],
+        )
 
     def test_msp_user_registration_rejects_password_mismatch(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -1959,7 +2115,7 @@ class MspCustomerDetailTests(unittest.TestCase):
         self.assertIn(b'name="weekly_day"', schedules.data)
         self.assertIn(b'<option value="MONTHLY">', schedules.data)
         self.assertIn(b'name="monthly_day"', schedules.data)
-        self.assertNotIn(b'field.hidden = !active', schedules.data)
+        self.assertNotIn(b"field.hidden = !active", schedules.data)
         self.assertIn("보존 정책 일괄 적용".encode("utf-8"), schedules.data)
         self.assertIn(b'name="tenant_id" value="tenant-1"', schedules.data)
         self.assertEqual(self.client.get("/history").status_code, 200)
@@ -1982,9 +2138,20 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.jobs.bulk_upserts, [(
-            [account_id], "DAILY", 9, 0, 1, "user-1", None,
-        )])
+        self.assertEqual(
+            self.jobs.bulk_upserts,
+            [
+                (
+                    [account_id],
+                    "DAILY",
+                    9,
+                    0,
+                    1,
+                    "user-1",
+                    None,
+                )
+            ],
+        )
 
     def test_msp_admin_can_bulk_create_weekly_schedules(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -2004,9 +2171,20 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.jobs.bulk_upserts, [(
-            [account_id], "WEEKLY", 18, 30, None, "user-1", 5,
-        )])
+        self.assertEqual(
+            self.jobs.bulk_upserts,
+            [
+                (
+                    [account_id],
+                    "WEEKLY",
+                    18,
+                    30,
+                    None,
+                    "user-1",
+                    5,
+                )
+            ],
+        )
 
     def test_msp_admin_can_bulk_delete_schedules(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -2023,9 +2201,7 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            self.jobs.bulk_deletes, [([account_id], "MONTHLY")]
-        )
+        self.assertEqual(self.jobs.bulk_deletes, [([account_id], "MONTHLY")])
 
     def test_msp_admin_can_bulk_apply_report_retention(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")
@@ -2044,16 +2220,21 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.repository.bulk_retention_updates, [(
-            ["tenant-1"],
-            {
-                "DAILY": {"mode": "DAYS", "days": "30"},
-                "WEEKLY": {"mode": "DAYS", "days": "180"},
-                "MONTHLY": {"mode": "FOREVER", "days": None},
-            },
-            "user-1",
-            None,
-        )])
+        self.assertEqual(
+            self.repository.bulk_retention_updates,
+            [
+                (
+                    ["tenant-1"],
+                    {
+                        "DAILY": {"mode": "DAYS", "days": "30"},
+                        "WEEKLY": {"mode": "DAYS", "days": "180"},
+                        "MONTHLY": {"mode": "FOREVER", "days": None},
+                    },
+                    "user-1",
+                    None,
+                )
+            ],
+        )
 
     def test_scoped_msp_admin_bulk_retention_rechecks_environment_scope(self):
         self.use_scoped_msp("MSP_ADMIN", "public")
@@ -2073,9 +2254,7 @@ class MspCustomerDetailTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            self.repository.bulk_retention_updates[0][-1], {"public"}
-        )
+        self.assertEqual(self.repository.bulk_retention_updates[0][-1], {"public"})
 
     def test_msp_admin_can_delete_an_account_credential(self):
         self.client.set_cookie(CSRF_COOKIE, "csrf-token")

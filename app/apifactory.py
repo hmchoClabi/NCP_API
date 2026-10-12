@@ -63,10 +63,7 @@ class APIFactory:
 
         if name not in self._registry:
             available = ", ".join(sorted(self._registry.keys()))
-            raise KeyError(
-                f"지원하지 않는 API입니다: {name}. "
-                f"사용 가능 API: {available}"
-            )
+            raise KeyError(f"지원하지 않는 API입니다: {name}. 사용 가능 API: {available}")
 
         if name not in self._cache:
             api_class = self._registry[name]

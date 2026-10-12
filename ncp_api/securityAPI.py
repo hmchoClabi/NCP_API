@@ -7,8 +7,9 @@ class SecurityMonitoringAPI(BaseNCPAPI):
     SecurityMonitoringAPI 클래스
 
     """
+
     ENDPOINT_KEY = "securitymonitoring"
-    
+
     """
     ================================================================
     SecurityMonitoringAPI
@@ -16,7 +17,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
     ================================================================
     """
 
-    def get_anti_virus_list (
+    def get_anti_virus_list(
         self,
         startDateTime: int,
         endDateTime: int,
@@ -24,12 +25,11 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         countPerPage: int,
         order: Optional[str] = None,
         regionCode: Optional[str] = None,
-        zoneName : Optional[str] = None,
-        infectedServerIp : Optional[str] = None,
-        detectionPath : Optional[str] = None,
-        malwareType : Optional[str] = None,       
+        zoneName: Optional[str] = None,
+        infectedServerIp: Optional[str] = None,
+        detectionPath: Optional[str] = None,
+        malwareType: Optional[str] = None,
     ) -> Dict:
-
         """
         Anti-Virus 서비스 사용 중에 발생한 보안 이벤트 목록을 조회합니다.
 
@@ -47,7 +47,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
                 totalRows	Integer	-	조회된 목록의 총 개수
@@ -55,37 +55,35 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                 antiVirusDataList	Array	-	Anti-Virus 보안 이벤트 목록: antiVirusDataList
 
 
-                
+
         """
         json_body = {
             "startDateTime": startDateTime,
             "endDateTime": endDateTime,
             "page": page,
-            "countPerPage": countPerPage
+            "countPerPage": countPerPage,
         }
 
         if order is not None:
-            json_body['order'] = order
+            json_body["order"] = order
         if regionCode is not None:
-            json_body['regionCode'] = regionCode
+            json_body["regionCode"] = regionCode
         if zoneName is not None:
-            json_body['zoneName'] = zoneName
+            json_body["zoneName"] = zoneName
         if infectedServerIp is not None:
-            json_body['infectedServerIp'] = infectedServerIp
+            json_body["infectedServerIp"] = infectedServerIp
         if detectionPath is not None:
-            json_body['detectionPath'] = detectionPath
+            json_body["detectionPath"] = detectionPath
         if malwareType is not None:
-            json_body['malwareType'] = malwareType
+            json_body["malwareType"] = malwareType
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getAVList',
+            f"/vsecuritymonitoring/v1/getAVList",
             json_data=json_body,
             retry_safe=True,
         )
-    
 
-
-    def get_ddos_list (
+    def get_ddos_list(
         self,
         startDateTime: int,
         endDateTime: int,
@@ -93,12 +91,10 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         countPerPage: int,
         order: Optional[str] = None,
         regionCode: Optional[str] = None,
-        zoneName : Optional[str] = None,
-        attackIp : Optional[str] = None,
-        targetIp : Optional[str] = None
-        
+        zoneName: Optional[str] = None,
+        attackIp: Optional[str] = None,
+        targetIp: Optional[str] = None,
     ) -> Dict:
-
         """
         Anti-DDoS (Anti-Distributed Denial of Service) 서비스 사용 중에 발생한 보안 이벤트 목록을 조회합니다.
 
@@ -114,7 +110,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             targetIp	String	Optional	공격 대상 IP 주소
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 ddosDataList	Array	-	Anti-DDoS 보안 이벤트 목록: ddosDataList
                     ticketId	String	-	보안 이벤트에 부여된 고유 번호
@@ -131,38 +127,33 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
                 totalRows	Integer	-	조회된 목록의 총 개수
                 page	Integer	-	요청 페이지 번호
-                ddosDataList	Array	-	Anti-DDoS 보안 이벤트 목록: ddosDataList       
-"""
+                ddosDataList	Array	-	Anti-DDoS 보안 이벤트 목록: ddosDataList
+        """
         json_body = {
             "startDateTime": startDateTime,
             "endDateTime": endDateTime,
             "page": page,
-            "countPerPage": countPerPage
+            "countPerPage": countPerPage,
         }
 
         if order is not None:
-            json_body['order'] = order
+            json_body["order"] = order
         if regionCode is not None:
-            json_body['regionCode'] = regionCode
+            json_body["regionCode"] = regionCode
         if zoneName is not None:
-            json_body['zoneName'] = zoneName
+            json_body["zoneName"] = zoneName
         if attackIp is not None:
-            json_body['attackIp'] = attackIp
+            json_body["attackIp"] = attackIp
         if targetIp is not None:
-            json_body['targetIp'] = targetIp
+            json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getDDoSList',
+            f"/vsecuritymonitoring/v1/getDDoSList",
             json_data=json_body,
             retry_safe=True,
         )
 
-    def get_ddos_event_detail (
-        self,
-        ticketId: str
-        
-    ) -> Dict:
-
+    def get_ddos_event_detail(self, ticketId: str) -> Dict:
         """
         Anti-DDoS (Anti-Distributed Denial of Service) 서비스 사용 중에 발생한 보안 이벤트의 상세 정보를 조회합니다.
 
@@ -171,7 +162,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 lbName	String	-	보안 이벤트가 탐지된 로드밸런서 이름
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
@@ -179,30 +170,26 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                 lbDomainName	String	-	보안 이벤트가 탐지된 로드밸런서의 DNS 이름
                 lbInstanceNo	String	-	보안 이벤트가 탐지된 로드밸런서의 인스턴스 번호
         """
-        json_body = {
-            "ticketId" : ticketId
-        }
-
-        
+        json_body = {"ticketId": ticketId}
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getDDoSEventDetail',
+            f"/vsecuritymonitoring/v1/getDDoSEventDetail",
             json_data=json_body,
             retry_safe=True,
         )
-    
+
     def get_ids_list(
-        self, 
+        self,
         startDateTime: int,
         endDateTime: int,
         page: int,
         countPerPage: int,
         order: Optional[str] = None,
         regionCode: Optional[str] = None,
-        zoneName : Optional[str] = None,
-        attackType : Optional[str] = None,
-        attackIp : Optional[str] = None,
-        targetIp : Optional[str] = None
+        zoneName: Optional[str] = None,
+        attackType: Optional[str] = None,
+        attackIp: Optional[str] = None,
+        targetIp: Optional[str] = None,
     ) -> Dict:
         """
         IDS (Intrusion Detection System) 서비스 사용 중에 발생한 보안 이벤트 목록을 조회합니다.
@@ -212,7 +199,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 lbName	String	-	보안 이벤트가 탐지된 로드밸런서 이름
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
@@ -224,33 +211,28 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             "startDateTime": startDateTime,
             "endDateTime": endDateTime,
             "page": page,
-            "countPerPage": countPerPage
+            "countPerPage": countPerPage,
         }
         if order is not None:
-            json_body['order'] = order
+            json_body["order"] = order
         if regionCode is not None:
-            json_body['regionCode'] = regionCode
+            json_body["regionCode"] = regionCode
         if zoneName is not None:
-            json_body['zoneName'] = zoneName
+            json_body["zoneName"] = zoneName
         if attackType is not None:
-            json_body['attackType'] = attackType
+            json_body["attackType"] = attackType
         if attackIp is not None:
-            json_body['attackIp'] = attackIp
+            json_body["attackIp"] = attackIp
         if targetIp is not None:
-            json_body['targetIp'] = targetIp
+            json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getIDSList',
+            f"/vsecuritymonitoring/v1/getIDSList",
             json_data=json_body,
             retry_safe=True,
         )
-    
-    def get_ids_event_detail (
-        self,
-        ticketId: str
-        
-    ) -> Dict:
 
+    def get_ids_event_detail(self, ticketId: str) -> Dict:
         """
         IDS (Intrusion Detection System) 서비스 사용 중에 발생한 보안 이벤트의 상세 정보를 조회합니다.
 
@@ -259,7 +241,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 lbName	String	-	보안 이벤트가 탐지된 로드밸런서 이름
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
@@ -267,34 +249,28 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                 lbDomainName	String	-	보안 이벤트가 탐지된 로드밸런서의 DNS 이름
                 lbInstanceNo	String	-	보안 이벤트가 탐지된 로드밸런서의 인스턴스 번호
         """
-        json_body = {
-            "ticketId" : ticketId
-        }
-
-        
+        json_body = {"ticketId": ticketId}
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getIDSEventDetail',
+            f"/vsecuritymonitoring/v1/getIDSEventDetail",
             json_data=json_body,
             retry_safe=True,
         )
-    
+
     def get_ips_list(
-        self, 
+        self,
         startDateTime: int,
         endDateTime: int,
         page: int,
         countPerPage: int,
         order: Optional[str] = None,
         regionCode: Optional[str] = None,
-        zoneName : Optional[str] = None,
-        eventNm : Optional[str] = None,
-        attackIp : Optional[str] = None,
-        targetIp : Optional[str] = None,
-        attackType : Optional[str] = None,
-        protocol : Optional[str] = None,
-        
-        
+        zoneName: Optional[str] = None,
+        eventNm: Optional[str] = None,
+        attackIp: Optional[str] = None,
+        targetIp: Optional[str] = None,
+        attackType: Optional[str] = None,
+        protocol: Optional[str] = None,
     ) -> Dict:
         """
         IDS (Intrusion Detection System) 서비스 사용 중에 발생한 보안 이벤트 목록을 조회합니다.
@@ -315,7 +291,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 ipsDataList	Array	-	IPS 보안 이벤트 목록: ipsDataList
                     ticketId	String	-	보안 이벤트에 부여된 고유 번호
@@ -330,7 +306,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                     protocol	String	-	공격 프로토콜
                     detect	String	-	보안 이벤트 탐지 건수
                     region	String	-	리전
-                    zoneName	String	-	존 구분 KR-1 | KR-2 
+                    zoneName	String	-	존 구분 KR-1 | KR-2
                     platForm	String	-	플랫폼 구분 CLASSIC | VPC
                     vpcName	String	-	VPC 이름
                 returnMessage	String	-	요청에 대한 처리 결과 메시지
@@ -341,51 +317,44 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             "startDateTime": startDateTime,
             "endDateTime": endDateTime,
             "page": page,
-            "countPerPage": countPerPage
+            "countPerPage": countPerPage,
         }
         if order is not None:
-            json_body['order'] = order
+            json_body["order"] = order
         if regionCode is not None:
-            json_body['regionCode'] = regionCode
+            json_body["regionCode"] = regionCode
         if zoneName is not None:
-            json_body['zoneName'] = zoneName
+            json_body["zoneName"] = zoneName
         if eventNm is not None:
-            json_body['eventNm'] = eventNm
+            json_body["eventNm"] = eventNm
         if attackIp is not None:
-            json_body['attackIp'] = attackIp
+            json_body["attackIp"] = attackIp
         if targetIp is not None:
-            json_body['targetIp'] = targetIp
+            json_body["targetIp"] = targetIp
         if attackType is not None:
-            json_body['attackType'] = attackType
+            json_body["attackType"] = attackType
         if protocol is not None:
-            json_body['protocol'] = protocol
-        
-        
+            json_body["protocol"] = protocol
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getIPSList',
+            f"/vsecuritymonitoring/v1/getIPSList",
             json_data=json_body,
             retry_safe=True,
         )
-    
 
     def get_waf_list(
-        self, 
+        self,
         startDateTime: int,
         endDateTime: int,
         page: int,
         countPerPage: int,
         order: Optional[str] = None,
         regionCode: Optional[str] = None,
-        zoneName : Optional[str] = None,
-        attackType : Optional[str] = None,
-        eventNm : Optional[str] = None,
-        attackIp : Optional[str] = None,
-        targetIp : Optional[str] = None,
-        
-        
-        
-        
+        zoneName: Optional[str] = None,
+        attackType: Optional[str] = None,
+        eventNm: Optional[str] = None,
+        attackIp: Optional[str] = None,
+        targetIp: Optional[str] = None,
     ) -> Dict:
         """
         IDS (Intrusion Detection System) 서비스 사용 중에 발생한 보안 이벤트 목록을 조회합니다.
@@ -398,16 +367,16 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             order	String	Optional	이벤트 탐지 시간 정렬 순서 asc | desc (기본값) asc: 오름차순 desc: 내림차순
             regionCode	String	Optional	리전 코드 KR | DEN | JPN | SGN | USWN KR: 한국 DEN: 독일 JPN: 일본 SGN: 싱가포르 USWN: 미국
             zoneName	String	Optional	존 구분 KR-1 | KR-2
-            attackType	String	Optional	탐지된 공격 유형  
+            attackType	String	Optional	탐지된 공격 유형
             eventNm	String	Optional	탐지된 이벤트의 이름
             attackIp	String	Optional	공격자 IP 주소
             targetIp	String	Optional	공격 대상 IP 주소
-            
-            
+
+
 
 
         Returns:
-            Dict: 
+            Dict:
                 returnCode	Integer	-	요청에 대한 처리 결과 코드
                 wafDataList	Array	-	WAF 보안 이벤트 목록: wafDataList
                     ticketId	String	-	보안 이벤트에 부여된 고유 번호
@@ -418,7 +387,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
                     attackerIp	String	-	공격자 IP 주소
                     attackerPort	String	-	공격자의 포트 번호
                     targetIp	String	-	공격 대상 IP 주소
-                    targetPort	String	-	공격 대상의 포트 번호 
+                    targetPort	String	-	공격 대상의 포트 번호
                     region	String	-	리전
                     zoneName	String	-	존 구분 KR-1 | KR-2
                     platForm	String	-	플랫폼 구분 CLASSIC | VPC
@@ -431,25 +400,25 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             "startDateTime": startDateTime,
             "endDateTime": endDateTime,
             "page": page,
-            "countPerPage": countPerPage
+            "countPerPage": countPerPage,
         }
         if order is not None:
-            json_body['order'] = order
+            json_body["order"] = order
         if regionCode is not None:
-            json_body['regionCode'] = regionCode
+            json_body["regionCode"] = regionCode
         if zoneName is not None:
-            json_body['zoneName'] = zoneName
+            json_body["zoneName"] = zoneName
         if attackType is not None:
-            json_body['attackType'] = attackType
+            json_body["attackType"] = attackType
         if eventNm is not None:
-            json_body['eventNm'] = eventNm
+            json_body["eventNm"] = eventNm
         if attackIp is not None:
-            json_body['attackIp'] = attackIp
+            json_body["attackIp"] = attackIp
         if targetIp is not None:
-            json_body['targetIp'] = targetIp
+            json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f'/vsecuritymonitoring/v1/getWAFList',
+            f"/vsecuritymonitoring/v1/getWAFList",
             json_data=json_body,
             retry_safe=True,
         )

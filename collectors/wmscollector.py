@@ -65,8 +65,7 @@ class WMSCollector:
                     stage="scenario_validation",
                     api="get_wms_monitor_list",
                     message=(
-                        f"형식이 올바르지 않은 시나리오 {invalid_scenarios}건을 "
-                        "제외했습니다."
+                        f"형식이 올바르지 않은 시나리오 {invalid_scenarios}건을 제외했습니다."
                     ),
                 )
         except Exception as exc:
@@ -80,9 +79,7 @@ class WMSCollector:
             return []
 
         if not scenarios:
-            self.last_dataset_status = (
-                "FAILED" if self.last_errors else "COLLECTED_EMPTY"
-            )
+            self.last_dataset_status = "FAILED" if self.last_errors else "COLLECTED_EMPTY"
             return []
 
         from_seconds = start_time // 1_000
@@ -120,23 +117,17 @@ class WMSCollector:
                     raise ValueError("WMS 기간 결과가 object 형식이 아닙니다.")
                 raw_results = result_response.get("results")
                 if isinstance(raw_results, list):
-                    invalid_results = sum(
-                        not isinstance(item, Mapping)
-                        for item in raw_results
-                    )
+                    invalid_results = sum(not isinstance(item, Mapping) for item in raw_results)
                     if invalid_results:
                         self._record_error(
                             stage="result_validation",
                             api="get_wms_monitor_result",
                             target=str(scenario_id),
                             message=(
-                                f"형식이 올바르지 않은 WMS 결과 "
-                                f"{invalid_results}건을 제외했습니다."
+                                f"형식이 올바르지 않은 WMS 결과 {invalid_results}건을 제외했습니다."
                             ),
                         )
-                normalized.append(
-                    self.normalizer.normalize(scenario, result_response)
-                )
+                normalized.append(self.normalizer.normalize(scenario, result_response))
             except Exception as exc:
                 self._record_error(
                     stage="scenario_result",
@@ -146,9 +137,7 @@ class WMSCollector:
                     target=str(scenario_id),
                 )
 
-        observation_count = sum(
-            self._observation_count(item) for item in normalized
-        )
+        observation_count = sum(self._observation_count(item) for item in normalized)
         if not normalized and self.last_errors:
             self.last_dataset_status = "FAILED"
         elif self.last_errors:
@@ -165,9 +154,7 @@ class WMSCollector:
 
         total = item.get("total_count")
         try:
-            return max(int(total), 0) if total is not None else len(
-                item.get("results") or []
-            )
+            return max(int(total), 0) if total is not None else len(item.get("results") or [])
         except (TypeError, ValueError):
             return len(item.get("results") or [])
 
@@ -184,8 +171,10 @@ class WMSCollector:
 
     @staticmethod
     def _invalid_scenario_count(response: Any) -> int:
-        value = response if isinstance(response, list) else (
-            response.get("scenarios") if isinstance(response, Mapping) else []
+        value = (
+            response
+            if isinstance(response, list)
+            else (response.get("scenarios") if isinstance(response, Mapping) else [])
         )
         if not isinstance(value, list):
             return 0
@@ -206,10 +195,9 @@ class WMSCollector:
             "stage": stage,
             "target_type": "web_service_monitor",
             "api": api,
-            "message": message or (
-                safe_exception_message(exc)[:500]
-                if exc is not None
-                else "알 수 없는 WMS 수집 오류"
+            "message": message
+            or (
+                safe_exception_message(exc)[:500] if exc is not None else "알 수 없는 WMS 수집 오류"
             ),
         }
         if target:
@@ -226,5 +214,6 @@ class WMSCollector:
         if required_actions:
             issue["required_actions"] = list(required_actions)
         self.last_errors.append(issue)
+
 
 __all__ = ["WMSCollector"]

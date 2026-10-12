@@ -33,11 +33,13 @@ class ArtifactStorageUsageTests(unittest.TestCase):
                 (900, 100, "CRITICAL", 90.0),
                 (800, 100, "WARNING", 88.9),
             ):
-                with self.subTest(used=used, free=free), patch.dict(
-                    os.environ, {"REPORT_OUTPUT_DIR": directory}
-                ), patch(
-                    "webapp.repository.disk_usage",
-                    return_value=(1000, used, free),
+                with (
+                    self.subTest(used=used, free=free),
+                    patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}),
+                    patch(
+                        "webapp.repository.disk_usage",
+                        return_value=(1000, used, free),
+                    ),
                 ):
                     usage = _artifact_storage_usage()
 
@@ -48,9 +50,7 @@ class ArtifactStorageUsageTests(unittest.TestCase):
                 self.assertEqual(usage["used_percent"], expected_percent)
 
     def test_unavailable_does_not_expose_path_or_error(self):
-        with patch.dict(
-            os.environ, {"REPORT_OUTPUT_DIR": "missing-artifact-directory"}
-        ):
+        with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": "missing-artifact-directory"}):
             usage = _artifact_storage_usage()
 
         self.assertEqual(
@@ -71,7 +71,9 @@ class DashboardReviewTests(unittest.TestCase):
         connection = MagicMock()
         cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
         repository._connect = MagicMock(return_value=connection)
-        repository.report_history(["tenant-1"], query="50%_\\' OR 1=1", status="FAILED", limit=51, offset=50)
+        repository.report_history(
+            ["tenant-1"], query="50%_\\' OR 1=1", status="FAILED", limit=51, offset=50
+        )
         query, parameters = cursor.execute.call_args.args
         self.assertIn("history.tenant_id = ANY(%s::uuid[])", query)
         self.assertIn("LIMIT %s OFFSET %s", query)
@@ -79,9 +81,7 @@ class DashboardReviewTests(unittest.TestCase):
         self.assertEqual(parameters, [["tenant-1"], "%50\\%\\_\\\\' OR 1=1%", "FAILED", 51, 50])
 
     def test_findings_are_deduplicated_and_successful_changes_stay_reviewable(self):
-        window = datetime(
-            2026, 8, 23, tzinfo=timezone(timedelta(hours=9))
-        )
+        window = datetime(2026, 8, 23, tzinfo=timezone(timedelta(hours=9)))
         finding = {
             "fingerprint": "same-finding",
             "rule_id": "CPU_HIGH",
@@ -99,29 +99,31 @@ class DashboardReviewTests(unittest.TestCase):
             ("report-new", datetime(2026, 8, 24, tzinfo=timezone.utc)),
             ("report-old", datetime(2026, 8, 23, tzinfo=timezone.utc)),
         ):
-            reports.append({
-                "id": report_id,
-                "tenant_id": "tenant-1",
-                "cloud_account_id": "account-1",
-                "customer_code": "customer",
-                "customer_name": "Customer",
-                "environment": "public",
-                "account_name": "Primary",
-                "report_type": "DAILY",
-                "status": "SUCCESS",
-                "period_start": completed_at - timedelta(days=1),
-                "period_end": completed_at,
-                "end_exclusive": True,
-                "error_count": 0,
-                "completed_at": completed_at,
-                "analysis": {
-                    "findings": [finding],
-                    "changes": {
-                        "created_success_count": 1,
-                        "deleted_success_count": 0,
+            reports.append(
+                {
+                    "id": report_id,
+                    "tenant_id": "tenant-1",
+                    "cloud_account_id": "account-1",
+                    "customer_code": "customer",
+                    "customer_name": "Customer",
+                    "environment": "public",
+                    "account_name": "Primary",
+                    "report_type": "DAILY",
+                    "status": "SUCCESS",
+                    "period_start": completed_at - timedelta(days=1),
+                    "period_end": completed_at,
+                    "end_exclusive": True,
+                    "error_count": 0,
+                    "completed_at": completed_at,
+                    "analysis": {
+                        "findings": [finding],
+                        "changes": {
+                            "created_success_count": 1,
+                            "deleted_success_count": 0,
+                        },
                     },
-                },
-            })
+                }
+            )
 
         review = _build_dashboard_review(reports, window)
 
@@ -130,17 +132,12 @@ class DashboardReviewTests(unittest.TestCase):
         self.assertEqual(review["analyzed_report_count"], 2)
         self.assertEqual(review["critical_count"], 1)
         self.assertEqual(review["review_count"], 2)
-        finding_item = next(
-            item for item in review["items"]
-            if item["severity"] == "CRITICAL"
-        )
+        finding_item = next(item for item in review["items"] if item["severity"] == "CRITICAL")
         self.assertEqual(finding_item["report_id"], "report-new")
         self.assertEqual(finding_item["report_count"], 2)
 
     def test_missing_analysis_and_unexplained_partial_collection_are_visible(self):
-        window = datetime(
-            2026, 8, 23, tzinfo=timezone(timedelta(hours=9))
-        )
+        window = datetime(2026, 8, 23, tzinfo=timezone(timedelta(hours=9)))
         common = {
             "tenant_id": "tenant-1",
             "cloud_account_id": "account-1",
@@ -154,25 +151,28 @@ class DashboardReviewTests(unittest.TestCase):
             "end_exclusive": True,
             "completed_at": datetime(2026, 8, 23, tzinfo=timezone.utc),
         }
-        review = _build_dashboard_review([
-            {
-                **common,
-                "id": "missing-analysis",
-                "status": "SUCCESS",
-                "error_count": 0,
-                "analysis": {},
-            },
-            {
-                **common,
-                "id": "partial",
-                "status": "PARTIAL_SUCCESS",
-                "error_count": 2,
-                "analysis": {
-                    "findings": [],
-                    "changes": {"created_success_count": "invalid"},
+        review = _build_dashboard_review(
+            [
+                {
+                    **common,
+                    "id": "missing-analysis",
+                    "status": "SUCCESS",
+                    "error_count": 0,
+                    "analysis": {},
                 },
-            },
-        ], window)
+                {
+                    **common,
+                    "id": "partial",
+                    "status": "PARTIAL_SUCCESS",
+                    "error_count": 2,
+                    "analysis": {
+                        "findings": [],
+                        "changes": {"created_success_count": "invalid"},
+                    },
+                },
+            ],
+            window,
+        )
 
         self.assertEqual(review["analyzed_report_count"], 1)
         self.assertEqual(review["warning_count"], 2)
@@ -214,21 +214,19 @@ class DashboardReviewTests(unittest.TestCase):
         self.assertIn("public_snapshot.normalized_data -> 'analysis'", query)
         self.assertIn("tenant.status <> 'OFFBOARDED'", query)
         self.assertEqual(parameters[1], ["gov"])
-        self.assertEqual(
-            parameters[0].utcoffset(), timedelta(hours=9)
-        )
-        self.assertEqual(
-            (parameters[0].hour, parameters[0].minute), (0, 0)
-        )
+        self.assertEqual(parameters[0].utcoffset(), timedelta(hours=9))
+        self.assertEqual((parameters[0].hour, parameters[0].minute), (0, 0))
 
 
 class ReportRetentionPolicyTests(unittest.TestCase):
     def test_missing_policy_defaults_to_forever_without_accepting_bad_days(self):
         self.assertEqual(
-            normalize_report_retention_policies({
-                "DAILY": {"mode": "DAYS", "days": 30},
-                "WEEKLY": {"mode": "DAYS", "days": "0"},
-            }),
+            normalize_report_retention_policies(
+                {
+                    "DAILY": {"mode": "DAYS", "days": 30},
+                    "WEEKLY": {"mode": "DAYS", "days": "0"},
+                }
+            ),
             {
                 "DAILY": {"mode": "DAYS", "days": 30},
                 "WEEKLY": {"mode": "FOREVER", "days": None},
@@ -285,7 +283,8 @@ class ReportRetentionPolicyTests(unittest.TestCase):
         )
 
         upsert = next(
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "ON CONFLICT (tenant_id) DO UPDATE SET" in call.args[0]
         )
         stored = json.loads(upsert.args[1][1])
@@ -304,9 +303,7 @@ class ReportRetentionPolicyTests(unittest.TestCase):
             "11111111-1111-1111-1111-111111111111",
             "22222222-2222-2222-2222-222222222222",
         ]
-        cursor.fetchall.return_value = [
-            {"id": tenant_id} for tenant_id in tenant_ids
-        ]
+        cursor.fetchall.return_value = [{"id": tenant_id} for tenant_id in tenant_ids]
         policies = {
             report_type: {"mode": "DAYS", "days": 30}
             for report_type in ("DAILY", "WEEKLY", "MONTHLY")
@@ -324,7 +321,8 @@ class ReportRetentionPolicyTests(unittest.TestCase):
         self.assertIn("status = 'ACTIVE'", tenant_select.args[0])
         self.assertIn("environment = ANY(%s)", tenant_select.args[0])
         settings_updates = [
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "UPDATE control.tenant_report_settings" in call.args[0]
         ]
         self.assertEqual(len(settings_updates), 1)
@@ -348,11 +346,13 @@ class ReportArtifactCleanupTests(unittest.TestCase):
             outside_file.write_text("outside", encoding="utf-8")
 
             with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": str(output_root)}):
-                candidates, failed = _local_report_artifact_paths([
-                    report_file.as_uri(),
-                    outside_file.as_uri(),
-                    "s3://archive/report.html",
-                ])
+                candidates, failed = _local_report_artifact_paths(
+                    [
+                        report_file.as_uri(),
+                        outside_file.as_uri(),
+                        "s3://archive/report.html",
+                    ]
+                )
 
             self.assertEqual(failed, 0)
             self.assertIn(report_file.resolve(), candidates)
@@ -363,9 +363,11 @@ class ReportArtifactCleanupTests(unittest.TestCase):
     def test_candidate_selection_reports_malformed_local_uri(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
-                candidates, failed = _local_report_artifact_paths([
-                    Path(directory).as_uri() + "/%00",
-                ])
+                candidates, failed = _local_report_artifact_paths(
+                    [
+                        Path(directory).as_uri() + "/%00",
+                    ]
+                )
 
             self.assertEqual(candidates, set())
             self.assertEqual(failed, 1)
@@ -435,25 +437,22 @@ class TenantDeletionArtifactCleanupTests(unittest.TestCase):
             owned.write_text("owned", encoding="utf-8")
             shared.write_text("shared", encoding="utf-8")
             shared_legacy.write_text("shared legacy", encoding="utf-8")
-            repository._other_artifact_storage_uris = MagicMock(
-                return_value=[shared.as_uri()]
-            )
+            repository._other_artifact_storage_uris = MagicMock(return_value=[shared.as_uri()])
 
             with patch.dict(os.environ, {"REPORT_OUTPUT_DIR": directory}):
-                operation_id, queued, shared_count = (
-                    repository._queue_artifact_cleanup(
-                        cursor,
-                        tenant_id="tenant-1",
-                        storage_uris=[owned.as_uri(), shared.as_uri()],
-                        owner_column="report_run_id",
-                        owner_id="report-1",
-                    )
+                operation_id, queued, shared_count = repository._queue_artifact_cleanup(
+                    cursor,
+                    tenant_id="tenant-1",
+                    storage_uris=[owned.as_uri(), shared.as_uri()],
+                    owner_column="report_run_id",
+                    owner_id="report-1",
                 )
 
         self.assertIsNotNone(operation_id)
         self.assertEqual((queued, shared_count), (1, 11))
         insert = next(
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "INSERT INTO control.artifact_cleanup_outbox" in call.args[0]
         )
         self.assertEqual(insert.args[1][2], owned.as_uri())
@@ -488,9 +487,7 @@ class TenantDeletionArtifactCleanupTests(unittest.TestCase):
             self.assertTrue(connection.__exit__.called)
             return 3, 0
 
-        repository._finish_artifact_cleanup = MagicMock(
-            side_effect=finish_after_commit
-        )
+        repository._finish_artifact_cleanup = MagicMock(side_effect=finish_after_commit)
 
         result = repository.permanently_delete_tenant(
             "tenant-1",
@@ -589,13 +586,17 @@ class DurableReportCleanupQueueTests(unittest.TestCase):
             allowed_environments={"public"},
         )
 
-        self.assertEqual(result, {
-            "queued_count": 1,
-            "already_queued_count": 1,
-            "protected_count": 1,
-        })
+        self.assertEqual(
+            result,
+            {
+                "queued_count": 1,
+                "already_queued_count": 1,
+                "protected_count": 1,
+            },
+        )
         update = next(
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "SET cleanup_requested_at" in call.args[0]
         )
         self.assertIn("retention_policies", update.args[0])
@@ -605,16 +606,20 @@ class DurableReportCleanupQueueTests(unittest.TestCase):
 
     def test_all_request_only_queues_eligible_preview_rows(self):
         repository, cursor = self._repository_with_cursor()
-        repository.report_cleanup_candidates = MagicMock(return_value=[
-            {"id": self.REPORT_ID, "eligible": True},
-            {"id": "44444444-4444-4444-4444-444444444444", "eligible": False},
-        ])
+        repository.report_cleanup_candidates = MagicMock(
+            return_value=[
+                {"id": self.REPORT_ID, "eligible": True},
+                {"id": "44444444-4444-4444-4444-444444444444", "eligible": False},
+            ]
+        )
         cursor.fetchall.side_effect = [
-            [{
-                "id": self.REPORT_ID,
-                "cleanup_requested_at": None,
-                "protection_reason": None,
-            }],
+            [
+                {
+                    "id": self.REPORT_ID,
+                    "cleanup_requested_at": None,
+                    "protection_reason": None,
+                }
+            ],
             [{"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}],
         ]
 
@@ -636,9 +641,7 @@ class DurableReportCleanupQueueTests(unittest.TestCase):
 
     def test_retention_enqueue_is_bounded_and_malformed_json_is_fail_closed(self):
         repository, cursor = self._repository_with_cursor()
-        cursor.fetchall.return_value = [
-            {"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}
-        ]
+        cursor.fetchall.return_value = [{"id": self.REPORT_ID, "tenant_id": self.TENANT_ID}]
 
         self.assertEqual(repository.enqueue_expired_report_cleanup(limit=25), 1)
 
@@ -674,26 +677,31 @@ class DurableReportCleanupQueueTests(unittest.TestCase):
                 "cleanup_reason": "MANUAL",
             },
         ]
-        repository.delete_report = MagicMock(side_effect=[
-            {
-                "removed_artifact_files": 2,
-                "failed_artifact_files": 1,
-            },
-            ReportCleanupProtectedError("protected"),
-            RuntimeError("temporary failure"),
-        ])
+        repository.delete_report = MagicMock(
+            side_effect=[
+                {
+                    "removed_artifact_files": 2,
+                    "failed_artifact_files": 1,
+                },
+                ReportCleanupProtectedError("protected"),
+                RuntimeError("temporary failure"),
+            ]
+        )
         repository._record_report_cleanup_failure = MagicMock()
 
         result = repository.process_requested_report_cleanup(limit=3)
 
-        self.assertEqual(result, {
-            "claimed_count": 3,
-            "deleted_count": 1,
-            "protected_count": 1,
-            "failed_count": 1,
-            "removed_artifact_files": 2,
-            "pending_artifact_files": 1,
-        })
+        self.assertEqual(
+            result,
+            {
+                "claimed_count": 3,
+                "deleted_count": 1,
+                "protected_count": 1,
+                "failed_count": 1,
+                "removed_artifact_files": 2,
+                "pending_artifact_files": 1,
+            },
+        )
         self.assertEqual(
             repository.delete_report.call_args_list[0].kwargs,
             {"protect_latest": False, "automated_retention": True},
@@ -734,12 +742,8 @@ class DurableReportCleanupQueueTests(unittest.TestCase):
             artifact_cleanup.main()
 
         settings_from_env.assert_called_once_with()
-        repository.enqueue_expired_report_cleanup.assert_called_once_with(
-            limit=25
-        )
-        repository.process_requested_report_cleanup.assert_called_once_with(
-            limit=25
-        )
+        repository.enqueue_expired_report_cleanup.assert_called_once_with(limit=25)
+        repository.process_requested_report_cleanup.assert_called_once_with(limit=25)
         repository.retry_artifact_cleanup.assert_called_once_with(limit=25)
 
 
@@ -819,9 +823,7 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
             "retention_protected": False,
         }
         cursor.fetchall.side_effect = [[], [], []]
-        repository._queue_artifact_cleanup = MagicMock(
-            return_value=(None, 0, 0)
-        )
+        repository._queue_artifact_cleanup = MagicMock(return_value=(None, 0, 0))
 
         deleted = repository.delete_report("report-1", "admin-1")
 
@@ -847,11 +849,7 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
                 "retention_protected": False,
             },
             {
-                "settings": {
-                    "retention_policies": {
-                        "DAILY": {"mode": "FOREVER", "days": None}
-                    }
-                },
+                "settings": {"retention_policies": {"DAILY": {"mode": "FOREVER", "days": None}}},
                 "evaluated_at": datetime.now(timezone.utc),
             },
         ]
@@ -889,18 +887,12 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
                 "retention_protected": False,
             },
             {
-                "settings": {
-                    "retention_policies": {
-                        "DAILY": {"mode": "DAYS", "days": 30}
-                    }
-                },
+                "settings": {"retention_policies": {"DAILY": {"mode": "DAYS", "days": 30}}},
                 "evaluated_at": datetime.now(timezone.utc),
             },
         ]
         cursor.fetchall.side_effect = [[], [], []]
-        repository._queue_artifact_cleanup = MagicMock(
-            return_value=(None, 0, 0)
-        )
+        repository._queue_artifact_cleanup = MagicMock(return_value=(None, 0, 0))
 
         repository.delete_report(
             "report-1",
@@ -912,7 +904,8 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
         settings_lock = cursor.execute.call_args_list[1]
         self.assertIn("FOR UPDATE", settings_lock.args[0])
         audit = next(
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "INSERT INTO audit.data_change_logs" in call.args[0]
         )
         changed_fields = json.loads(audit.args[1][3])
@@ -996,13 +989,11 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
             "ORDER BY next_attempt_at, created_at, id",
             statements[0],
         )
-        self.assertTrue(any(
-            "DELETE FROM control.artifact_cleanup_outbox" in sql
-            for sql in statements
-        ))
+        self.assertTrue(
+            any("DELETE FROM control.artifact_cleanup_outbox" in sql for sql in statements)
+        )
         retry_update = next(
-            sql for sql in statements
-            if "UPDATE control.artifact_cleanup_outbox" in sql
+            sql for sql in statements if "UPDATE control.artifact_cleanup_outbox" in sql
         )
         self.assertIn(
             "1 << LEAST(attempt_count, 8)",
@@ -1037,7 +1028,8 @@ class ReportDeletionArtifactCleanupTests(unittest.TestCase):
 
         remove.assert_not_called()
         update = next(
-            call for call in cursor.execute.call_args_list
+            call
+            for call in cursor.execute.call_args_list
             if "UPDATE control.artifact_cleanup_outbox" in call.args[0]
         )
         self.assertEqual(update.args[1][0], "STILL_REFERENCED")
@@ -1065,11 +1057,7 @@ class LegacyReportPolicyCompatibilityTests(unittest.TestCase):
         )
 
     def test_json_settings_are_supported_without_reactivating_policies(self):
-        settings = json.dumps({
-            "operational_analysis": {
-                "policies": {"flag_public_ip": False}
-            }
-        })
+        settings = json.dumps({"operational_analysis": {"policies": {"flag_public_ip": False}}})
 
         self.assertEqual(
             _preserved_legacy_analysis_policies(settings),
@@ -1100,11 +1088,7 @@ class ReportDetailRepositoryTests(unittest.TestCase):
                     ]
                 }
             },
-            {
-                "configuration": [
-                    {"category": "ROUTE_TABLE", "resource_name": "route-1"}
-                ]
-            },
+            {"configuration": [{"category": "ROUTE_TABLE", "resource_name": "route-1"}]},
         ]
 
         report = repository.report_detail("report-1", ["tenant-1"])
@@ -1135,14 +1119,16 @@ class TenantBrandingRepositoryTests(unittest.TestCase):
         self.logo = validate_customer_logo(self.content, "image/png")
 
     def test_branding_view_returns_only_validated_data_uri_and_metadata(self):
-        branding = PortalRepository._branding_view({
-            "logo_content": memoryview(self.content),
-            "logo_content_type": "image/png",
-            "logo_width": 320,
-            "logo_height": 120,
-            "logo_sha256": self.logo.sha256,
-            "updated_at": "2026-08-10T00:00:00Z",
-        })
+        branding = PortalRepository._branding_view(
+            {
+                "logo_content": memoryview(self.content),
+                "logo_content_type": "image/png",
+                "logo_width": 320,
+                "logo_height": 120,
+                "logo_sha256": self.logo.sha256,
+                "updated_at": "2026-08-10T00:00:00Z",
+            }
+        )
 
         self.assertEqual(branding["logo_data_uri"], self.logo.data_uri)
         self.assertNotIn("logo_content", branding)
@@ -1164,14 +1150,16 @@ class TenantBrandingRepositoryTests(unittest.TestCase):
 
     def test_branding_view_rejects_metadata_integrity_mismatch(self):
         with self.assertRaisesRegex(ValueError, "무결성"):
-            PortalRepository._branding_view({
-                "logo_content": self.content,
-                "logo_content_type": "image/png",
-                "logo_width": 321,
-                "logo_height": 120,
-                "logo_sha256": self.logo.sha256,
-                "updated_at": "2026-08-10T00:00:00Z",
-            })
+            PortalRepository._branding_view(
+                {
+                    "logo_content": self.content,
+                    "logo_content_type": "image/png",
+                    "logo_width": 321,
+                    "logo_height": 120,
+                    "logo_sha256": self.logo.sha256,
+                    "updated_at": "2026-08-10T00:00:00Z",
+                }
+            )
 
     def test_anonymization_removes_current_branding_record(self):
         cursor = MagicMock()
@@ -1182,10 +1170,9 @@ class TenantBrandingRepositoryTests(unittest.TestCase):
         )
 
         statements = [call.args[0] for call in cursor.execute.call_args_list]
-        self.assertTrue(any(
-            "DELETE FROM control.tenant_branding" in statement
-            for statement in statements
-        ))
+        self.assertTrue(
+            any("DELETE FROM control.tenant_branding" in statement for statement in statements)
+        )
 
 
 class MspAccountStatusSafetyTests(unittest.TestCase):
@@ -1255,52 +1242,61 @@ class UserDeletionSafetyTests(unittest.TestCase):
 
     def test_rejects_wrong_email_and_self_deletion(self):
         with self.assertRaisesRegex(ValueError, "이메일"):
-            _validate_user_deletion(
-                **{**self.BASE, "confirmation_email": "other@example.com"}
-            )
+            _validate_user_deletion(**{**self.BASE, "confirmation_email": "other@example.com"})
         with self.assertRaisesRegex(ValueError, "자신의 계정"):
-            _validate_user_deletion(
-                **{**self.BASE, "target_user_id": "admin-1"}
-            )
+            _validate_user_deletion(**{**self.BASE, "target_user_id": "admin-1"})
 
     def test_rejects_last_msp_and_customer_admin(self):
         with self.assertRaisesRegex(ValueError, "마지막 활성 MSP 관리자"):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "platform_roles": {"MSP_ADMIN"},
-                "active_admin_count": 1,
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "platform_roles": {"MSP_ADMIN"},
+                    "active_admin_count": 1,
+                }
+            )
         with self.assertRaisesRegex(ValueError, "다른 활성 고객 관리자"):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "blocked_customer_names": ("고객사 A",),
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "blocked_customer_names": ("고객사 A",),
+                }
+            )
 
     def test_rejects_mixed_or_global_scope_and_protected_roles(self):
         with self.assertRaises(PermissionError):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "membership_environments": {"public", "gov"},
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "membership_environments": {"public", "gov"},
+                }
+            )
         with self.assertRaises(PermissionError):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "platform_roles": {"MSP_OPERATOR"},
-                "platform_environment_scopes": {None},
-                "membership_environments": set(),
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "platform_roles": {"MSP_OPERATOR"},
+                    "platform_environment_scopes": {None},
+                    "membership_environments": set(),
+                }
+            )
         with self.assertRaises(PermissionError):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "platform_roles": {"MSP_OPERATOR"},
-                "platform_environment_scopes": {"public"},
-                "membership_environments": {"gov"},
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "platform_roles": {"MSP_OPERATOR"},
+                    "platform_environment_scopes": {"public"},
+                    "membership_environments": {"gov"},
+                }
+            )
         with self.assertRaisesRegex(PermissionError, "시스템 권한"):
-            _validate_user_deletion(**{
-                **self.BASE,
-                "platform_roles": {"SYSTEM_ADMIN"},
-            })
+            _validate_user_deletion(
+                **{
+                    **self.BASE,
+                    "platform_roles": {"SYSTEM_ADMIN"},
+                }
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -52,9 +52,7 @@ class DiscoveryAPI:
         )
         selected = (dimensions_selected_list or [{}])[0]
         id_dimension = selected.get("name")
-        selected_values = {
-            str(value) for value in selected.get("values", [])
-        }
+        selected_values = {str(value) for value in selected.get("values", [])}
         result = []
         for source in self.metrics[prod_key]:
             item = dict(source)
@@ -78,10 +76,7 @@ class DiscoveryAPI:
                     for entry in dim_values
                 ):
                     continue
-            item["dimensions"] = [
-                {"dim": name, "val": value}
-                for name, value in dimensions.items()
-            ]
+            item["dimensions"] = [{"dim": name, "val": value} for name, value in dimensions.items()]
             result.append(item)
         return {"metrics": result}
 
@@ -133,9 +128,7 @@ class DiscoveryAPI:
             result.append(
                 {
                     "metric": metric,
-                    "unit": (
-                        "bytes/sec" if "traffic" in metric else "count"
-                    ),
+                    "unit": ("bytes/sec" if "traffic" in metric else "count"),
                     "options": self._options("AVG", "SUM", "MAX"),
                     "dimensions": [
                         {"dim": "instanceId", "val": "lb-1"},
@@ -385,9 +378,7 @@ class FailingDiscoveryAPI:
     def get_search_metric_list(self, prod_key, **kwargs):
         del prod_key
         del kwargs
-        raise RuntimeError(
-            "failed https://example.test/metric?privateKey=do-not-store"
-        )
+        raise RuntimeError("failed https://example.test/metric?privateKey=do-not-store")
 
 
 class OptionalDeniedAPI(DiscoveryAPI):
@@ -396,10 +387,7 @@ class OptionalDeniedAPI(DiscoveryAPI):
         del kwargs
         response = requests.Response()
         response.status_code = 403
-        response._content = (
-            b'{"error":{"errorCode":"2300",'
-            b'"privateKey":"do-not-store"}}'
-        )
+        response._content = b'{"error":{"errorCode":"2300","privateKey":"do-not-store"}}'
         response.headers["Content-Type"] = "application/json"
         error = requests.HTTPError(
             "forbidden https://example.test/metric?privateKey=do-not-store",
@@ -460,10 +448,7 @@ class PartialQueryFailureAPI(DiscoveryAPI):
                 "payloads": metric_info_list,
             }
         )
-        if any(
-            payload["dimensions"].get("instanceId") == "lb-bad"
-            for payload in metric_info_list
-        ):
+        if any(payload["dimensions"].get("instanceId") == "lb-bad" for payload in metric_info_list):
             response = requests.Response()
             response.status_code = 400
             response._content = b'{"error":{"errorCode":"100"}}'
@@ -510,9 +495,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
     def _collector(self, api):
         collector = InfrastructureMetricCollector(FakeFactory(api))
-        collector._select_metric_interval = (
-            lambda start_time, end_time: "Min5"
-        )
+        collector._select_metric_interval = lambda start_time, end_time: "Min5"
         return collector
 
     def test_empty_or_non_monitored_resources_are_normal_empty_results(self):
@@ -565,19 +548,13 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             {"AVG", "MAX"},
         )
         total_session_group = next(
-            group
-            for group in by_category["CLOUD_DB"]
-            if group["metric"] == "total_session_count"
+            group for group in by_category["CLOUD_DB"] if group["metric"] == "total_session_count"
         )
         active_session_group = next(
-            group
-            for group in by_category["CLOUD_DB"]
-            if group["metric"] == "active_session_count"
+            group for group in by_category["CLOUD_DB"] if group["metric"] == "active_session_count"
         )
         replication_group = next(
-            group
-            for group in by_category["CLOUD_DB"]
-            if group["metric"] == "replication_lag"
+            group for group in by_category["CLOUD_DB"] if group["metric"] == "replication_lag"
         )
         self.assertEqual(total_session_group["unit"], "count")
         self.assertEqual(total_session_group["metric_label"], "전체 세션 수")
@@ -587,8 +564,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         self.assertEqual(replication_group["aggregation"], "MAX")
         self.assertTrue(
             all(
-                group["aggregation"] == "AVG"
-                and group["unit"] == "bytes/sec"
+                group["aggregation"] == "AVG" and group["unit"] == "bytes/sec"
                 for group in by_category["LOAD_BALANCER"]
                 if group["metric"].startswith("traffic_")
             )
@@ -641,13 +617,10 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                len(call["dimensions_selected_list"][0]["values"]) == 1
-                for call in api.search_calls
+                len(call["dimensions_selected_list"][0]["values"]) == 1 for call in api.search_calls
             )
         )
-        nks_search = next(
-            call for call in api.search_calls if call["prod_key"] == "nks"
-        )
+        nks_search = next(call for call in api.search_calls if call["prod_key"] == "nks")
         self.assertEqual(
             nks_search["dim_values"],
             [{"name": "type", "value": "NodeAvailability"}],
@@ -673,11 +646,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         groups = collector.collect(infrastructure, 1, 2)
 
         self.assertEqual(
-            {
-                group["metric"]
-                for group in groups
-                if group["category"] == "LOAD_BALANCER"
-            },
+            {group["metric"] for group in groups if group["category"] == "LOAD_BALANCER"},
             {
                 "connectionsPerSecond2",
                 "concurrentSession",
@@ -686,11 +655,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            {
-                group["metric"]
-                for group in groups
-                if group["category"] == "KUBERNETES"
-            },
+            {group["metric"] for group in groups if group["category"] == "KUBERNETES"},
             set(),
         )
         self.assertFalse(
@@ -764,9 +729,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
         by_category = {}
         for group in groups:
-            by_category.setdefault(group["category"], set()).add(
-                group["metric"]
-            )
+            by_category.setdefault(group["category"], set()).add(group["metric"])
         self.assertEqual(
             by_category,
             {
@@ -826,29 +789,20 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         }
         self.assertEqual(
             {
-                call["prod_key"]:
-                call["dimensions_selected_list"][0]["name"]
+                call["prod_key"]: call["dimensions_selected_list"][0]["name"]
                 for call in api.search_calls
             },
             expected_dimensions,
         )
-        expected_resource_ids = {
-            item["category"]: item["resource_id"]
-            for item in infrastructure
-        }
+        expected_resource_ids = {item["category"]: item["resource_id"] for item in infrastructure}
         self.assertTrue(
             all(
-                series["resource_id"]
-                == expected_resource_ids[group["category"]]
+                series["resource_id"] == expected_resource_ids[group["category"]]
                 for group in groups
                 for series in group["series"]
             )
         )
-        lag_group = next(
-            group
-            for group in groups
-            if group["metric"] == "consumer_group_lag"
-        )
+        lag_group = next(group for group in groups if group["metric"] == "consumer_group_lag")
         self.assertEqual(lag_group["aggregation"], "MAX")
         self.assertEqual(collector.last_errors, [])
 
@@ -977,9 +931,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
 
         selected_ids_by_product = {
-            call["prod_key"]: call["dimensions_selected_list"][0][
-                "values"
-            ]
+            call["prod_key"]: call["dimensions_selected_list"][0]["values"]
             for call in api.search_calls
         }
         self.assertEqual(
@@ -990,9 +942,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             },
         )
         resource_ids_by_product = {
-            group["product_name"]: {
-                series["resource_id"] for series in group["series"]
-            }
+            group["product_name"]: {series["resource_id"] for series in group["series"]}
             for group in groups
         }
         self.assertEqual(
@@ -1048,8 +998,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                warning["stage"] == "series_limit"
-                and warning["omitted_count"] == 1
+                warning["stage"] == "series_limit" and warning["omitted_count"] == 1
                 for warning in collector.last_warnings
             )
         )
@@ -1179,9 +1128,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
     def test_metric_discovery_failure_is_isolated_per_target(self):
         api = PartialSearchFailureAPI()
-        api.schemas = [
-            {"prodName": "Load Balancer(VPC)", "cwKey": "lb"}
-        ]
+        api.schemas = [{"prodName": "Load Balancer(VPC)", "cwKey": "lb"}]
         api.metrics["lb"].append(
             {
                 "metric": "connections_per_second",
@@ -1211,25 +1158,18 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
         self.assertTrue(groups)
         self.assertTrue(
-            all(
-                series["resource_id"] == "lb-1"
-                for group in groups
-                for series in group["series"]
-            )
+            all(series["resource_id"] == "lb-1" for group in groups for series in group["series"])
         )
         self.assertTrue(
             any(
-                warning["stage"] == "metric_discovery"
-                and warning["target_id"] == "lb-bad"
+                warning["stage"] == "metric_discovery" and warning["target_id"] == "lb-bad"
                 for warning in collector.last_warnings
             )
         )
 
     def test_bad_query_dimension_is_split_from_valid_series(self):
         api = PartialQueryFailureAPI()
-        api.schemas = [
-            {"prodName": "Load Balancer(VPC)", "cwKey": "lb"}
-        ]
+        api.schemas = [{"prodName": "Load Balancer(VPC)", "cwKey": "lb"}]
         api.metrics["lb"].append(
             {
                 "metric": "connections_per_second",
@@ -1264,15 +1204,11 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         }
         self.assertEqual(points_by_resource["lb-1"], [[1, 1.0], [2, 2.0]])
         self.assertEqual(points_by_resource["lb-bad"], [])
-        self.assertTrue(
-            any(error["stage"] == "query" for error in collector.last_errors)
-        )
+        self.assertTrue(any(error["stage"] == "query" for error in collector.last_errors))
 
     def test_metric_discovery_target_count_is_bounded(self):
         api = DiscoveryAPI()
-        api.schemas = [
-            {"prodName": "Load Balancer(VPC)", "cwKey": "lb"}
-        ]
+        api.schemas = [{"prodName": "Load Balancer(VPC)", "cwKey": "lb"}]
         api.metrics["lb"] = [
             {
                 "metric": "connections_per_second",
@@ -1302,8 +1238,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         self.assertEqual(len(groups[0]["series"]), 2)
         self.assertTrue(
             any(
-                warning["stage"] == "discovery_target_limit"
-                and warning["omitted_count"] == 1
+                warning["stage"] == "discovery_target_limit" and warning["omitted_count"] == 1
                 for warning in collector.last_warnings
             )
         )
@@ -1357,9 +1292,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
     def test_missing_cdb_child_ids_reports_metric_mapping_warning(self):
         api = DiscoveryAPI()
-        api.schemas = [
-            {"prodName": "Cloud DB for PostgreSQL(VPC)", "cwKey": "pg"}
-        ]
+        api.schemas = [{"prodName": "Cloud DB for PostgreSQL(VPC)", "cwKey": "pg"}]
         collector = self._collector(api)
 
         groups = collector.collect(
@@ -1389,10 +1322,12 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
 
     def test_empty_legacy_schema_does_not_warn_when_category_already_mapped(self):
         api = DiscoveryAPI()
-        api.schemas.extend([
-            {"prodName": "Load Balancer Monitor", "cwKey": "lb-legacy"},
-            {"prodName": "Kubernetes Service(VPC)", "cwKey": "nks-legacy"},
-        ])
+        api.schemas.extend(
+            [
+                {"prodName": "Load Balancer Monitor", "cwKey": "lb-legacy"},
+                {"prodName": "Kubernetes Service(VPC)", "cwKey": "nks-legacy"},
+            ]
+        )
         api.metrics["lb-legacy"] = []
         api.metrics["nks-legacy"] = []
         collector = self._collector(api)
@@ -1421,17 +1356,12 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             {"LOAD_BALANCER", "KUBERNETES"},
         )
         self.assertFalse(
-            any(
-                warning["stage"] == "metric_mapping"
-                for warning in collector.last_warnings
-            )
+            any(warning["stage"] == "metric_mapping" for warning in collector.last_warnings)
         )
 
     def test_mssql_user_connections_are_selected_as_count(self):
         api = DiscoveryAPI()
-        api.schemas = [
-            {"prodName": "Cloud DB for MSSQL(VPC)", "cwKey": "mssql"}
-        ]
+        api.schemas = [{"prodName": "Cloud DB for MSSQL(VPC)", "cwKey": "mssql"}]
         api.metrics = {
             "mssql": [
                 {
@@ -1451,9 +1381,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
                     "resource_id": "mssql-service-1",
                     "resource_name": "mssql",
                     "platform": "MSSQL",
-                    "details": {
-                        "server_instance_nos": ["mssql-node-1"]
-                    },
+                    "details": {"server_instance_nos": ["mssql-node-1"]},
                 }
             ],
             1,
@@ -1546,18 +1474,13 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
                 selected = collector._select_metric_names(
                     category="CDB",
                     product_name=product_name,
-                    metric_items=[
-                        {"metric": metric_name}
-                        for metric_name in metric_names
-                    ],
+                    metric_items=[{"metric": metric_name} for metric_name in metric_names],
                 )
                 self.assertEqual(selected, expected)
 
     def test_mysql_metrics_keep_node_identity_and_role_in_series_name(self):
         api = DiscoveryAPI()
-        api.schemas = [
-            {"prodName": "Cloud DB for MySQL(VPC)", "cwKey": "mysql"}
-        ]
+        api.schemas = [{"prodName": "Cloud DB for MySQL(VPC)", "cwKey": "mysql"}]
         metrics = (
             ("cpu_total", "%"),
             ("mem_pct", "%"),
@@ -1621,19 +1544,13 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
         self.assertTrue(all(len(group["series"]) == 2 for group in groups))
         self.assertEqual(
-            {
-                series["resource_name"]
-                for group in groups
-                for series in group["series"]
-            },
+            {series["resource_name"] for group in groups for series in group["series"]},
             {
                 "orders-mysql · mysql-a (node-a) · MASTER",
                 "orders-mysql · mysql-b (node-b) · STANDBY MASTER",
             },
         )
-        lag_group = next(
-            group for group in groups if group["metric"] == "mysql_slavedelay"
-        )
+        lag_group = next(group for group in groups if group["metric"] == "mysql_slavedelay")
         self.assertEqual(lag_group["metric_label"], "복제 지연 (구간 최대)")
         self.assertEqual(lag_group["unit"], "sec")
         self.assertEqual(lag_group["aggregation"], "MAX")
@@ -1709,24 +1626,18 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            collector._product_category(
-                "System/Load Balancer Target Group(VPC)"
-            ),
+            collector._product_category("System/Load Balancer Target Group(VPC)"),
             "TARGET_GROUP",
         )
         target_group_searches = [
-            call
-            for call in api.search_calls
-            if call["prod_key"] == "target-group"
+            call for call in api.search_calls if call["prod_key"] == "target-group"
         ]
         self.assertEqual(len(target_group_searches), 1)
         self.assertEqual(
             target_group_searches[0]["dimensions_selected_list"],
             [{"name": "targetGroupNo", "values": ["tg-1"]}],
         )
-        load_balancer_searches = [
-            call for call in api.search_calls if call["prod_key"] == "lb"
-        ]
+        load_balancer_searches = [call for call in api.search_calls if call["prod_key"] == "lb"]
         self.assertEqual(len(load_balancer_searches), 1)
         self.assertEqual(
             load_balancer_searches[0]["dimensions_selected_list"],
@@ -1740,10 +1651,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             if payload["prodKey"] == "target-group"
         ]
         self.assertEqual(
-            {
-                payload["metric"]: payload["aggregation"]
-                for payload in target_group_payloads
-            },
+            {payload["metric"]: payload["aggregation"] for payload in target_group_payloads},
             {
                 "available_host_count": "MIN",
                 "unavailable_host_count": "MAX",
@@ -1765,9 +1673,7 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
         )
 
         target_group_groups = [
-            group
-            for group in groups
-            if group.get("metric_scope") == "TARGET_GROUP"
+            group for group in groups if group.get("metric_scope") == "TARGET_GROUP"
         ]
         self.assertEqual(len(target_group_groups), 2)
         self.assertEqual(
@@ -1779,51 +1685,55 @@ class InfrastructureMetricCollectorTests(unittest.TestCase):
             {"TargetGroup"},
         )
         self.assertEqual(
-            {
-                group["metric"]: group["aggregation"]
-                for group in target_group_groups
-            },
+            {group["metric"]: group["aggregation"] for group in target_group_groups},
             {
                 "available_host_count": "MIN",
                 "unavailable_host_count": "MAX",
             },
         )
-        self.assertTrue(
-            all(group["unit"] == "count" for group in target_group_groups)
-        )
+        self.assertTrue(all(group["unit"] == "count" for group in target_group_groups))
         self.assertTrue(
             all(
-                group["series"] == [{
-                    "resource_id": "tg-1",
-                    "resource_name": "web-targets",
-                    "dimensions": {"targetGroupNo": "tg-1"},
-                    "points": [[1, 1.0], [2, 2.5]],
-                }]
+                group["series"]
+                == [
+                    {
+                        "resource_id": "tg-1",
+                        "resource_name": "web-targets",
+                        "dimensions": {"targetGroupNo": "tg-1"},
+                        "points": [[1, 1.0], [2, 2.5]],
+                    }
+                ]
                 for group in target_group_groups
             )
         )
 
     def test_target_group_resources_are_not_monitored_without_lb_selection(self):
         api = DiscoveryAPI()
-        api.schemas = [{
-            "prodName": "System/Load Balancer Target Group(VPC)",
-            "cwKey": "target-group",
-        }]
+        api.schemas = [
+            {
+                "prodName": "System/Load Balancer Target Group(VPC)",
+                "cwKey": "target-group",
+            }
+        ]
         api.metrics = {
-            "target-group": [{
-                "metric": "available_host_count",
-                "options": api._options("MIN"),
-                "dimensions": {"targetGroupNo": "tg-1"},
-            }]
+            "target-group": [
+                {
+                    "metric": "available_host_count",
+                    "options": api._options("MIN"),
+                    "dimensions": {"targetGroupNo": "tg-1"},
+                }
+            ]
         }
         collector = self._collector(api)
 
         groups = collector.collect(
-            [{
-                "category": "TARGET_GROUP",
-                "resource_id": "tg-1",
-                "resource_name": "web-targets",
-            }],
+            [
+                {
+                    "category": "TARGET_GROUP",
+                    "resource_id": "tg-1",
+                    "resource_name": "web-targets",
+                }
+            ],
             1,
             2,
             selected_categories=["NAS"],

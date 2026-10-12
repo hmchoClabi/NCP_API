@@ -43,9 +43,13 @@ def register_request_security(
                 "",
             )
             expected_hash = g.user.get("csrf_token_hash") if g.user else ""
-            if not submitted or not expected_hash or not hmac.compare_digest(
-                token_hash(submitted),
-                expected_hash,
+            if (
+                not submitted
+                or not expected_hash
+                or not hmac.compare_digest(
+                    token_hash(submitted),
+                    expected_hash,
+                )
             ):
                 abort(403)
         return None

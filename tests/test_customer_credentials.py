@@ -28,9 +28,7 @@ class CustomerCredentialTests(unittest.TestCase):
             },
             clear=False,
         ):
-            credentials = EnvironmentCredentialProvider().get_credentials(
-                customer
-            )
+            credentials = EnvironmentCredentialProvider().get_credentials(customer)
 
         self.assertEqual(credentials.access_key, "GOV-ACCESS")
         self.assertEqual(credentials.secret_key, "GOV-SECRET")

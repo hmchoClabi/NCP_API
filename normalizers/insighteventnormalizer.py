@@ -26,11 +26,7 @@ class InsightEventNormalizer(_EventNormalizerBase):
             )
 
         if group_by == "product":
-            return (
-                event.get("prod_name")
-                or event.get("prod_key")
-                or "unknown"
-            )
+            return event.get("prod_name") or event.get("prod_key") or "unknown"
 
         if group_by == "level":
             return event.get("level") or "unknown"
@@ -83,7 +79,6 @@ class InsightEventNormalizer(_EventNormalizerBase):
             "region_code": event.get("regionCode"),
             "zone_code": event.get("zoneCode"),
             "dimension": dimension,
-
             # 원본 보존
             "raw": event,
         }
@@ -140,16 +135,8 @@ class InsightEventNormalizer(_EventNormalizerBase):
             if not isinstance(item, dict):
                 continue
 
-            name = (
-                item.get("dim")
-                or item.get("name")
-                or item.get("dimension")
-            )
-            item_value = (
-                item.get("val")
-                if item.get("val") is not None
-                else item.get("value")
-            )
+            name = item.get("dim") or item.get("name") or item.get("dimension")
+            item_value = item.get("val") if item.get("val") is not None else item.get("value")
 
             if name and item_value is not None:
                 result[str(name)] = item_value

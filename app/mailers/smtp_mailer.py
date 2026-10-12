@@ -27,9 +27,7 @@ def _read_bool(name: str, default: bool) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    raise ValueError(
-        f"{name} must be one of true/false, yes/no, on/off, or 1/0."
-    )
+    raise ValueError(f"{name} must be one of true/false, yes/no, on/off, or 1/0.")
 
 
 def _read_positive_int(name: str, default: int) -> int:
@@ -55,12 +53,7 @@ def parse_recipients(values: Iterable[str] | None) -> list[str]:
                 continue
 
             display_name, address = parseaddr(recipient)
-            if (
-                not address
-                or "@" not in address
-                or "\r" in recipient
-                or "\n" in recipient
-            ):
+            if not address or "@" not in address or "\r" in recipient or "\n" in recipient:
                 raise ValueError(f"Invalid email recipient: {recipient!r}")
 
             normalized = address.lower()
@@ -68,9 +61,7 @@ def parse_recipients(values: Iterable[str] | None) -> list[str]:
                 continue
 
             seen.add(normalized)
-            recipients.append(
-                f"{display_name} <{address}>" if display_name else address
-            )
+            recipients.append(f"{display_name} <{address}>" if display_name else address)
 
     return recipients
 
@@ -112,17 +103,11 @@ class SMTPConfig:
         if not self.sender:
             raise ValueError("SMTP_FROM is required when sending email.")
         if self.use_tls and self.use_ssl:
-            raise ValueError(
-                "SMTP_USE_TLS and SMTP_USE_SSL cannot both be enabled."
-            )
+            raise ValueError("SMTP_USE_TLS and SMTP_USE_SSL cannot both be enabled.")
         if self.username and not self.password:
-            raise ValueError(
-                "SMTP_PASSWORD is required when SMTP_USERNAME is set."
-            )
+            raise ValueError("SMTP_PASSWORD is required when SMTP_USERNAME is set.")
         if self.password and not self.username:
-            raise ValueError(
-                "SMTP_USERNAME is required when SMTP_PASSWORD is set."
-            )
+            raise ValueError("SMTP_USERNAME is required when SMTP_PASSWORD is set.")
 
         _, sender_address = parseaddr(self.sender)
         if (
@@ -213,10 +198,7 @@ class SMTPMailer:
                 client.send_message(
                     message,
                     from_addr=parseaddr(self.config.sender)[1],
-                    to_addrs=[
-                        parseaddr(recipient)[1]
-                        for recipient in normalized_recipients
-                    ],
+                    to_addrs=[parseaddr(recipient)[1] for recipient in normalized_recipients],
                 )
             except smtplib.SMTPSenderRefused as exc:
                 provider_hint = ""

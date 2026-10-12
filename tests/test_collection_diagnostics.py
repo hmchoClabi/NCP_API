@@ -43,73 +43,83 @@ class ProviderPermissionParsingTests(unittest.TestCase):
 
     def test_success_message_is_not_treated_as_permission_error(self):
         self.assertEqual(
-            extract_required_actions({
-                "returnCode": 0,
-                "message": "Resource label View/getVpcList",
-            }),
+            extract_required_actions(
+                {
+                    "returnCode": 0,
+                    "message": "Resource label View/getVpcList",
+                }
+            ),
             (),
         )
 
     def test_provider_code_is_bounded_and_accepts_depth_five(self):
         forged = {"error": {"errorCode": "X00004\nforged"}}
-        nested = {
-            "a": {"b": {"c": {"d": {"e": {"errorCode": "X00004"}}}}}
-        }
+        nested = {"a": {"b": {"c": {"d": {"e": {"errorCode": "X00004"}}}}}}
 
         self.assertIsNone(extract_provider_code(forged))
         self.assertEqual(extract_provider_code(nested), "X00004")
 
     def test_error_envelope_code_precedes_business_resource_code(self):
         self.assertEqual(
-            extract_provider_code({
-                "resource": {"code": "RESOURCE_OK"},
-                "error": {"errorCode": "X00004"},
-            }),
+            extract_provider_code(
+                {
+                    "resource": {"code": "RESOURCE_OK"},
+                    "error": {"errorCode": "X00004"},
+                }
+            ),
             "X00004",
         )
 
     def test_generic_error_envelope_code_precedes_nested_business_code(self):
         self.assertEqual(
-            extract_provider_code({
-                "resource": {"returnCode": "RESOURCE_STATE"},
-                "error": {"code": "X00004"},
-            }),
+            extract_provider_code(
+                {
+                    "resource": {"returnCode": "RESOURCE_STATE"},
+                    "error": {"code": "X00004"},
+                }
+            ),
             "X00004",
         )
 
     def test_confirmed_root_error_supports_description_message(self):
         self.assertEqual(
-            extract_required_actions({
-                "errorCode": "X00004",
-                "description": "Grant View/getDomainList.",
-            }),
+            extract_required_actions(
+                {
+                    "errorCode": "X00004",
+                    "description": "Grant View/getDomainList.",
+                }
+            ),
             ("View/getDomainList",),
         )
 
     def test_nested_resource_description_in_error_details_is_not_trusted(self):
         self.assertEqual(
-            extract_required_actions({
-                "error": {
-                    "message": "Permission denied.",
-                    "details": {
-                        "resource": {
-                            "description": "View/getVpcList",
+            extract_required_actions(
+                {
+                    "error": {
+                        "message": "Permission denied.",
+                        "details": {
+                            "resource": {
+                                "description": "View/getVpcList",
+                            },
                         },
                     },
-                },
-            }),
+                }
+            ),
             (),
         )
 
 
 class CollectionDiagnosticTests(unittest.TestCase):
     def test_uses_exact_cdb_engine_from_inventory_target_type(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureCollector",
-            "target_type": "cdb_postgresql",
-            "api": "get_cloud_postgresql_instance_list",
-            "target_id": "db-123",
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureCollector",
+                "target_type": "cdb_postgresql",
+                "api": "get_cloud_postgresql_instance_list",
+                "target_id": "db-123",
+            }
+        )
 
         self.assertEqual(issue["service_name"], "Cloud DB for PostgreSQL")
         self.assertEqual(issue["target"], "Cloud DB for PostgreSQL · db-123")
@@ -117,13 +127,15 @@ class CollectionDiagnosticTests(unittest.TestCase):
         self.assertEqual(issue["severity_label"], "오류")
 
     def test_cloud_insight_product_has_priority_over_generic_target(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureMetricCollector",
-            "target_type": "infrastructure_metric",
-            "category": "CLOUD_DB",
-            "product_name": "System/Cloud DB for MySQL(VPC)",
-            "severity": "WARNING",
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureMetricCollector",
+                "target_type": "infrastructure_metric",
+                "category": "CLOUD_DB",
+                "product_name": "System/Cloud DB for MySQL(VPC)",
+                "severity": "WARNING",
+            }
+        )
 
         self.assertEqual(issue["service_name"], "Cloud DB for MySQL")
         self.assertEqual(issue["target"], "Cloud DB for MySQL")
@@ -157,24 +169,28 @@ class CollectionDiagnosticTests(unittest.TestCase):
                 self.assertEqual(diagnostic_service_name(payload), expected)
 
     def test_uses_attempted_cloud_insight_products_for_mapping_warning(self):
-        issue = normalize_collection_issue({
-            "target_type": "infrastructure_metric",
-            "category": "CLOUD_DB",
-            "attempted_products": [
-                "System/Cloud DB for PostgreSQL(VPC)",
-                "System/Cloud DB for PostgreSQL(VPC)",
-            ],
-            "severity": "warning",
-        })
+        issue = normalize_collection_issue(
+            {
+                "target_type": "infrastructure_metric",
+                "category": "CLOUD_DB",
+                "attempted_products": [
+                    "System/Cloud DB for PostgreSQL(VPC)",
+                    "System/Cloud DB for PostgreSQL(VPC)",
+                ],
+                "severity": "warning",
+            }
+        )
 
         self.assertEqual(issue["target"], "Cloud DB for PostgreSQL")
 
     def test_event_collector_is_mapped_to_its_ncp_product(self):
         self.assertEqual(
-            diagnostic_service_name({
-                "collector": "ActivityTracerEventCollector",
-                "target_type": "event",
-            }),
+            diagnostic_service_name(
+                {
+                    "collector": "ActivityTracerEventCollector",
+                    "target_type": "event",
+                }
+            ),
             "Cloud Activity Tracer",
         )
 
@@ -185,10 +201,12 @@ class CollectionDiagnosticTests(unittest.TestCase):
         self.assertEqual(issue["called_api"], "unknown_operation")
 
     def test_legacy_payload_without_api_is_marked_explicitly(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureCollector",
-            "status_code": 403,
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureCollector",
+                "status_code": 403,
+            }
+        )
 
         self.assertEqual(
             issue["called_api"],
@@ -196,21 +214,25 @@ class CollectionDiagnosticTests(unittest.TestCase):
         )
 
     def test_historical_snapshot_diagnostic_uses_internal_source_label(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureCollector",
-            "stage": "historical_snapshot_lookup",
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureCollector",
+                "stage": "historical_snapshot_lookup",
+            }
+        )
 
         self.assertEqual(issue["called_api"], "내부 저장 스냅샷 판정")
 
     def test_generic_403_uses_api_catalog_as_permission_recommendation(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureCollector",
-            "target_type": "cdb_postgresql",
-            "api": "get_cloud_postgresql_instance_list",
-            "status_code": 403,
-            "message": "권한이 없거나 현재 환경에서 지원되지 않는 API입니다.",
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureCollector",
+                "target_type": "cdb_postgresql",
+                "api": "get_cloud_postgresql_instance_list",
+                "status_code": 403,
+                "message": "권한이 없거나 현재 환경에서 지원되지 않는 API입니다.",
+            }
+        )
 
         self.assertEqual(issue["permission_source"], "api_catalog")
         self.assertEqual(
@@ -227,15 +249,17 @@ class CollectionDiagnosticTests(unittest.TestCase):
         )
 
     def test_provider_required_action_has_priority_over_catalog(self):
-        issue = normalize_collection_issue({
-            "collector": "InfrastructureCollector",
-            "target_type": "global_dns",
-            "api": "get_domain",
-            "status_code": 400,
-            "error_code": "X00004",
-            "required_actions": ["View/getDomainList"],
-            "message": "Sub Account에 자원 조회 권한이 없습니다.",
-        })
+        issue = normalize_collection_issue(
+            {
+                "collector": "InfrastructureCollector",
+                "target_type": "global_dns",
+                "api": "get_domain",
+                "status_code": 400,
+                "error_code": "X00004",
+                "required_actions": ["View/getDomainList"],
+                "message": "Sub Account에 자원 조회 권한이 없습니다.",
+            }
+        )
 
         self.assertEqual(issue["permission_source"], "provider_response")
         self.assertEqual(
@@ -244,11 +268,13 @@ class CollectionDiagnosticTests(unittest.TestCase):
         )
 
     def test_related_actions_are_included_for_target_list(self):
-        issue = normalize_collection_issue({
-            "target_type": "target_group",
-            "api": "get_target_list",
-            "status_code": 403,
-        })
+        issue = normalize_collection_issue(
+            {
+                "target_type": "target_group",
+                "api": "get_target_list",
+                "status_code": 403,
+            }
+        )
 
         self.assertEqual(
             issue["permission_related_actions"],
@@ -256,23 +282,27 @@ class CollectionDiagnosticTests(unittest.TestCase):
         )
 
     def test_unknown_403_does_not_invent_a_permission_name(self):
-        issue = normalize_collection_issue({
-            "api": "unknown_operation",
-            "status_code": 403,
-        })
+        issue = normalize_collection_issue(
+            {
+                "api": "unknown_operation",
+                "status_code": 403,
+            }
+        )
 
         self.assertEqual(issue["permission_source"], "unknown")
         self.assertEqual(issue["permission_actions"], [])
 
     def test_non_permission_failures_do_not_show_permission_candidates(self):
         cases = (
-            {"target_type": "server", "api": "get_server_instance_list",
-             "status_code": 500},
-            {"target_type": "global_dns", "api": "get_domain",
-             "status_code": 404},
-            {"target_type": "server", "api": "get_server_instance_list",
-             "status_code": 401, "error_code": "200",
-             "message": "Authentication Failed"},
+            {"target_type": "server", "api": "get_server_instance_list", "status_code": 500},
+            {"target_type": "global_dns", "api": "get_domain", "status_code": 404},
+            {
+                "target_type": "server",
+                "api": "get_server_instance_list",
+                "status_code": 401,
+                "error_code": "200",
+                "message": "Authentication Failed",
+            },
         )
 
         for payload in cases:
@@ -292,25 +322,29 @@ class CollectionDiagnosticTests(unittest.TestCase):
 
         for status_code, error_code in cases:
             with self.subTest(status_code=status_code, error_code=error_code):
-                issue = normalize_collection_issue({
-                    "target_type": "server",
-                    "api": "get_server_instance_list",
-                    "status_code": status_code,
-                    "error_code": error_code,
-                })
+                issue = normalize_collection_issue(
+                    {
+                        "target_type": "server",
+                        "api": "get_server_instance_list",
+                        "status_code": status_code,
+                        "error_code": error_code,
+                    }
+                )
                 self.assertEqual(issue["permission_source"], "api_catalog")
 
     def test_untrusted_provider_action_is_not_rendered_as_confirmed(self):
-        issue = normalize_collection_issue({
-            "target_type": "global_dns",
-            "api": "get_domain",
-            "status_code": 403,
-            "required_actions": [
-                "<script>alert(1)</script>",
-                "View/getDomainList",
-                "View/getDomainList",
-            ],
-        })
+        issue = normalize_collection_issue(
+            {
+                "target_type": "global_dns",
+                "api": "get_domain",
+                "status_code": 403,
+                "required_actions": [
+                    "<script>alert(1)</script>",
+                    "View/getDomainList",
+                    "View/getDomainList",
+                ],
+            }
+        )
 
         self.assertEqual(issue["permission_source"], "provider_response")
         self.assertEqual(
@@ -319,16 +353,18 @@ class CollectionDiagnosticTests(unittest.TestCase):
         )
 
     def test_provider_write_action_is_separated_from_view_recommendation(self):
-        issue = normalize_collection_issue({
-            "target_type": "network_interface",
-            "api": "get_network_interface_instance_list",
-            "status_code": 400,
-            "error_code": "X00004",
-            "required_actions": [
-                "View/getNetworkInterfaceList",
-                "Change/setSecondaryIP",
-            ],
-        })
+        issue = normalize_collection_issue(
+            {
+                "target_type": "network_interface",
+                "api": "get_network_interface_instance_list",
+                "status_code": 400,
+                "error_code": "X00004",
+                "required_actions": [
+                    "View/getNetworkInterfaceList",
+                    "Change/setSecondaryIP",
+                ],
+            }
+        )
 
         self.assertEqual(issue["permission_source"], "provider_response")
         self.assertEqual(
@@ -339,9 +375,7 @@ class CollectionDiagnosticTests(unittest.TestCase):
             issue["permission_write_actions"],
             ["Change/setSecondaryIP"],
         )
-        self.assertIn("쓰기 권한을 권고하지 않습니다", issue[
-            "permission_security_note"
-        ])
+        self.assertIn("쓰기 권한을 권고하지 않습니다", issue["permission_security_note"])
 
     def test_permission_catalog_only_contains_bounded_ncp_actions(self):
         for key, hint in PERMISSION_HINTS.items():

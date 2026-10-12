@@ -28,9 +28,7 @@ def test_kubernetes_deployment_assets_exist():
 def test_pilot_storage_is_retained_and_secrets_are_external():
     storage = (CHART / "templates" / "storage.yaml").read_text(encoding="utf-8")
     chart_files = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in CHART.rglob("*")
-        if path.is_file()
+        path.read_text(encoding="utf-8") for path in CHART.rglob("*") if path.is_file()
     )
 
     assert "reclaimPolicy: Retain" in storage
@@ -40,12 +38,8 @@ def test_pilot_storage_is_retained_and_secrets_are_external():
 
 
 def test_database_backups_support_a_replacement_claim_and_are_verified():
-    backup = (CHART / "templates" / "backup-cronjob.yaml").read_text(
-        encoding="utf-8"
-    )
-    storage = (CHART / "templates" / "storage.yaml").read_text(
-        encoding="utf-8"
-    )
+    backup = (CHART / "templates" / "backup-cronjob.yaml").read_text(encoding="utf-8")
+    storage = (CHART / "templates" / "storage.yaml").read_text(encoding="utf-8")
     pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
 
     assert ".Values.backups.existingClaim" in backup
@@ -60,9 +54,7 @@ def test_database_backups_support_a_replacement_claim_and_are_verified():
 
 def test_runtime_and_migration_images_are_separate():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    migration_script = (
-        ROOT / "deploy" / "docker" / "migrate.sh"
-    ).read_text(encoding="utf-8")
+    migration_script = (ROOT / "deploy" / "docker" / "migrate.sh").read_text(encoding="utf-8")
 
     assert "FROM postgres:16 AS migration" in dockerfile
     assert "FROM python:3.13-slim AS runtime" in dockerfile
@@ -71,9 +63,9 @@ def test_runtime_and_migration_images_are_separate():
 
 
 def test_worker_roles_can_check_the_required_schema_version():
-    migration = (
-        ROOT / "database" / "schema" / "100_customer_lifecycle.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "100_customer_lifecycle.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "GRANT SELECT ON control.schema_versions TO" in migration
     assert "ncp_public_worker" in migration
@@ -81,9 +73,9 @@ def test_worker_roles_can_check_the_required_schema_version():
 
 
 def test_forced_test_customer_deletion_is_audited():
-    migration = (
-        ROOT / "database" / "schema" / "110_forced_test_customer_deletion.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "110_forced_test_customer_deletion.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "forced boolean NOT NULL DEFAULT false" in migration
     assert "OR forced" in migration
@@ -91,9 +83,9 @@ def test_forced_test_customer_deletion_is_audited():
 
 
 def test_artifact_cleanup_outbox_is_durable_and_msp_only():
-    migration = (
-        ROOT / "database" / "schema" / "190_artifact_cleanup_outbox.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "190_artifact_cleanup_outbox.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS control.artifact_cleanup_outbox" in migration
     assert "expected_sha256 char(64) NOT NULL" in migration
@@ -105,19 +97,16 @@ def test_artifact_cleanup_outbox_is_durable_and_msp_only():
 
 
 def test_weekly_and_cleanup_migrations_match_schema_wait():
-    weekly_migration = (
-        ROOT / "database" / "schema" / "200_weekly_reports.sql"
-    ).read_text(encoding="utf-8")
-    cleanup_migration = (
-        ROOT / "database" / "schema" / "210_report_cleanup_queue.sql"
-    ).read_text(encoding="utf-8")
+    weekly_migration = (ROOT / "database" / "schema" / "200_weekly_reports.sql").read_text(
+        encoding="utf-8"
+    )
+    cleanup_migration = (ROOT / "database" / "schema" / "210_report_cleanup_queue.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "ADD COLUMN IF NOT EXISTS weekly_day smallint" in weekly_migration
     assert "report_type IN ('DAILY', 'WEEKLY', 'MONTHLY')" in weekly_migration
-    assert (
-        "report_type IN ('DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM')"
-        in weekly_migration
-    )
+    assert "report_type IN ('DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM')" in weekly_migration
     assert "weekly_day BETWEEN 1 AND 7" in weekly_migration
     assert "VALUES ('200'" in weekly_migration
     assert "cleanup_requested_at timestamptz" in cleanup_migration
@@ -125,34 +114,21 @@ def test_weekly_and_cleanup_migrations_match_schema_wait():
     assert "cleanup_next_attempt_at timestamptz" in cleanup_migration
     assert "report_runs_cleanup_due_idx" in cleanup_migration
     assert "VALUES ('210'" in cleanup_migration
-    assert 'schemaVersion: "210"' in (
-        CHART / "values.yaml"
-    ).read_text(encoding="utf-8")
-    assert "waitForSchema: true" in (
-        CHART / "values.yaml"
-    ).read_text(encoding="utf-8")
-    assert 'REPORT_SCHEMA_VERSION:-210' in (
-        ROOT / "deploy" / "docker" / "migrate.sh"
-    ).read_text(encoding="utf-8")
-    deployment_guide = (
-        ROOT / "deploy" / "NCP_DEPLOYMENT.md"
-    ).read_text(encoding="utf-8")
+    assert 'schemaVersion: "210"' in (CHART / "values.yaml").read_text(encoding="utf-8")
+    assert "waitForSchema: true" in (CHART / "values.yaml").read_text(encoding="utf-8")
+    assert "REPORT_SCHEMA_VERSION:-210" in (ROOT / "deploy" / "docker" / "migrate.sh").read_text(
+        encoding="utf-8"
+    )
+    deployment_guide = (ROOT / "deploy" / "NCP_DEPLOYMENT.md").read_text(encoding="utf-8")
     assert "schema version `210`" in deployment_guide
     assert "disable every WEEKLY" in deployment_guide
     assert "WEEKLY job is running" in deployment_guide
-    assert (
-        "must not be rolled back by dropping data or columns"
-        in deployment_guide
-    )
+    assert "must not be rolled back by dropping data or columns" in deployment_guide
 
 
 def test_artifact_cleanup_has_a_scheduled_least_privilege_consumer():
-    cleanup = (
-        CHART / "templates" / "artifact-cleanup-cronjob.yaml"
-    ).read_text(encoding="utf-8")
-    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(
-        encoding="utf-8"
-    )
+    cleanup = (CHART / "templates" / "artifact-cleanup-cronjob.yaml").read_text(encoding="utf-8")
+    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(encoding="utf-8")
 
     assert ".Values.artifacts.persistence.enabled" in cleanup
     assert "kind: CronJob" in cleanup
@@ -168,12 +144,8 @@ def test_artifact_cleanup_has_a_scheduled_least_privilege_consumer():
 
 def test_compose_artifact_cleanup_is_recurring_and_secret_free():
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
-    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(
-        encoding="utf-8"
-    )
-    cleanup = compose.split("\n  artifact-cleanup:\n", 1)[1].split(
-        "\n  worker-public:\n", 1
-    )[0]
+    cli = (ROOT / "webapp" / "artifact_cleanup.py").read_text(encoding="utf-8")
+    cleanup = compose.split("\n  artifact-cleanup:\n", 1)[1].split("\n  worker-public:\n", 1)[0]
 
     assert "REPORT_DB_ROLE: msp" in cleanup
     assert "REPORT_DB_USER: ncp_msp_app" in cleanup
@@ -192,9 +164,9 @@ def test_compose_artifact_cleanup_is_recurring_and_secret_free():
 
 
 def test_period_aware_billing_cost_facts_are_migrated():
-    migration = (
-        ROOT / "database" / "schema" / "120_billing_cost_facts.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "120_billing_cost_facts.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "billing_cost_facts" in migration
     assert "PERIOD_ESTIMATE" in migration
@@ -204,9 +176,9 @@ def test_period_aware_billing_cost_facts_are_migrated():
 
 
 def test_organization_account_billing_is_migrated():
-    migration = (
-        ROOT / "database" / "schema" / "130_organization_billing.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "130_organization_billing.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "organization_members" in migration
     assert "billing_account_cost_facts" in migration
@@ -215,9 +187,9 @@ def test_organization_account_billing_is_migrated():
 
 
 def test_tenant_report_settings_are_migrated_with_rls():
-    migration = (
-        ROOT / "database" / "schema" / "140_tenant_report_settings.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "140_tenant_report_settings.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "control.tenant_report_settings" in migration
     assert "settings jsonb NOT NULL" in migration
@@ -234,9 +206,9 @@ def test_tenant_report_settings_are_migrated_with_rls():
 
 
 def test_tenant_branding_is_size_limited_and_tenant_isolated():
-    migration = (
-        ROOT / "database" / "schema" / "150_tenant_branding.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "150_tenant_branding.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "control.tenant_branding" in migration
     assert "octet_length(logo_content) BETWEEN 1 AND 524288" in migration
@@ -246,9 +218,7 @@ def test_tenant_branding_is_size_limited_and_tenant_isolated():
     assert "tenant_branding_gov_worker_access" in migration
     assert "SELECT, INSERT, UPDATE, DELETE" in migration
     assert "VALUES ('150'" in migration
-    verification = (
-        ROOT / "database" / "verify_database.sql"
-    ).read_text(encoding="utf-8")
+    verification = (ROOT / "database" / "verify_database.sql").read_text(encoding="utf-8")
     assert "tenant_branding" in verification
     assert "Expected at least 37 tables" in verification
 
@@ -267,10 +237,7 @@ def test_report_topology_settings_are_removed_safely():
 
 def test_network_configuration_snapshots_are_separate_and_tenant_isolated():
     migration = (
-        ROOT
-        / "database"
-        / "schema"
-        / "170_network_configuration_snapshots.sql"
+        ROOT / "database" / "schema" / "170_network_configuration_snapshots.sql"
     ).read_text(encoding="utf-8")
 
     assert "network_configuration_snapshots" in migration
@@ -294,12 +261,10 @@ def test_network_configuration_snapshots_are_separate_and_tenant_isolated():
 
 
 def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
-    migration = (
-        ROOT / "database" / "schema" / "180_operational_analysis.sql"
-    ).read_text(encoding="utf-8")
-    verification = (
-        ROOT / "database" / "verify_database.sql"
-    ).read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "schema" / "180_operational_analysis.sql").read_text(
+        encoding="utf-8"
+    )
+    verification = (ROOT / "database" / "verify_database.sql").read_text(encoding="utf-8")
 
     assert "'ANALYSIS'" in migration
     assert "control.policy_exceptions" in migration
@@ -321,9 +286,9 @@ def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
     assert "daily_account_facts_latest_run_tenant_fk" in migration
     assert "DROP CONSTRAINT IF EXISTS daily_customer_facts_pkey" not in migration
     assert "CREATE OR REPLACE VIEW control.v_msp_customer_daily_status" not in migration
-    assert "sum(critical_count)::integer" in (
-        ROOT / "database" / "report_repository.py"
-    ).read_text(encoding="utf-8")
+    assert "sum(critical_count)::integer" in (ROOT / "database" / "report_repository.py").read_text(
+        encoding="utf-8"
+    )
     assert "policy_exceptions_active_account_idx" in migration
     assert "policy_exceptions_cloud_account_idx" in migration
     assert "expires_at timestamptz NOT NULL" in migration
@@ -333,18 +298,14 @@ def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
     assert "tenant_id = control.current_tenant_id()" in migration
     assert "current_setting('app.environment_scope', true)" in migration
     assert "environment = NULLIF" in migration
-    customer_policy = migration.split(
-        "CREATE POLICY policy_exceptions_customer_access", 1
-    )[1].split("DROP POLICY IF EXISTS policy_exceptions_msp_access", 1)[0]
+    customer_policy = migration.split("CREATE POLICY policy_exceptions_customer_access", 1)[
+        1
+    ].split("DROP POLICY IF EXISTS policy_exceptions_msp_access", 1)[0]
     assert "FOR SELECT TO ncp_control_app" in customer_policy
     assert "FOR ALL TO ncp_control_app" not in customer_policy
-    base_rls = (
-        ROOT / "database" / "schema" / "050_security_rls.sql"
-    ).read_text(encoding="utf-8")
+    base_rls = (ROOT / "database" / "schema" / "050_security_rls.sql").read_text(encoding="utf-8")
     assert "IF table_name = 'event_cases'" in base_rls
-    event_case_branch = base_rls.split(
-        "IF table_name = 'event_cases'", 1
-    )[1].split("ELSE", 1)[0]
+    event_case_branch = base_rls.split("IF table_name = 'event_cases'", 1)[1].split("ELSE", 1)[0]
     assert "tenant_id = control.current_tenant_id()" in event_case_branch
     assert "app.environment_scope" not in event_case_branch
     assert "VALUES ('180'" in migration
@@ -358,17 +319,15 @@ def test_operational_analysis_cases_and_exceptions_are_migrated_safely():
 
 
 def test_sourcebuild_deployment_waits_for_migration_job():
-    script = (
-        ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert '"--wait-for-jobs"' in script
 
 
 def test_sourcebuild_runner_uses_dedicated_credentials_and_exact_build_id():
-    script = (
-        ROOT / "deploy" / "scripts" / "run-sourcebuild.ps1"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "scripts" / "run-sourcebuild.ps1").read_text(encoding="utf-8")
 
     assert "NCP_SOURCEBUILD_ACCESS_KEY" in script
     assert "NCP_SOURCEBUILD_SECRET_KEY" in script
@@ -384,12 +343,8 @@ def test_sourcebuild_runner_uses_dedicated_credentials_and_exact_build_id():
     assert "failedPhase" in script
     assert "SourceBuild timed out" in script
     assert "SupportsShouldProcess = $true" in script
-    assert "NCP_ACCESS_KEY" not in script.replace(
-        "NCP_SOURCEBUILD_ACCESS_KEY", ""
-    )
-    assert "NCP_SECRET_KEY" not in script.replace(
-        "NCP_SOURCEBUILD_SECRET_KEY", ""
-    )
+    assert "NCP_ACCESS_KEY" not in script.replace("NCP_SOURCEBUILD_ACCESS_KEY", "")
+    assert "NCP_SECRET_KEY" not in script.replace("NCP_SOURCEBUILD_SECRET_KEY", "")
 
 
 def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():
@@ -400,28 +355,22 @@ def test_pilot_uses_private_registry_endpoint_for_cluster_pulls():
 
 
 def test_registry_secret_script_does_not_accept_secret_as_parameter():
-    script = (
-        ROOT / "deploy" / "scripts" / "create-registry-secret.ps1"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "scripts" / "create-registry-secret.ps1").read_text(
+        encoding="utf-8"
+    )
 
     parameter_block = script.split(")", 1)[0]
     assert "SecretKey" not in parameter_block
     assert "qoyw4pih.kr.private-ncr.ntruss.com" in parameter_block
-    assert "Read-Host \"NCP registry Secret Key\" -AsSecureString" in script
+    assert 'Read-Host "NCP registry Secret Key" -AsSecureString' in script
     assert '".dockerconfigjson"' in script
     assert "--ignore-not-found -o name" in script
 
 
 def test_migration_job_and_schema_wait_are_independently_configured():
-    deployments = (CHART / "templates" / "deployments.yaml").read_text(
-        encoding="utf-8"
-    )
-    migration = (CHART / "templates" / "migration-job.yaml").read_text(
-        encoding="utf-8"
-    )
-    cleanup = (
-        CHART / "templates" / "artifact-cleanup-cronjob.yaml"
-    ).read_text(encoding="utf-8")
+    deployments = (CHART / "templates" / "deployments.yaml").read_text(encoding="utf-8")
+    migration = (CHART / "templates" / "migration-job.yaml").read_text(encoding="utf-8")
+    cleanup = (CHART / "templates" / "artifact-cleanup-cronjob.yaml").read_text(encoding="utf-8")
     hpa = (CHART / "templates" / "hpa.yaml").read_text(encoding="utf-8")
 
     assert ".Values.migration.waitForSchema" in deployments
@@ -439,28 +388,22 @@ def test_migration_job_and_schema_wait_are_independently_configured():
 
 
 def test_sourcedeploy_manifest_uses_latest_registry_placeholder():
-    manifest = (
-        ROOT / "deploy" / "sourcedeploy" / "runtime.yaml"
-    ).read_text(encoding="utf-8")
+    manifest = (ROOT / "deploy" / "sourcedeploy" / "runtime.yaml").read_text(encoding="utf-8")
 
-    top_level_deployments = sum(
-        line == "kind: Deployment" for line in manifest.splitlines()
-    )
+    top_level_deployments = sum(line == "kind: Deployment" for line in manifest.splitlines())
     assert top_level_deployments == 4
     assert "kind: HorizontalPodAutoscaler" in manifest
-    assert '${registry_endpoint}/ncp-report:latest' in manifest
+    assert "${registry_endpoint}/ncp-report:latest" in manifest
     assert "kind: Job" not in manifest
     assert manifest.count("name: wait-schema") == 4
-    assert '${registry_endpoint}/ncp-report-migrate:latest' in manifest
+    assert "${registry_endpoint}/ncp-report-migrate:latest" in manifest
     assert '"210"' in manifest
     assert "namespace: ncp-report" in manifest
 
 
 def test_pilot_ingress_uses_small_public_alb():
     pilot_values = (CHART / "values-pilot.yaml").read_text(encoding="utf-8")
-    ingress = (CHART / "templates" / "ingress.yaml").read_text(
-        encoding="utf-8"
-    )
+    ingress = (CHART / "templates" / "ingress.yaml").read_text(encoding="utf-8")
 
     assert "loadBalancerSize: small" in pilot_values
     assert "networkType: public" in pilot_values
@@ -471,18 +414,16 @@ def test_pilot_ingress_uses_small_public_alb():
     assert "helm.sh/resource-policy: keep" in ingress
     assert "alb.ingress.kubernetes.io/idle-timeout" in ingress
     assert "alb.ingress.kubernetes.io/healthcheck-path" in ingress
-    assert r'[{\"HTTP\": 80}, {\"HTTPS\": 443}]' in ingress
+    assert r"[{\"HTTP\": 80}, {\"HTTPS\": 443}]" in ingress
     assert 'alb.ingress.kubernetes.io/ssl-redirect: "443"' in ingress
     assert "alb.ingress.kubernetes.io/enable-http2" not in ingress
-    assert "cookieSecure: true" in (
-        CHART / "values-production.yaml"
-    ).read_text(encoding="utf-8")
+    assert "cookieSecure: true" in (CHART / "values-production.yaml").read_text(encoding="utf-8")
 
 
 def test_secret_preparation_excludes_global_ncp_credentials():
-    script = (
-        ROOT / "deploy" / "scripts" / "prepare-kubernetes-secrets.ps1"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "scripts" / "prepare-kubernetes-secrets.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert '"SMTP_PASSWORD"' in script
     assert '$selected["NCP_ACCESS_KEY"]' not in script
@@ -491,12 +432,12 @@ def test_secret_preparation_excludes_global_ncp_credentials():
 
 
 def test_sourcecommit_release_is_commit_pinned_and_secret_free():
-    release = (
-        ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1"
-    ).read_text(encoding="utf-8")
-    configure = (
-        ROOT / "deploy" / "scripts" / "configure-sourcecommit.ps1"
-    ).read_text(encoding="utf-8")
+    release = (ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1").read_text(
+        encoding="utf-8"
+    )
+    configure = (ROOT / "deploy" / "scripts" / "configure-sourcecommit.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert "git status --porcelain" in release
     assert "git push $Remote" in release
@@ -509,9 +450,7 @@ def test_sourcecommit_release_is_commit_pinned_and_secret_free():
 
 
 def test_image_build_records_full_git_revision():
-    script = (
-        ROOT / "deploy" / "scripts" / "build-and-push.ps1"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "deploy" / "scripts" / "build-and-push.ps1").read_text(encoding="utf-8")
 
     assert "org.opencontainers.image.revision=$Revision" in script
     assert "Revision must be a full Git commit SHA" in script
@@ -529,9 +468,7 @@ def test_sourcebuild_has_separate_runtime_and_migration_images():
 
 
 def test_web_receives_deployed_image_tag_and_source_revision():
-    deployments = (
-        CHART / "templates" / "deployments.yaml"
-    ).read_text(encoding="utf-8")
+    deployments = (CHART / "templates" / "deployments.yaml").read_text(encoding="utf-8")
 
     assert "APP_VERSION" in deployments
     assert "$root.Values.image.tag" in deployments
@@ -554,18 +491,18 @@ def test_sourcebuild_test_dependencies_are_separate_from_runtime():
 
 
 def test_normal_release_does_not_build_images_locally():
-    legacy = (
-        ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1"
-    ).read_text(encoding="utf-8")
-    deployment = (
-        ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1"
-    ).read_text(encoding="utf-8")
+    legacy = (ROOT / "deploy" / "scripts" / "release-from-sourcecommit.ps1").read_text(
+        encoding="utf-8"
+    )
+    deployment = (ROOT / "deploy" / "scripts" / "deploy-sourcebuild-images.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert "AllowLocalBuild" in legacy
     assert "Local image builds are disabled" in legacy
     assert "docker build" not in deployment.lower()
     assert "git ls-remote sourcecommit refs/heads/master" in deployment
     assert '"--atomic", "--wait"' in deployment
-    assert '[Parameter(Mandatory = $true)]\n    [string]$MigrationTag' in deployment
+    assert "[Parameter(Mandatory = $true)]\n    [string]$MigrationTag" in deployment
     assert '"migration.image.tag=$MigrationTag"' in deployment
     assert "if ($EnableMigration)" not in deployment

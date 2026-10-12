@@ -58,22 +58,36 @@ def analyze_costs(
         rate = number(comparison.get("rate_change"))
         warning_threshold = _cost_warning_threshold(policy)
         if rate is not None and rate >= warning_threshold:
-            findings.append(Finding(
-                rule_id="COST_INCREASE_BASELINE",
-                severity="WARNING",
-                category="COST",
-                title="동일 기준의 비교 기간보다 비용이 증가했습니다.",
-                evidence=[
-                    {"label": "현재 금액", "value": comparison["current_amount"], "unit": comparison["currency"]},
-                    {"label": "기준 금액", "value": comparison["baseline_amount"], "unit": comparison["currency"]},
-                    {"label": "증가율", "value": rate, "unit": "%"},
-                    {"label": "경고 기준", "value": warning_threshold, "unit": "%"},
-                    {"label": "금액 기준", "value": comparison["amount_basis"]},
-                ],
-                impact="비용 증가 원인이 지속되면 예산 초과 가능성이 있습니다.",
-                recommendation="서비스별 비용과 같은 기간의 자원·트래픽 변경을 확인하세요.",
-                resource={"id": comparison["fact_name"], "name": FACT_LABELS[comparison["fact_name"]], "type": "COST"},
-            ))
+            findings.append(
+                Finding(
+                    rule_id="COST_INCREASE_BASELINE",
+                    severity="WARNING",
+                    category="COST",
+                    title="동일 기준의 비교 기간보다 비용이 증가했습니다.",
+                    evidence=[
+                        {
+                            "label": "현재 금액",
+                            "value": comparison["current_amount"],
+                            "unit": comparison["currency"],
+                        },
+                        {
+                            "label": "기준 금액",
+                            "value": comparison["baseline_amount"],
+                            "unit": comparison["currency"],
+                        },
+                        {"label": "증가율", "value": rate, "unit": "%"},
+                        {"label": "경고 기준", "value": warning_threshold, "unit": "%"},
+                        {"label": "금액 기준", "value": comparison["amount_basis"]},
+                    ],
+                    impact="비용 증가 원인이 지속되면 예산 초과 가능성이 있습니다.",
+                    recommendation="서비스별 비용과 같은 기간의 자원·트래픽 변경을 확인하세요.",
+                    resource={
+                        "id": comparison["fact_name"],
+                        "name": FACT_LABELS[comparison["fact_name"]],
+                        "type": "COST",
+                    },
+                )
+            )
 
     return {
         "status": "AVAILABLE" if facts else "UNAVAILABLE",
@@ -109,29 +123,31 @@ def _cost_facts(report: Any) -> list[dict[str, Any]]:
         status = str(value.get("status") or "").upper()
         if status != "AVAILABLE" or amount is None:
             continue
-        result.append({
-            "name": name,
-            "label": FACT_LABELS[name],
-            "cost_type": value.get("cost_type"),
-            "status": status,
-            "period_start": value.get("period_start"),
-            "period_end": value.get("period_end"),
-            "coverage_start": value.get("coverage_start"),
-            "coverage_end": value.get("coverage_end"),
-            "total_amount": rounded(amount),
-            "currency": str(value.get("currency") or "KRW"),
-            "amount_basis": value.get("amount_basis"),
-            "confidence": value.get("confidence"),
-            "includes_discount": value.get("includes_discount"),
-            "includes_vat": value.get("includes_vat"),
-            "source_api": value.get("source_api"),
-            "source_state": (
-                OBSERVED
-                if name == "invoice_summary"
-                or str(value.get("cost_type") or "").upper() == "CONFIRMED"
-                else CALCULATED
-            ),
-        })
+        result.append(
+            {
+                "name": name,
+                "label": FACT_LABELS[name],
+                "cost_type": value.get("cost_type"),
+                "status": status,
+                "period_start": value.get("period_start"),
+                "period_end": value.get("period_end"),
+                "coverage_start": value.get("coverage_start"),
+                "coverage_end": value.get("coverage_end"),
+                "total_amount": rounded(amount),
+                "currency": str(value.get("currency") or "KRW"),
+                "amount_basis": value.get("amount_basis"),
+                "confidence": value.get("confidence"),
+                "includes_discount": value.get("includes_discount"),
+                "includes_vat": value.get("includes_vat"),
+                "source_api": value.get("source_api"),
+                "source_state": (
+                    OBSERVED
+                    if name == "invoice_summary"
+                    or str(value.get("cost_type") or "").upper() == "CONFIRMED"
+                    else CALCULATED
+                ),
+            }
+        )
     return result
 
 
@@ -144,9 +160,7 @@ def _compare_facts(
     period = mapping(field(report, "period", {}))
     period_type = normalize_period_type(period.get("period_type"))
     current_fact: Optional[dict[str, Any]] = None
-    first_incompatible: Optional[
-        tuple[dict[str, Any], dict[str, Any], list[str]]
-    ] = None
+    first_incompatible: Optional[tuple[dict[str, Any], dict[str, Any], list[str]]] = None
     for name in preferred:
         current = _fact_by_name(current_facts, name)
         if current_fact is None and current is not None:
@@ -185,17 +199,11 @@ def _compare_facts(
     if first_incompatible is not None:
         current, previous, incompatible_fields = first_incompatible
         incompatible_fields = sorted(incompatible_fields)
-        labels = ", ".join(
-            INCOMPATIBILITY_LABELS.get(name, name)
-            for name in incompatible_fields
-        )
+        labels = ", ".join(INCOMPATIBILITY_LABELS.get(name, name) for name in incompatible_fields)
         return {
             "status": "INCOMPATIBLE",
             "source_state": CALCULATED,
-            "reason": (
-                "다음 비교 조건이 일치하지 않아 증감은 계산하지 "
-                f"않았습니다: {labels}."
-            ),
+            "reason": (f"다음 비교 조건이 일치하지 않아 증감은 계산하지 않았습니다: {labels}."),
             **_comparison_context(current, previous),
             "incompatible_fields": incompatible_fields,
         }
@@ -263,9 +271,7 @@ def _preferred_fact_names(report: Any) -> tuple[str, ...]:
     )
 
 
-def _fact_by_name(
-    facts: list[dict[str, Any]], name: str
-) -> Optional[dict[str, Any]]:
+def _fact_by_name(facts: list[dict[str, Any]], name: str) -> Optional[dict[str, Any]]:
     return next((fact for fact in facts if fact.get("name") == name), None)
 
 
@@ -282,15 +288,9 @@ def _incompatibility(
         "includes_discount",
         "includes_vat",
     )
-    differences = [
-        name for name in fields if current.get(name) != previous.get(name)
-    ]
-    current_period = _date_range(
-        current.get("period_start"), current.get("period_end")
-    )
-    previous_period = _date_range(
-        previous.get("period_start"), previous.get("period_end")
-    )
+    differences = [name for name in fields if current.get(name) != previous.get(name)]
+    current_period = _date_range(current.get("period_start"), current.get("period_end"))
+    previous_period = _date_range(previous.get("period_start"), previous.get("period_end"))
     # 두 보고서가 같은 확정 청구월을 그대로 재사용하면 0% 증감처럼
     # 보일 수 있다. 양쪽 기간이 명시되고 서로 다른 경우에만 비교한다.
     if (
@@ -317,11 +317,7 @@ def _incompatibility(
 def _date_range(start: Any, end: Any) -> Optional[tuple[date, date]]:
     parsed_start = date_value(start)
     parsed_end = date_value(end)
-    if (
-        parsed_start is None
-        or parsed_end is None
-        or parsed_start > parsed_end
-    ):
+    if parsed_start is None or parsed_end is None or parsed_start > parsed_end:
         return None
     return parsed_start, parsed_end
 
@@ -339,8 +335,7 @@ def _periods_are_comparable(
 
     if period_type == "DAILY":
         return (
-            current_days == previous_days == 0
-            and previous_end + timedelta(days=1) == current_start
+            current_days == previous_days == 0 and previous_end + timedelta(days=1) == current_start
         )
     if period_type == "MONTHLY":
         if (
@@ -354,21 +349,16 @@ def _periods_are_comparable(
             or previous_start.year != previous_end.year
         ):
             return False
-        current_full = current_end.day == calendar.monthrange(
-            current_end.year, current_end.month
-        )[1]
-        previous_full = previous_end.day == calendar.monthrange(
-            previous_end.year, previous_end.month
-        )[1]
-        return (current_full and previous_full) or (
-            not current_full
-            and not previous_full
-            and current_days == previous_days
+        current_full = (
+            current_end.day == calendar.monthrange(current_end.year, current_end.month)[1]
         )
-    return (
-        current_days == previous_days
-        and previous_end + timedelta(days=1) == current_start
-    )
+        previous_full = (
+            previous_end.day == calendar.monthrange(previous_end.year, previous_end.month)[1]
+        )
+        return (current_full and previous_full) or (
+            not current_full and not previous_full and current_days == previous_days
+        )
+    return current_days == previous_days and previous_end + timedelta(days=1) == current_start
 
 
 def _coverage_is_comparable(
@@ -378,12 +368,8 @@ def _coverage_is_comparable(
     current_period: tuple[date, date],
     previous_period: tuple[date, date],
 ) -> bool:
-    current_coverage = _date_range(
-        current.get("coverage_start"), current.get("coverage_end")
-    )
-    previous_coverage = _date_range(
-        previous.get("coverage_start"), previous.get("coverage_end")
-    )
+    current_coverage = _date_range(current.get("coverage_start"), current.get("coverage_end"))
+    previous_coverage = _date_range(previous.get("coverage_start"), previous.get("coverage_end"))
     if current_coverage is None or previous_coverage is None:
         return False
 
@@ -392,9 +378,7 @@ def _coverage_is_comparable(
     ) -> Optional[tuple[bool, int, int]]:
         period_start, period_end = period
         coverage_start, coverage_end = coverage
-        if not (
-            period_start <= coverage_start <= coverage_end <= period_end
-        ):
+        if not (period_start <= coverage_start <= coverage_end <= period_end):
             return None
         return (
             coverage == period,

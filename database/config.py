@@ -62,19 +62,13 @@ class DatabaseSettings:
     ) -> "DatabaseSettings":
         process_env = dict(os.environ if environ is None else environ)
         root = project_root or Path(__file__).resolve().parent.parent
-        config_file = Path(
-            process_env.get("REPORT_DB_CONFIG_FILE", ".env.db")
-        )
+        config_file = Path(process_env.get("REPORT_DB_CONFIG_FILE", ".env.db"))
         if not config_file.is_absolute():
             config_file = root / config_file
 
         file_values = {
             key: str(value)
-            for key, value in (
-                dotenv_values(config_file).items()
-                if config_file.exists()
-                else []
-            )
+            for key, value in (dotenv_values(config_file).items() if config_file.exists() else [])
             if value is not None
         }
 
@@ -107,9 +101,7 @@ class DatabaseSettings:
                 "REPORT_DB_CONNECT_TIMEOUT",
                 10,
             ),
-            application_name=str(
-                setting("REPORT_DB_APPLICATION_NAME", "ncp-report-cli")
-            ).strip(),
+            application_name=str(setting("REPORT_DB_APPLICATION_NAME", "ncp-report-cli")).strip(),
             tenant_id=setting("REPORT_DB_TENANT_ID") or None,
         )
         settings.validate()
@@ -125,13 +117,16 @@ class DatabaseSettings:
                 "password in REPORT_DB_CONFIG_FILE."
             )
         if self.sslmode not in {
-            "disable", "allow", "prefer", "require", "verify-ca", "verify-full"
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full",
         }:
             raise ValueError("REPORT_DB_SSLMODE has an unsupported value.")
         if self.role == "control" and not self.tenant_id:
-            raise ValueError(
-                "REPORT_DB_TENANT_ID is required for a tenant-scoped DB role."
-            )
+            raise ValueError("REPORT_DB_TENANT_ID is required for a tenant-scoped DB role.")
 
     def connection_kwargs(self) -> dict:
         common = {

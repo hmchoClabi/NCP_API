@@ -31,6 +31,7 @@ class InsightEventNormalizerTests(unittest.TestCase):
         self.assertEqual(event["metric_group_item_id"], "metric-item-1")
         self.assertEqual(event["calc_sliding_group_key"], "detail-key")
         self.assertTrue(event["start_time_kst"].endswith(" KST"))
+
     def test_events_are_sorted_oldest_first_with_unknown_times_last(self):
         normalizer = InsightEventNormalizer()
 

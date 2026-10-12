@@ -60,9 +60,7 @@ def main() -> None:
 def _process_job(job, settings, portal, cipher, jobs) -> None:
     api_factory = None
     try:
-        customer, credentials = portal.account_credentials(
-            str(job["cloud_account_id"]), cipher
-        )
+        customer, credentials = portal.account_credentials(str(job["cloud_account_id"]), cipher)
         tenant_settings = replace(settings, tenant_id=str(job["tenant_id"]))
         repository = PostgresReportRepository(
             tenant_settings,
@@ -88,11 +86,13 @@ def _process_job(job, settings, portal, cipher, jobs) -> None:
             target_month=target if job["report_type"] == "MONTHLY" else None,
             start_datetime=(
                 job["period_start"].astimezone(ReportRunner.KST).isoformat()
-                if job["report_type"] == "CUSTOM" else None
+                if job["report_type"] == "CUSTOM"
+                else None
             ),
             end_datetime=(
                 job["period_end"].astimezone(ReportRunner.KST).isoformat()
-                if job["report_type"] == "CUSTOM" else None
+                if job["report_type"] == "CUSTOM"
+                else None
             ),
         )
         jobs.complete(str(job["id"]), repository.last_report_run_id)

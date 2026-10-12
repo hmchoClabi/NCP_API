@@ -676,9 +676,9 @@ REPORT_INTERACTION_SCRIPT = r"""(() => {
 
 })();"""
 REPORT_INTERACTION_CSP_SOURCE = "'sha256-{}'".format(
-    base64.b64encode(
-        hashlib.sha256(REPORT_INTERACTION_SCRIPT.encode("utf-8")).digest()
-    ).decode("ascii")
+    base64.b64encode(hashlib.sha256(REPORT_INTERACTION_SCRIPT.encode("utf-8")).digest()).decode(
+        "ascii"
+    )
 )
 
 
@@ -702,9 +702,7 @@ class HtmlReportRenderer:
         "#a16207",
         "#475569",
     )
-    INFRASTRUCTURE_CATEGORIES = tuple(
-        RESOURCE_CATEGORY_LABELS.items()
-    )
+    INFRASTRUCTURE_CATEGORIES = tuple(RESOURCE_CATEGORY_LABELS.items())
 
     def render(self, report: ReportResult) -> str:
         display = self._prepare_display_data(report)
@@ -741,9 +739,7 @@ class HtmlReportRenderer:
             status = "NORMAL"
             status_label = "생성 완료"
             summary = "NCP 보고서가 생성되었습니다. 아래 핵심 수치와 첨부 보고서를 확인하세요."
-            issue_count = len(report.collection_errors) + len(
-                report.collection_warnings
-            )
+            issue_count = len(report.collection_errors) + len(report.collection_warnings)
             collection_label = "확인 필요" if issue_count else "정상"
 
         status_color = {
@@ -761,10 +757,10 @@ class HtmlReportRenderer:
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #fed7aa;border-left:5px solid {status_color};border-radius:12px;background:#fffaf0">
                   <tr><td style="padding:18px 20px">
                     <div style="font-size:12px;font-weight:800;color:{status_color};margin-bottom:6px">가장 먼저 확인</div>
-                    <div style="font-size:17px;font-weight:800;color:#111827">{self._text(priority.get('title'))}</div>
-                    <div style="font-size:13px;color:#64748b;margin:4px 0 12px">{self._text(resource.get('name') or resource.get('id') or '공통')}</div>
-                    <div style="font-size:13px;line-height:1.65;color:#374151"><strong>영향</strong> · {self._text(priority.get('impact') or '-')}</div>
-                    <div style="font-size:13px;line-height:1.65;color:#1d4ed8"><strong>조치</strong> · {self._text(priority.get('recommendation') or '-')}</div>
+                    <div style="font-size:17px;font-weight:800;color:#111827">{self._text(priority.get("title"))}</div>
+                    <div style="font-size:13px;color:#64748b;margin:4px 0 12px">{self._text(resource.get("name") or resource.get("id") or "공통")}</div>
+                    <div style="font-size:13px;line-height:1.65;color:#374151"><strong>영향</strong> · {self._text(priority.get("impact") or "-")}</div>
+                    <div style="font-size:13px;line-height:1.65;color:#1d4ed8"><strong>조치</strong> · {self._text(priority.get("recommendation") or "-")}</div>
                   </td></tr>
                 </table>
               </td></tr>"""
@@ -815,11 +811,7 @@ class HtmlReportRenderer:
         period = report.period
         report_options = report.selected_report_options
         customer_name = str(report.customer.get("name") or "").strip()
-        report_title = (
-            f"{customer_name} · NCP 이용 보고서"
-            if customer_name
-            else "NCP 이용 보고서"
-        )
+        report_title = f"{customer_name} · NCP 이용 보고서" if customer_name else "NCP 이용 보고서"
         billing = dict(report.billing or {})
         billing["collection_errors"] = self._records(
             billing.get("collection_errors")
@@ -827,14 +819,10 @@ class HtmlReportRenderer:
         billing_display = self._prepare_billing_display(period, billing)
         activity_events = self._flatten_grouped(report.activity_events)
         infrastructure = report.display_infrastructure
-        inventory_enabled = report_options.section_enabled(
-            "infrastructure_inventory"
-        )
+        inventory_enabled = report_options.section_enabled("infrastructure_inventory")
         monitoring_enabled = report_options.section_enabled("monitoring")
         billing_enabled = report_options.section_enabled("billing")
-        organization_billing_enabled = report_options.section_enabled(
-            "organization_billing"
-        )
+        organization_billing_enabled = report_options.section_enabled("organization_billing")
         collection_metadata = self._mapping(report.collection_metadata)
         network_configuration_metadata = self._mapping(
             collection_metadata.get("network_configuration")
@@ -856,9 +844,7 @@ class HtmlReportRenderer:
             monitoring_enabled=monitoring_enabled,
             billing_enabled=billing_enabled,
             organization_billing_enabled=organization_billing_enabled,
-            network_configuration_metadata=(
-                network_configuration_metadata
-            ),
+            network_configuration_metadata=(network_configuration_metadata),
         )
 
     def _prepare_billing_display(
@@ -874,12 +860,8 @@ class HtmlReportRenderer:
         billing_summary = billing.get("summary", {})
         invoice_summary = self._mapping(billing.get("invoice_summary"))
         period_estimate = self._mapping(billing.get("period_estimate"))
-        month_to_date_estimate = self._mapping(
-            billing.get("month_to_date_estimate")
-        )
-        month_end_projection = self._mapping(
-            billing.get("month_end_projection")
-        )
+        month_to_date_estimate = self._mapping(billing.get("month_to_date_estimate"))
+        month_end_projection = self._mapping(billing.get("month_end_projection"))
         cost_facts = [
             {
                 **fact,
@@ -897,26 +879,19 @@ class HtmlReportRenderer:
             if fact and fact.get("status") != "NOT_APPLICABLE"
         ]
         account_costs = self._records(billing.get("account_costs"))
-        confirmed_service_summary = self._records(
-            billing.get("service_summary")
-        )
+        confirmed_service_summary = self._records(billing.get("service_summary"))
         period_usage_rows = self._records(billing.get("daily_usage_rows"))
-        month_to_date_usage_rows = self._records(
-            billing.get("month_to_date_usage_rows")
-        )
+        month_to_date_usage_rows = self._records(billing.get("month_to_date_usage_rows"))
         daily_usage_failed = self._billing_source_failed(
             billing,
             "daily_usage",
         )
-        month_to_date_usage_summary = self._records(
-            billing.get("month_to_date_usage_summary")
-        )
+        month_to_date_usage_summary = self._records(billing.get("month_to_date_usage_summary"))
         month_to_date_network_summary = self._records(
             billing.get("month_to_date_network_usage_summary")
         )
         month_to_date_reference_available = bool(
-            month_to_date_usage_summary
-            or month_to_date_network_summary
+            month_to_date_usage_summary or month_to_date_network_summary
         )
         delayed_daily_usage = self._use_delayed_month_to_date_usage(
             period=period,
@@ -925,41 +900,31 @@ class HtmlReportRenderer:
             month_to_date_estimate=month_to_date_estimate,
             daily_usage_failed=daily_usage_failed,
         )
-        use_month_to_date_usage = (
-            delayed_daily_usage and month_to_date_reference_available
-        )
+        use_month_to_date_usage = delayed_daily_usage and month_to_date_reference_available
         use_estimated_cost = period.get("is_closed_month") is False
         if use_estimated_cost:
             period_estimate_status = period_estimate.get("status")
-            month_to_date_service_costs = self._records(
-                billing.get("month_to_date_by_service")
-            )
-            month_to_date_current_costs = self._records(
-                billing.get("target_service_summary")
-            )
+            month_to_date_service_costs = self._records(billing.get("month_to_date_by_service"))
+            month_to_date_current_costs = self._records(billing.get("target_service_summary"))
             month_to_date_basis = month_to_date_estimate.get("amount_basis")
             month_to_date_cost_rows_available = bool(
                 month_to_date_current_costs
-                if month_to_date_basis in {
+                if month_to_date_basis
+                in {
                     "NCP_PRODUCT_DEMAND_USE_AMOUNT",
                     "NCP_CURRENT_USE_AMOUNT_FALLBACK",
                 }
                 else month_to_date_service_costs
             )
-            use_month_to_date = (
-                month_to_date_estimate.get("status") == "AVAILABLE"
-                and (
-                    period_estimate_status == "NOT_APPLICABLE"
-                    or (
-                        period_estimate_status == "UNAVAILABLE"
-                        and delayed_daily_usage
-                        and month_to_date_cost_rows_available
-                    )
+            use_month_to_date = month_to_date_estimate.get("status") == "AVAILABLE" and (
+                period_estimate_status == "NOT_APPLICABLE"
+                or (
+                    period_estimate_status == "UNAVAILABLE"
+                    and delayed_daily_usage
+                    and month_to_date_cost_rows_available
                 )
             )
-            if use_month_to_date and month_to_date_estimate.get(
-                "amount_basis"
-            ) in {
+            if use_month_to_date and month_to_date_estimate.get("amount_basis") in {
                 "NCP_PRODUCT_DEMAND_USE_AMOUNT",
                 "NCP_CURRENT_USE_AMOUNT_FALLBACK",
             }:
@@ -990,9 +955,7 @@ class HtmlReportRenderer:
                     for row in self._records(billing.get("expected_by_service"))
                 ]
             billing_card_title = (
-                "보고 기준일까지 누적 추정 비용"
-                if use_month_to_date
-                else "기간 예상 비용"
+                "보고 기준일까지 누적 추정 비용" if use_month_to_date else "기간 예상 비용"
             )
             billing_card_amount = (
                 month_to_date_estimate.get("total_amount")
@@ -1000,14 +963,10 @@ class HtmlReportRenderer:
                 else period_estimate.get("total_amount")
             )
             if billing_card_amount is None:
-                billing_card_amount = billing_summary.get(
-                    "expected_total_amount"
-                )
+                billing_card_amount = billing_summary.get("expected_total_amount")
             if use_month_to_date:
                 billing_section_title = "월 누적 서비스별 예상 비용"
-                coverage_text = self._billing_coverage_text(
-                    month_to_date_estimate
-                )
+                coverage_text = self._billing_coverage_text(month_to_date_estimate)
                 if delayed_daily_usage:
                     billing_section_description = (
                         "NCP 일별 사용량 응답이 0건입니다. 실제 사용량 "
@@ -1017,8 +976,7 @@ class HtmlReportRenderer:
                     )
                 else:
                     billing_section_description = (
-                        f"{coverage_text} 월 누적 사용량과 단가로 계산한 "
-                        "미확정 예상 비용입니다."
+                        f"{coverage_text} 월 누적 사용량과 단가로 계산한 미확정 예상 비용입니다."
                     )
             else:
                 billing_section_title = "서비스별 예상 비용"
@@ -1044,15 +1002,11 @@ class HtmlReportRenderer:
                 "total_amount", billing_summary.get("confirmed_total_amount")
             )
             billing_section_title = "서비스별 청구 금액"
-            billing_section_description = (
-                "NCP 서비스 단위로 집계한 확정 청구 금액입니다."
-            )
+            billing_section_description = "NCP 서비스 단위로 집계한 확정 청구 금액입니다."
         if use_month_to_date_usage:
             usage_summary = month_to_date_usage_summary
             network_summary = month_to_date_network_summary
-            coverage_start = (
-                month_to_date_estimate.get("coverage_start") or "-"
-            )
+            coverage_start = month_to_date_estimate.get("coverage_start") or "-"
             coverage_end = month_to_date_estimate.get("coverage_end") or "-"
             fallback_description = (
                 "NCP 일별 사용량 응답이 0건입니다. 실제 사용량 0이거나 "
@@ -1071,22 +1025,17 @@ class HtmlReportRenderer:
                     "getContractUsageListByDaily 수집 오류로 표시할 수 "
                     "없습니다. 수집 진단을 확인하세요."
                     if daily_usage_failed
-                    else "NCP가 선택 기간의 일별 사용량 데이터를 "
-                    "반환하지 않았습니다."
+                    else "NCP가 선택 기간의 일별 사용량 데이터를 반환하지 않았습니다."
                 )
             usage_summary = self._records(billing.get("usage_summary"))
-            network_summary = self._records(
-                billing.get("network_usage_summary")
-            )
+            network_summary = self._records(billing.get("network_usage_summary"))
             usage_section_title = "서비스별 사용량"
             usage_section_description = (
-                empty_usage_description
-                or "서비스 및 과금 항목별 사용량입니다."
+                empty_usage_description or "서비스 및 과금 항목별 사용량입니다."
             )
             network_section_title = "네트워크 사용량"
             network_section_description = (
-                empty_usage_description
-                or "서비스와 전송 방향별 네트워크 사용량입니다."
+                empty_usage_description or "서비스와 전송 방향별 네트워크 사용량입니다."
             )
         return BillingDisplayData(
             cost_facts=cost_facts,
@@ -1126,16 +1075,9 @@ class HtmlReportRenderer:
 
         report_start = date_value(period.get("start_dt"))
         report_end = date_value(period.get("end_dt"))
-        coverage_end = date_value(
-            month_to_date_estimate.get("coverage_end")
-        )
+        coverage_end = date_value(month_to_date_estimate.get("coverage_end"))
         calculated_date = date_value(period.get("calculated_at"))
-        if (
-            not report_start
-            or not report_end
-            or not coverage_end
-            or not calculated_date
-        ):
+        if not report_start or not report_end or not coverage_end or not calculated_date:
             return False
         report_age_days = (calculated_date - report_start).days
         return (
@@ -1151,19 +1093,13 @@ class HtmlReportRenderer:
     ) -> bool:
         expected = str(source).strip().casefold()
         return any(
-            str(error.get("source") or error.get("api") or "")
-            .strip()
-            .casefold()
-            == expected
+            str(error.get("source") or error.get("api") or "").strip().casefold() == expected
             for error in self._records(billing.get("collection_errors"))
         )
 
     @staticmethod
     def _billing_coverage_text(fact: Mapping[str, Any]) -> str:
-        return (
-            f"{fact.get('coverage_start') or '-'} ~ "
-            f"{fact.get('coverage_end') or '-'}"
-        )
+        return f"{fact.get('coverage_start') or '-'} ~ {fact.get('coverage_end') or '-'}"
 
     def _billing_fact_breakdown(
         self,
@@ -1194,11 +1130,10 @@ class HtmlReportRenderer:
                     continue
                 name = str(row.get("service_name") or "서비스 미분류").strip()
                 name = name or "서비스 미분류"
-                key = "".join(
-                    character.casefold()
-                    for character in name
-                    if character.isalnum()
-                ) or "서비스미분류"
+                key = (
+                    "".join(character.casefold() for character in name if character.isalnum())
+                    or "서비스미분류"
+                )
                 item = result.setdefault(
                     key,
                     {"service_name": name, "amount": 0.0},
@@ -1222,14 +1157,10 @@ class HtmlReportRenderer:
                 checked=True,
             )
             accrued_total = sum(item["amount"] for item in amounts.values())
-            projected_total = sum(
-                item["amount"] for item in projected.values()
-            )
+            projected_total = sum(item["amount"] for item in projected.values())
             current_total = sum(item["amount"] for item in current.values())
             if not accrued_total:
-                amounts = {
-                    key: dict(item) for key, item in projected.items()
-                }
+                amounts = {key: dict(item) for key, item in projected.items()}
             elif projected_total > current_total:
                 for key in current.keys() | projected.keys():
                     current_amount = current.get(key, {}).get("amount", 0.0)
@@ -1270,9 +1201,7 @@ class HtmlReportRenderer:
             )
             if not amounts:
                 month_to_date_basis = str(
-                    self._mapping(billing.get("month_to_date_estimate")).get(
-                        "amount_basis"
-                    ) or ""
+                    self._mapping(billing.get("month_to_date_estimate")).get("amount_basis") or ""
                 ).upper()
                 if month_to_date_basis == "NCP_CONTRACT_DEMAND_USE_AMOUNT":
                     amounts = service_amounts(
@@ -1329,29 +1258,33 @@ class HtmlReportRenderer:
             if subtotal is not None:
                 subtotal_adjustment = round(subtotal - service_total, 2)
                 if abs(subtotal_adjustment) >= 0.01:
-                    rows.append({
-                        "service_name": "공급가액 조정",
-                        "amount": subtotal_adjustment,
-                        "is_adjustment": True,
-                    })
+                    rows.append(
+                        {
+                            "service_name": "공급가액 조정",
+                            "amount": subtotal_adjustment,
+                            "is_adjustment": True,
+                        }
+                    )
             if vat is not None and abs(vat) >= 0.01:
-                rows.append({
-                    "service_name": "VAT",
-                    "amount": round(vat, 2),
-                    "is_adjustment": True,
-                })
+                rows.append(
+                    {
+                        "service_name": "VAT",
+                        "amount": round(vat, 2),
+                        "is_adjustment": True,
+                    }
+                )
 
         difference = round(total - sum(row["amount"] for row in rows), 2)
         if abs(difference) >= 0.01:
-            rows.append({
-                "service_name": (
-                    "최종 청구 조정"
-                    if cost_type == "CONFIRMED"
-                    else "누적·예측 금액 보정"
-                ),
-                "amount": difference,
-                "is_adjustment": True,
-            })
+            rows.append(
+                {
+                    "service_name": (
+                        "최종 청구 조정" if cost_type == "CONFIRMED" else "누적·예측 금액 보정"
+                    ),
+                    "amount": difference,
+                    "is_adjustment": True,
+                }
+            )
         return rows
 
     def _report_period_cost_fact(
@@ -1361,22 +1294,21 @@ class HtmlReportRenderer:
         preferred_names: Sequence[str],
     ) -> Mapping[str, Any]:
         """보고서 대상 기간과 정확히 일치하는 비용 사실만 요약에 사용한다."""
-        report_start = date_value(
-            period.get("use_start_date") or period.get("start_dt")
-        )
-        report_end = date_value(
-            period.get("use_end_date") or period.get("end_dt")
-        )
+        report_start = date_value(period.get("use_start_date") or period.get("start_dt"))
+        report_end = date_value(period.get("use_end_date") or period.get("end_dt"))
         if report_start is None or report_end is None:
             return {}
-        return next((
-            fact
-            for name in preferred_names
-            for fact in facts
-            if fact.get("name") == name
-            and date_value(fact.get("period_start")) == report_start
-            and date_value(fact.get("period_end")) == report_end
-        ), {})
+        return next(
+            (
+                fact
+                for name in preferred_names
+                for fact in facts
+                if fact.get("name") == name
+                and date_value(fact.get("period_start")) == report_start
+                and date_value(fact.get("period_end")) == report_end
+            ),
+            {},
+        )
 
     @staticmethod
     def _operational_cost_label(fact: Mapping[str, Any]) -> str:
@@ -1399,9 +1331,7 @@ class HtmlReportRenderer:
         return f"{status} ({label})"
 
     @staticmethod
-    def _comparison_period_text(
-        comparison: Mapping[str, Any], prefix: str
-    ) -> str:
+    def _comparison_period_text(comparison: Mapping[str, Any], prefix: str) -> str:
         period_start = comparison.get(f"{prefix}_period_start")
         period_end = comparison.get(f"{prefix}_period_end")
         coverage_start = comparison.get(f"{prefix}_coverage_start")
@@ -1424,16 +1354,10 @@ class HtmlReportRenderer:
             if report.analysis:
                 return self._render_operational_analysis(
                     report,
-                    cost_enabled=(
-                        display.billing_enabled
-                        or display.organization_billing_enabled
-                    ),
+                    cost_enabled=(display.billing_enabled or display.organization_billing_enabled),
                     billing_detail_enabled=display.billing_enabled,
                 )
-            diagnostic_count = (
-                len(report.collection_errors)
-                + len(report.collection_warnings)
-            )
+            diagnostic_count = len(report.collection_errors) + len(report.collection_warnings)
             summary_cards = []
             if display.inventory_enabled:
                 summary_cards.append(
@@ -1460,13 +1384,9 @@ class HtmlReportRenderer:
                         warning=bool(diagnostic_count),
                     )
                 )
-            if (
-                display.billing_enabled
-                or display.organization_billing_enabled
-            ):
+            if display.billing_enabled or display.organization_billing_enabled:
                 billing_card_available = (
-                    display.billing.card_amount is not None
-                    and display.billing.card_amount != ""
+                    display.billing.card_amount is not None and display.billing.card_amount != ""
                 )
                 summary_cards.append(
                     self._summary_card(
@@ -1498,23 +1418,24 @@ class HtmlReportRenderer:
                     "보고 기간의 핵심 자원·비용·수집 결과를 요약했습니다. "
                     "필요한 기술 상세만 펼쳐 확인하세요."
                 )
-            return "".join((
-                '<section class="operational-overview legacy-overview" '
-                'aria-label="핵심 요약">',
-                '<section class="daily-summary">',
-                '<div class="summary-heading">',
-                '<p class="section-eyebrow">REPORT BRIEF</p>',
-                '<h2>오늘의 요약</h2>',
-                '<p>핵심 수치를 먼저 확인하세요.</p>',
-                '</div>',
-                f'<p class="summary-narrative">{self._text(summary_text)}</p>',
-                '<section class="summary-grid" aria-label="주요 요약">',
-                "".join(summary_cards),
-                '</section>',
-                '<p class="legacy-summary-note">이전 형식 보고서에는 운영 위험 판정이 포함되지 않습니다.</p>',
-                '</section>',
-                '</section>',
-            ))
+            return "".join(
+                (
+                    '<section class="operational-overview legacy-overview" aria-label="핵심 요약">',
+                    '<section class="daily-summary">',
+                    '<div class="summary-heading">',
+                    '<p class="section-eyebrow">REPORT BRIEF</p>',
+                    "<h2>오늘의 요약</h2>",
+                    "<p>핵심 수치를 먼저 확인하세요.</p>",
+                    "</div>",
+                    f'<p class="summary-narrative">{self._text(summary_text)}</p>',
+                    '<section class="summary-grid" aria-label="주요 요약">',
+                    "".join(summary_cards),
+                    "</section>",
+                    '<p class="legacy-summary-note">이전 형식 보고서에는 운영 위험 판정이 포함되지 않습니다.</p>',
+                    "</section>",
+                    "</section>",
+                )
+            )
         return ""
 
     def _render_operational_analysis(
@@ -1540,12 +1461,10 @@ class HtmlReportRenderer:
             "RISK": "위험",
             "UNKNOWN": "판정 불가",
         }[status]
-        requested_datasets = [
-            item for item in datasets
-            if item.get("status") != "NOT_REQUESTED"
-        ]
+        requested_datasets = [item for item in datasets if item.get("status") != "NOT_REQUESTED"]
         completed_datasets = [
-            item for item in requested_datasets
+            item
+            for item in requested_datasets
             if item.get("status") in {"AVAILABLE", "COLLECTED_EMPTY"}
         ]
         collection_label = {
@@ -1555,9 +1474,7 @@ class HtmlReportRenderer:
             "UNKNOWN": "판정 불가",
         }.get(str(quality.get("overall_status")), "판정 불가")
         if requested_datasets:
-            collection_label += (
-                f" · {len(completed_datasets)}/{len(requested_datasets)}"
-            )
+            collection_label += f" · {len(completed_datasets)}/{len(requested_datasets)}"
 
         cost_facts = self._records(costs.get("facts"))
         preferred_cost_names = (
@@ -1590,41 +1507,42 @@ class HtmlReportRenderer:
         immediate_detail = (
             '<div class="finding-list">'
             + "".join(self._finding_card(item) for item in active_findings)
-            + '</div>'
+            + "</div>"
             if active_findings
             else (
                 '<p class="status-evidence-copy">현재 수집·검사 범위에서 '
-                '활성 운영 경고가 없습니다.</p>'
+                "활성 운영 경고가 없습니다.</p>"
             )
         )
-        status_cards = "".join((
-            self._analysis_status_card(
-                "클라우드 운영 판정",
-                status_label,
-                status.casefold(),
-                analysis.get("source_state", CALCULATED),
-                details_html=assessment_detail,
-            ),
-            self._analysis_status_card(
-                "즉시 확인",
-                f"{len(active_findings)}건",
-                immediate_status,
-                CALCULATED,
-                details_html=immediate_detail,
-            ),
-            self._analysis_status_card(
-                "데이터 수집",
-                collection_label,
-                str(quality.get("overall_status") or "unknown").casefold(),
-                quality.get("source_state", CALCULATED),
-                details_html=self._collection_status_detail(datasets),
-            ),
-        ))
+        status_cards = "".join(
+            (
+                self._analysis_status_card(
+                    "클라우드 운영 판정",
+                    status_label,
+                    status.casefold(),
+                    analysis.get("source_state", CALCULATED),
+                    details_html=assessment_detail,
+                ),
+                self._analysis_status_card(
+                    "즉시 확인",
+                    f"{len(active_findings)}건",
+                    immediate_status,
+                    CALCULATED,
+                    details_html=immediate_detail,
+                ),
+                self._analysis_status_card(
+                    "데이터 수집",
+                    collection_label,
+                    str(quality.get("overall_status") or "unknown").casefold(),
+                    quality.get("source_state", CALCULATED),
+                    details_html=self._collection_status_detail(datasets),
+                ),
+            )
+        )
         if (
             resource_changes
             and analysis.get("period_type") == "MONTHLY"
-            and resource_changes.get("reason_code")
-            != "INFRASTRUCTURE_NOT_REQUESTED"
+            and resource_changes.get("reason_code") != "INFRASTRUCTURE_NOT_REQUESTED"
         ):
             if resource_changes.get("status") == "AVAILABLE":
                 resource_change_label = (
@@ -1640,17 +1558,11 @@ class HtmlReportRenderer:
             status_cards += self._analysis_status_card(
                 "전월 대비 자원",
                 resource_change_label,
-                (
-                    "normal"
-                    if resource_changes.get("status") == "AVAILABLE"
-                    else "unknown"
-                ),
+                ("normal" if resource_changes.get("status") == "AVAILABLE" else "unknown"),
                 resource_changes.get("source_state", UNAVAILABLE),
             )
 
-        availability_value = availability.get(
-            "overall_availability_percent"
-        )
+        availability_value = availability.get("overall_availability_percent")
         quick_facts = [
             self._analysis_quick_fact(
                 "서비스 가용률",
@@ -1698,15 +1610,10 @@ class HtmlReportRenderer:
                 f"{len(active_findings):,}건 있습니다."
             ),
             "CAUTION": (
-                f"현재 수집 범위에서 확인이 필요한 운영 신호가 "
-                f"{len(active_findings):,}건 있습니다."
+                f"현재 수집 범위에서 확인이 필요한 운영 신호가 {len(active_findings):,}건 있습니다."
             ),
-            "NORMAL": (
-                "현재 수집·검사 범위에서 활성 운영 경고가 없습니다."
-            ),
-            "UNKNOWN": (
-                "일부 데이터가 수집되지 않아 운영 상태를 완전히 판정할 수 없습니다."
-            ),
+            "NORMAL": ("현재 수집·검사 범위에서 활성 운영 경고가 없습니다."),
+            "UNKNOWN": ("일부 데이터가 수집되지 않아 운영 상태를 완전히 판정할 수 없습니다."),
         }[status]
         technical_details = self._render_operational_detail_sections(
             analysis,
@@ -1721,34 +1628,36 @@ class HtmlReportRenderer:
         else:
             brief_eyebrow, brief_title = "DAILY BRIEF", "오늘의 요약"
 
-        return "".join((
-            '<section class="operational-overview" aria-label="운영 판단 요약">',
-            '<section class="daily-summary">',
-            '<div class="summary-heading">',
-            f'<p class="section-eyebrow">{brief_eyebrow}</p>',
-            f'<h2>{brief_title}</h2>',
-            '<p>현재 상태와 우선 조치를 먼저 확인하세요.</p>',
-            '</div>',
-            f'<p class="summary-narrative">{self._text(summary_text)}</p>',
-            f'<div class="operational-status-grid">{status_cards}</div>',
-            f'<div class="summary-facts">{"".join(quick_facts)}</div>',
-            '</section>',
-            self._section(
-                "우선 확인 및 조치",
-                "위험도 순으로 최대 5건만 표시합니다. 원시 근거와 전체 수집 상태는 아래 기술 부록에서 확인할 수 있습니다.",
-                finding_content,
-                len(findings),
-                warning=bool(findings),
-            ),
-            '<details class="technical-appendix">',
-            '<summary><span class="technical-appendix-copy">'
-            '<span class="technical-appendix-title">운영 근거 및 기술 상세</span>'
-            '<small>자원 변화·수집 상태·임계치·가용성·보안·비용 비교</small>'
-            '</span></summary>',
-            f'<div class="technical-appendix-body">{technical_details}</div>',
-            '</details>',
-            "</section>",
-        ))
+        return "".join(
+            (
+                '<section class="operational-overview" aria-label="운영 판단 요약">',
+                '<section class="daily-summary">',
+                '<div class="summary-heading">',
+                f'<p class="section-eyebrow">{brief_eyebrow}</p>',
+                f"<h2>{brief_title}</h2>",
+                "<p>현재 상태와 우선 조치를 먼저 확인하세요.</p>",
+                "</div>",
+                f'<p class="summary-narrative">{self._text(summary_text)}</p>',
+                f'<div class="operational-status-grid">{status_cards}</div>',
+                f'<div class="summary-facts">{"".join(quick_facts)}</div>',
+                "</section>",
+                self._section(
+                    "우선 확인 및 조치",
+                    "위험도 순으로 최대 5건만 표시합니다. 원시 근거와 전체 수집 상태는 아래 기술 부록에서 확인할 수 있습니다.",
+                    finding_content,
+                    len(findings),
+                    warning=bool(findings),
+                ),
+                '<details class="technical-appendix">',
+                '<summary><span class="technical-appendix-copy">'
+                '<span class="technical-appendix-title">운영 근거 및 기술 상세</span>'
+                "<small>자원 변화·수집 상태·임계치·가용성·보안·비용 비교</small>"
+                "</span></summary>",
+                f'<div class="technical-appendix-body">{technical_details}</div>',
+                "</details>",
+                "</section>",
+            )
+        )
 
     def _active_operational_findings(
         self,
@@ -1758,11 +1667,7 @@ class HtmlReportRenderer:
         if not findings:
             # 초기 1.0 분석 스냅샷은 key_findings만 저장할 수 있다.
             findings = self._records(analysis.get("key_findings"))
-        return [
-            finding
-            for finding in findings
-            if self._is_visible_operational_finding(finding)
-        ]
+        return [finding for finding in findings if self._is_visible_operational_finding(finding)]
 
     def _analysis_quick_fact(
         self,
@@ -1773,9 +1678,9 @@ class HtmlReportRenderer:
         details_html: str = "",
     ) -> str:
         content = (
-            f'<span>{self._text(label)}</span>'
-            f'<strong>{self._text(value)}</strong>'
-            f'<small>{self._text(self._source_state_text(source_state))}</small>'
+            f"<span>{self._text(label)}</span>"
+            f"<strong>{self._text(value)}</strong>"
+            f"<small>{self._text(self._source_state_text(source_state))}</small>"
         )
         if details_html:
             return (
@@ -1783,15 +1688,11 @@ class HtmlReportRenderer:
                 f'<summary>{content}<span class="status-card-action">'
                 '<span class="disclosure-action-open">근거 보기</span>'
                 '<span class="disclosure-action-close">접기</span>'
-                '</span></summary>'
+                "</span></summary>"
                 f'<div class="status-card-detail">{details_html}</div>'
-                '</details>'
+                "</details>"
             )
-        return (
-            '<div class="summary-fact">'
-            f'{content}'
-            '</div>'
-        )
+        return f'<div class="summary-fact">{content}</div>'
 
     def _operational_assessment_detail(
         self,
@@ -1799,13 +1700,9 @@ class HtmlReportRenderer:
         findings: Sequence[Mapping[str, Any]],
         datasets: Sequence[Mapping[str, Any]],
     ) -> str:
-        requested = [
-            item for item in datasets
-            if item.get("status") != "NOT_REQUESTED"
-        ]
+        requested = [item for item in datasets if item.get("status") != "NOT_REQUESTED"]
         completed = [
-            item for item in requested
-            if item.get("status") in {"AVAILABLE", "COLLECTED_EMPTY"}
+            item for item in requested if item.get("status") in {"AVAILABLE", "COLLECTED_EMPTY"}
         ]
         if status == "NORMAL" and requested:
             reason = (
@@ -1828,14 +1725,12 @@ class HtmlReportRenderer:
                 "완료되어 정상 여부를 확정하지 않았습니다."
             )
         else:
-            reason = (
-                "데이터셋별 수집 상태가 기록되지 않아 정상 여부를 확정하지 않았습니다."
-            )
+            reason = "데이터셋별 수집 상태가 기록되지 않아 정상 여부를 확정하지 않았습니다."
         return (
             '<p class="status-evidence-copy">'
-            f'{self._text(reason)} '
+            f"{self._text(reason)} "
             "이 판정은 보고서에 수집되고 규칙으로 검사된 범위에 한정됩니다."
-            '</p>'
+            "</p>"
         )
 
     def _collection_status_detail(
@@ -1845,40 +1740,34 @@ class HtmlReportRenderer:
         if not datasets:
             return (
                 '<p class="status-evidence-copy">데이터셋별 수집 상태가 기록되지 않아 '
-                '완료·누락 항목을 구분할 수 없습니다.</p>'
+                "완료·누락 항목을 구분할 수 없습니다.</p>"
             )
         items = []
         for item in datasets:
             counts = []
             if item.get("record_count") is not None:
-                counts.append(
-                    f"레코드 {self._number(item.get('record_count'), 0)}건"
-                )
+                counts.append(f"레코드 {self._number(item.get('record_count'), 0)}건")
             if item.get("error_count"):
-                counts.append(
-                    f"오류 {self._number(item.get('error_count'), 0)}건"
-                )
+                counts.append(f"오류 {self._number(item.get('error_count'), 0)}건")
             if item.get("warning_count"):
-                counts.append(
-                    f"경고 {self._number(item.get('warning_count'), 0)}건"
-                )
+                counts.append(f"경고 {self._number(item.get('warning_count'), 0)}건")
             metadata = " · ".join(counts) or "건수 정보 없음"
             items.append(
                 '<li><details class="collection-status-item"><summary>'
                 '<span class="collection-status-heading"><strong>'
                 f"{self._text(item.get('label') or item.get('key') or '데이터셋')}"
-                '</strong><span>'
+                "</strong><span>"
                 f"{self._text(item.get('status_label') or item.get('status') or '판정 불가')}"
-                '</span></span><small>'
+                "</span></span><small>"
                 f"{self._text(metadata)}"
                 '</small><span class="collection-detail-action">'
                 '<span class="disclosure-action-open">상세 보기</span>'
                 '<span class="disclosure-action-close">접기</span>'
                 '</span></summary><p class="collection-status-reason">'
                 f"{self._text(item.get('reason') or '판정 근거 없음')}"
-                '</p></details></li>'
+                "</p></details></li>"
             )
-        return '<ul class="status-evidence-list">' + "".join(items) + '</ul>'
+        return '<ul class="status-evidence-list">' + "".join(items) + "</ul>"
 
     def _availability_status_detail(
         self,
@@ -1888,9 +1777,7 @@ class HtmlReportRenderer:
         rows = [
             {
                 **item,
-                "source_state_text": self._source_state_text(
-                    item.get("source_state")
-                ),
+                "source_state_text": self._source_state_text(item.get("source_state")),
             }
             for item in self._records(availability.get("items"))
         ]
@@ -1908,9 +1795,9 @@ class HtmlReportRenderer:
             )
         dataset = next(
             (
-                item for item in datasets
-                if item.get("key") == "service_availability"
-                or item.get("label") == "서비스 가용성"
+                item
+                for item in datasets
+                if item.get("key") == "service_availability" or item.get("label") == "서비스 가용성"
             ),
             {},
         )
@@ -1918,7 +1805,7 @@ class HtmlReportRenderer:
             '<p class="status-evidence-copy">'
             f"{self._text(dataset.get('status_label') or availability.get('status') or '조회 불가')}"
             f" · {self._text(dataset.get('reason') or '수집된 WMS 시나리오가 없습니다.')}"
-            '</p>'
+            "</p>"
         )
 
     def _cost_status_detail(
@@ -1932,19 +1819,20 @@ class HtmlReportRenderer:
         billing_link = (
             '<p class="status-evidence-copy">'
             '<a href="#billing-cost-basis">과금 데이터 기준과 서비스별 비용 상세로 이동</a>'
-            '</p>'
-            if show_billing_link else ""
+            "</p>"
+            if show_billing_link
+            else ""
         )
         return (
             '<dl class="status-evidence-dl">'
-            '<div><dt>선택 기준</dt><dd>'
+            "<div><dt>선택 기준</dt><dd>"
             f"{self._text(self._operational_cost_label(fact))}</dd></div>"
-            '<div><dt>대상 기간</dt><dd>'
+            "<div><dt>대상 기간</dt><dd>"
             f"{self._text(period_start or '-')} ~ {self._text(period_end or '-')}</dd></div>"
-            '<div><dt>금액 기준</dt><dd>'
+            "<div><dt>금액 기준</dt><dd>"
             f"{self._text(fact.get('amount_basis') or '-')}</dd></div>"
-            '</dl>'
-            f'{billing_link}'
+            "</dl>"
+            f"{billing_link}"
         )
 
     def _render_operational_detail_sections(
@@ -1967,9 +1855,7 @@ class HtmlReportRenderer:
                 "error_count": item.get("error_count"),
                 "warning_count": item.get("warning_count"),
                 "reason": item.get("reason"),
-                "source_state_text": self._source_state_text(
-                    item.get("source_state")
-                ),
+                "source_state_text": self._source_state_text(item.get("source_state")),
             }
             for item in datasets
         ]
@@ -1990,48 +1876,39 @@ class HtmlReportRenderer:
             {
                 **item,
                 "alert_severity_label": (
-                    "위험"
-                    if item.get("alert_severity") == "CRITICAL"
-                    else "주의"
+                    "위험" if item.get("alert_severity") == "CRITICAL" else "주의"
                 ),
                 "alert_duration_seconds": (
-                    item.get("alert_duration_seconds")
-                    or item.get("warning_duration_seconds")
+                    item.get("alert_duration_seconds") or item.get("warning_duration_seconds")
                 ),
-                "source_state_text": self._source_state_text(
-                    item.get("source_state")
-                ),
+                "source_state_text": self._source_state_text(item.get("source_state")),
             }
             for item in metric_alert_rows[:10]
         ]
         comparison = self._mapping(costs.get("comparison"))
-        comparison_rows = [{
-            **comparison,
-            "source_state_text": self._source_state_text(
-                comparison.get("source_state")
-            ),
-            "current_period_display": self._comparison_period_text(
-                comparison, "current"
-            ),
-            "baseline_period_display": self._comparison_period_text(
-                comparison, "baseline"
-            ),
-        }] if comparison else []
+        comparison_rows = (
+            [
+                {
+                    **comparison,
+                    "source_state_text": self._source_state_text(comparison.get("source_state")),
+                    "current_period_display": self._comparison_period_text(comparison, "current"),
+                    "baseline_period_display": self._comparison_period_text(comparison, "baseline"),
+                }
+            ]
+            if comparison
+            else []
+        )
         scenario_rows = [
             {
                 **item,
-                "source_state_text": self._source_state_text(
-                    item.get("source_state")
-                ),
+                "source_state_text": self._source_state_text(item.get("source_state")),
             }
             for item in self._records(availability.get("items"))
         ]
         security_rows = [
             {
                 **item,
-                "source_state_text": self._source_state_text(
-                    item.get("source_state")
-                ),
+                "source_state_text": self._source_state_text(item.get("source_state")),
             }
             for item in self._records(security.get("items"))[:50]
         ]
@@ -2047,27 +1924,24 @@ class HtmlReportRenderer:
                 change_type,
                 (change_type or "-", "unknown"),
             )
-            resource_change_rows.append({
-                **item,
-                "change_badge": (
-                    f'<span class="change-badge {style}">'
-                    f"{self._text(label)}</span>"
-                ),
-                "resource_name_html": (
-                    '<strong class="resource-change-name">'
-                    f"{self._text(item.get('resource_name') or '-')}</strong>"
-                ),
-                "change_detail": self._resource_change_detail(
-                    item.get("changed_fields"),
-                    change_type,
-                ),
-            })
-        resource_change_status = str(
-            resource_changes.get("status") or ""
-        ).upper()
-        raw_lifecycle_only = resource_changes.get(
-            "lifecycle_only_categories"
-        )
+            resource_change_rows.append(
+                {
+                    **item,
+                    "change_badge": (
+                        f'<span class="change-badge {style}">{self._text(label)}</span>'
+                    ),
+                    "resource_name_html": (
+                        '<strong class="resource-change-name">'
+                        f"{self._text(item.get('resource_name') or '-')}</strong>"
+                    ),
+                    "change_detail": self._resource_change_detail(
+                        item.get("changed_fields"),
+                        change_type,
+                    ),
+                }
+            )
+        resource_change_status = str(resource_changes.get("status") or "").upper()
+        raw_lifecycle_only = resource_changes.get("lifecycle_only_categories")
         lifecycle_only_labels = (
             [
                 RESOURCE_CATEGORY_LABELS.get(
@@ -2086,15 +1960,12 @@ class HtmlReportRenderer:
         )
         if lifecycle_only_labels:
             resource_change_description += (
-                " 스펙 변경 비교 제외: "
-                + ", ".join(lifecycle_only_labels)
-                + "."
+                " 스펙 변경 비교 제외: " + ", ".join(lifecycle_only_labels) + "."
             )
         show_resource_changes = (
             bool(resource_changes)
             and resource_change_status != "NOT_APPLICABLE"
-            and resource_changes.get("reason_code")
-            != "INFRASTRUCTURE_NOT_REQUESTED"
+            and resource_changes.get("reason_code") != "INFRASTRUCTURE_NOT_REQUESTED"
         )
         if resource_change_status == "AVAILABLE":
             resource_change_content = (
@@ -2128,101 +1999,111 @@ class HtmlReportRenderer:
             if show_resource_changes
             else ""
         )
-        return "".join((
-            resource_change_section,
-            self._section(
-                "데이터 수집 상태",
-                "수집 완료 0건과 미수집·권한 부족·실패를 분리합니다.",
-                self._table(
-                    dataset_rows,
-                    (
-                        ("label", "데이터셋"),
-                        ("status", "상태"),
-                        ("source_state_text", "출처 상태"),
-                        ("record_count", "레코드", "number0"),
-                        ("error_count", "오류", "number0"),
-                        ("warning_count", "경고", "number0"),
-                        ("reason", "판정 근거"),
+        return "".join(
+            (
+                resource_change_section,
+                self._section(
+                    "데이터 수집 상태",
+                    "수집 완료 0건과 미수집·권한 부족·실패를 분리합니다.",
+                    self._table(
+                        dataset_rows,
+                        (
+                            ("label", "데이터셋"),
+                            ("status", "상태"),
+                            ("source_state_text", "출처 상태"),
+                            ("record_count", "레코드", "number0"),
+                            ("error_count", "오류", "number0"),
+                            ("warning_count", "경고", "number0"),
+                            ("reason", "판정 근거"),
+                        ),
                     ),
+                    len(dataset_rows),
                 ),
-                len(dataset_rows),
-            ),
-            self._section(
-                "90% 이상 지속 사용 자원",
-                "CPU·메모리·스토리지 실제 사용률의 평균(AVG) 또는 최소(MIN) 집계가 90% 이상으로 지속된 자원 중 위험도와 최대 사용률 기준 상위 10건을 표시합니다. 우측 건수는 전체 알람 수이며, 순간 최댓값·할당 용량·암호화·태그 정책은 포함하지 않습니다.",
-                self._table(
-                    metric_rows,
-                    (
-                        ("alert_severity_label", "상태"),
-                        ("category", "상품"),
-                        ("resource_name", "자원"),
-                        ("metric_label", "지표"),
-                        ("aggregation", "집계"),
-                        ("source_state_text", "출처 상태"),
-                        ("average", "평균", "number2"),
-                        ("p95", "P95", "number2"),
-                        ("maximum", "최대", "number2"),
-                        ("alert_duration_seconds", "90% 이상 지속(초)", "number0"),
+                self._section(
+                    "90% 이상 지속 사용 자원",
+                    "CPU·메모리·스토리지 실제 사용률의 평균(AVG) 또는 최소(MIN) 집계가 90% 이상으로 지속된 자원 중 위험도와 최대 사용률 기준 상위 10건을 표시합니다. 우측 건수는 전체 알람 수이며, 순간 최댓값·할당 용량·암호화·태그 정책은 포함하지 않습니다.",
+                    self._table(
+                        metric_rows,
+                        (
+                            ("alert_severity_label", "상태"),
+                            ("category", "상품"),
+                            ("resource_name", "자원"),
+                            ("metric_label", "지표"),
+                            ("aggregation", "집계"),
+                            ("source_state_text", "출처 상태"),
+                            ("average", "평균", "number2"),
+                            ("p95", "P95", "number2"),
+                            ("maximum", "최대", "number2"),
+                            ("alert_duration_seconds", "90% 이상 지속(초)", "number0"),
+                        ),
                     ),
-                ),
-                metric_alert_count,
-            ) if metric_rows else "",
-            self._section(
-                "서비스 가용성(WMS)",
-                "가용률과 평균 응답시간입니다. 집계 버킷 통계이며 개별 요청 p95로 해석하지 않습니다.",
-                self._table(
-                    scenario_rows,
-                    (
-                        ("name", "시나리오"),
-                        ("source_state_text", "출처 상태"),
-                        ("availability_percent", "가용률(%)", "number2"),
-                        ("avg_load_time_ms", "평균 로드(ms)", "number2"),
-                        ("avg_run_time_ms", "평균 실행(ms)", "number2"),
-                        ("success_count", "성공", "number0"),
-                        ("error_count", "오류", "number0"),
+                    metric_alert_count,
+                )
+                if metric_rows
+                else "",
+                self._section(
+                    "서비스 가용성(WMS)",
+                    "가용률과 평균 응답시간입니다. 집계 버킷 통계이며 개별 요청 p95로 해석하지 않습니다.",
+                    self._table(
+                        scenario_rows,
+                        (
+                            ("name", "시나리오"),
+                            ("source_state_text", "출처 상태"),
+                            ("availability_percent", "가용률(%)", "number2"),
+                            ("avg_load_time_ms", "평균 로드(ms)", "number2"),
+                            ("avg_run_time_ms", "평균 실행(ms)", "number2"),
+                            ("success_count", "성공", "number0"),
+                            ("error_count", "오류", "number0"),
+                        ),
                     ),
-                ),
-                len(scenario_rows),
-            ) if scenario_rows else "",
-            self._section(
-                "Security Monitoring(VPC)",
-                "AV·DDoS·IDS·IPS·WAF 탐지 결과입니다. 미수집은 보안 정상으로 표시하지 않습니다.",
-                self._table(
-                    security_rows,
-                    (
-                        ("service", "상품"),
-                        ("source_state_text", "출처 상태"),
-                        ("detected_at_kst", "탐지 시각"),
-                        ("event_name", "이벤트"),
-                        ("attack_type", "유형"),
-                        ("action_status", "조치"),
-                        ("target", "대상"),
+                    len(scenario_rows),
+                )
+                if scenario_rows
+                else "",
+                self._section(
+                    "Security Monitoring(VPC)",
+                    "AV·DDoS·IDS·IPS·WAF 탐지 결과입니다. 미수집은 보안 정상으로 표시하지 않습니다.",
+                    self._table(
+                        security_rows,
+                        (
+                            ("service", "상품"),
+                            ("source_state_text", "출처 상태"),
+                            ("detected_at_kst", "탐지 시각"),
+                            ("event_name", "이벤트"),
+                            ("attack_type", "유형"),
+                            ("action_status", "조치"),
+                            ("target", "대상"),
+                        ),
                     ),
-                ),
-                len(security_rows),
-                warning=bool(security_rows),
-            ) if security_rows else "",
-            self._section(
-                "비용 전기 비교",
-                "현재 보고 기간과 직전 동일 기간의 비용을 같은 기준·신뢰도·할인·VAT 범위일 때만 비교합니다.",
-                self._table(
-                    comparison_rows,
-                    (
-                        ("status", "비교 상태"),
-                        ("source_state_text", "출처 상태"),
-                        ("current_period_display", "현재 대상·수집 기간"),
-                        ("baseline_period_display", "이전 대상·수집 기간"),
-                        ("current_amount", "현재 금액", "number0"),
-                        ("baseline_amount", "이전 금액", "number0"),
-                        ("amount_change", "증감액", "number0"),
-                        ("rate_change", "증감률(%)", "number2"),
-                        ("amount_basis", "금액 기준"),
-                        ("reason", "근거"),
+                    len(security_rows),
+                    warning=bool(security_rows),
+                )
+                if security_rows
+                else "",
+                self._section(
+                    "비용 전기 비교",
+                    "현재 보고 기간과 직전 동일 기간의 비용을 같은 기준·신뢰도·할인·VAT 범위일 때만 비교합니다.",
+                    self._table(
+                        comparison_rows,
+                        (
+                            ("status", "비교 상태"),
+                            ("source_state_text", "출처 상태"),
+                            ("current_period_display", "현재 대상·수집 기간"),
+                            ("baseline_period_display", "이전 대상·수집 기간"),
+                            ("current_amount", "현재 금액", "number0"),
+                            ("baseline_amount", "이전 금액", "number0"),
+                            ("amount_change", "증감액", "number0"),
+                            ("rate_change", "증감률(%)", "number2"),
+                            ("amount_basis", "금액 기준"),
+                            ("reason", "근거"),
+                        ),
                     ),
-                ),
-                len(comparison_rows),
-            ) if cost_enabled else "",
-        ))
+                    len(comparison_rows),
+                )
+                if cost_enabled
+                else "",
+            )
+        )
 
     def _resource_change_detail(
         self,
@@ -2262,12 +2143,23 @@ class HtmlReportRenderer:
         *,
         details_html: str = "",
     ) -> str:
-        safe_status = status if status in {
-            "normal", "caution", "risk", "unknown", "complete", "partial",
-            "failed", "generation-success",
-        } else "unknown"
+        safe_status = (
+            status
+            if status
+            in {
+                "normal",
+                "caution",
+                "risk",
+                "unknown",
+                "complete",
+                "partial",
+                "failed",
+                "generation-success",
+            }
+            else "unknown"
+        )
         content = (
-            f'<span>{self._text(label)}</span><strong>{self._text(value)}</strong>'
+            f"<span>{self._text(label)}</span><strong>{self._text(value)}</strong>"
             f'<small class="source-state">{self._text(self._source_state_text(source_state))}</small>'
         )
         if details_html:
@@ -2276,24 +2168,17 @@ class HtmlReportRenderer:
                 f'<summary>{content}<span class="status-card-action">'
                 '<span class="disclosure-action-open">상세 보기</span>'
                 '<span class="disclosure-action-close">접기</span>'
-                '</span></summary>'
+                "</span></summary>"
                 f'<div class="status-card-detail">{details_html}</div>'
-                '</details>'
+                "</details>"
             )
-        return (
-            f'<article class="operational-status {safe_status}">'
-            f'{content}'
-            "</article>"
-        )
+        return f'<article class="operational-status {safe_status}">{content}</article>'
 
     @staticmethod
     def _analysis_finding_status(
         findings: Sequence[Mapping[str, Any]],
     ) -> str:
-        severities = {
-            str(finding.get("severity") or "").upper()
-            for finding in findings
-        }
+        severities = {str(finding.get("severity") or "").upper() for finding in findings}
         if "CRITICAL" in severities:
             return "risk"
         if "WARNING" in severities:
@@ -2305,10 +2190,7 @@ class HtmlReportRenderer:
         findings: Sequence[Mapping[str, Any]],
         quality: Mapping[str, Any],
     ) -> str:
-        severities = {
-            str(finding.get("severity") or "").upper()
-            for finding in findings
-        }
+        severities = {str(finding.get("severity") or "").upper() for finding in findings}
         if "CRITICAL" in severities:
             return "RISK"
         if "WARNING" in severities:
@@ -2343,10 +2225,7 @@ class HtmlReportRenderer:
             }:
                 continue
             try:
-                return (
-                    float(item.get("value"))
-                    >= UTILIZATION_ALERT_MIN_PERCENT
-                )
+                return float(item.get("value")) >= UTILIZATION_ALERT_MIN_PERCENT
             except (TypeError, ValueError):
                 return False
         return False
@@ -2357,15 +2236,10 @@ class HtmlReportRenderer:
     ) -> bool:
         if summary.get("alert_severity") not in {"WARNING", "CRITICAL"}:
             return False
-        if summary.get("metric_kind") not in {
-            "CPU", "MEMORY", "FILESYSTEM"
-        }:
+        if summary.get("metric_kind") not in {"CPU", "MEMORY", "FILESYSTEM"}:
             return False
         try:
-            return (
-                float(summary.get("maximum"))
-                >= UTILIZATION_ALERT_MIN_PERCENT
-            )
+            return float(summary.get("maximum")) >= UTILIZATION_ALERT_MIN_PERCENT
         except (TypeError, ValueError):
             return False
 
@@ -2384,17 +2258,13 @@ class HtmlReportRenderer:
         )
         severity = str(finding.get("severity") or "INFO").casefold()
         priority_class = " priority" if priority else ""
-        priority_label = (
-            '<span class="priority-label">가장 먼저 확인</span>'
-            if priority
-            else ""
-        )
+        priority_label = '<span class="priority-label">가장 먼저 확인</span>' if priority else ""
         return f"""
         <article class="finding-card {self._text(severity)}{priority_class}">
           {priority_label}
-          <div class="finding-heading"><span>{self._text(finding.get('severity'))}</span><span>{self._text(self._source_state_text(finding.get('source_state')))}</span><strong>{self._text(finding.get('title'))}</strong></div>
-          <p>{self._text(resource.get('name') or resource.get('id') or '공통')}</p>
-          <dl><div><dt>영향</dt><dd>{self._text(finding.get('impact') or '-')}</dd></div><div><dt>조치</dt><dd>{self._text(finding.get('recommendation') or '-')}</dd></div><div><dt>근거</dt><dd>{self._text(evidence_text or '-')}</dd></div></dl>
+          <div class="finding-heading"><span>{self._text(finding.get("severity"))}</span><span>{self._text(self._source_state_text(finding.get("source_state")))}</span><strong>{self._text(finding.get("title"))}</strong></div>
+          <p>{self._text(resource.get("name") or resource.get("id") or "공통")}</p>
+          <dl><div><dt>영향</dt><dd>{self._text(finding.get("impact") or "-")}</dd></div><div><dt>조치</dt><dd>{self._text(finding.get("recommendation") or "-")}</dd></div><div><dt>근거</dt><dd>{self._text(evidence_text or "-")}</dd></div></dl>
         </article>"""
 
     def _render_infrastructure_sections(
@@ -2406,8 +2276,7 @@ class HtmlReportRenderer:
         inventory_resources = [
             resource
             for resource in display.infrastructure
-            if str(resource.get("category") or "").upper()
-            not in network_categories
+            if str(resource.get("category") or "").upper() not in network_categories
         ]
         server_resources = [
             resource
@@ -2420,15 +2289,18 @@ class HtmlReportRenderer:
             if str(resource.get("category") or "").upper() != "SERVER"
         ]
         inventory_html = (
-            "".join((
-                self._server_section(
-                    server_resources,
-                    report.servers,
-                    report.infrastructure,
-                ),
-                self._infrastructure_section(non_server_resources),
-            ))
-            if display.inventory_enabled and inventory_resources else ""
+            "".join(
+                (
+                    self._server_section(
+                        server_resources,
+                        report.servers,
+                        report.infrastructure,
+                    ),
+                    self._infrastructure_section(non_server_resources),
+                )
+            )
+            if display.inventory_enabled and inventory_resources
+            else ""
         )
         network_configuration_html = (
             self._network_configuration_section(
@@ -2454,23 +2326,25 @@ class HtmlReportRenderer:
         if display.monitoring_enabled:
             monitoring_parts = []
             if display.report_options.monitoring_enabled("SERVER"):
-                monitoring_parts.extend((
-                    self._section(
-                        "서버 이용 현황",
-                        "보고 기간의 서버별 CPU·메모리 평균과 마운트/드라이브별 "
-                        "파일시스템 평균·최대 사용률입니다.",
-                        self._metric_table(report.display_server_metrics),
-                        len(report.display_server_metrics),
-                        collapsed=len(report.display_server_metrics) > 20,
-                        collapsed_summary=self._server_metric_summary(
-                            report.display_server_metrics
+                monitoring_parts.extend(
+                    (
+                        self._section(
+                            "서버 이용 현황",
+                            "보고 기간의 서버별 CPU·메모리 평균과 마운트/드라이브별 "
+                            "파일시스템 평균·최대 사용률입니다.",
+                            self._metric_table(report.display_server_metrics),
+                            len(report.display_server_metrics),
+                            collapsed=len(report.display_server_metrics) > 20,
+                            collapsed_summary=self._server_metric_summary(
+                                report.display_server_metrics
+                            ),
                         ),
-                    ),
-                    self._metric_chart_section(
-                        report.server_metrics,
-                        report.period,
-                    ),
-                ))
+                        self._metric_chart_section(
+                            report.server_metrics,
+                            report.period,
+                        ),
+                    )
+                )
             monitoring_parts.append(
                 self._infrastructure_metric_section(
                     report.display_infrastructure_metrics,
@@ -2506,82 +2380,81 @@ class HtmlReportRenderer:
             for row in billing.usage_summary:
                 value = self._finite_number(row.get("usage_quantity"))
                 if value is not None:
-                    unit = (
-                        str(row.get("unit_code") or "").strip()
-                        or "단위 미표시"
-                    )
+                    unit = str(row.get("unit_code") or "").strip() or "단위 미표시"
                     usage_totals[unit] += value
             usage_parts = [
                 f"{unit} {self._number(total, 3)}"
                 for unit, total in sorted(usage_totals.items())[:3]
             ]
             usage_summary = (
-                "단위별 합계 " + " · ".join(usage_parts)
-                if usage_parts else "사용량 수치 없음"
+                "단위별 합계 " + " · ".join(usage_parts) if usage_parts else "사용량 수치 없음"
             )
             if len(usage_totals) > 3:
                 usage_summary += f" · 기타 {len(usage_totals) - 3:,}개 단위"
-            billing_html = "".join((
-                self._section(
-                    "과금 데이터 기준",
-                    "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
-                    self._billing_fact_cards(billing.cost_facts),
-                    len(billing.cost_facts),
-                ),
-                self._section(
-                    billing.section_title,
-                    billing.section_description,
-                    self._table(
-                        billing.service_summary,
-                        (
-                            ("service_name", "서비스"),
-                            ("amount", "금액", "number0"),
-                            ("row_count", "항목", "number0"),
-                        ),
+            billing_html = "".join(
+                (
+                    self._section(
+                        "과금 데이터 기준",
+                        "확정·추정 데이터의 대상 기간, 실제 수집 범위와 계산 기준 시점을 구분합니다.",
+                        self._billing_fact_cards(billing.cost_facts),
+                        len(billing.cost_facts),
                     ),
-                    len(billing.service_summary),
-                    collapsed=True,
-                    collapsed_summary=service_summary,
-                ),
-                self._section(
-                    billing.network_section_title,
-                    billing.network_section_description,
-                    self._table(
-                        billing.network_summary,
-                        (
-                            ("service_name", "서비스"),
-                            ("direction", "방향"),
-                            ("name", "항목"),
-                            ("usage_gb", "사용량(GB)", "number3"),
-                            ("row_count", "건수", "number0"),
+                    self._section(
+                        billing.section_title,
+                        billing.section_description,
+                        self._table(
+                            billing.service_summary,
+                            (
+                                ("service_name", "서비스"),
+                                ("amount", "금액", "number0"),
+                                ("row_count", "항목", "number0"),
+                            ),
                         ),
+                        len(billing.service_summary),
+                        collapsed=True,
+                        collapsed_summary=service_summary,
                     ),
-                    len(billing.network_summary),
-                    collapsed=True,
-                    collapsed_summary=network_summary,
-                ),
-                self._section(
-                    billing.usage_section_title,
-                    billing.usage_section_description,
-                    self._table(
-                        billing.usage_summary,
-                        (
-                            ("service_name", "서비스"),
-                            ("item_name", "항목"),
-                            ("usage_quantity", "사용량", "number3"),
-                            ("unit_code", "단위"),
-                            ("row_count", "건수", "number0"),
+                    self._section(
+                        billing.network_section_title,
+                        billing.network_section_description,
+                        self._table(
+                            billing.network_summary,
+                            (
+                                ("service_name", "서비스"),
+                                ("direction", "방향"),
+                                ("name", "항목"),
+                                ("usage_gb", "사용량(GB)", "number3"),
+                                ("row_count", "건수", "number0"),
+                            ),
                         ),
+                        len(billing.network_summary),
+                        collapsed=True,
+                        collapsed_summary=network_summary,
                     ),
-                    len(billing.usage_summary),
-                    collapsed=True,
-                    collapsed_summary=usage_summary,
-                ),
-            ))
+                    self._section(
+                        billing.usage_section_title,
+                        billing.usage_section_description,
+                        self._table(
+                            billing.usage_summary,
+                            (
+                                ("service_name", "서비스"),
+                                ("item_name", "항목"),
+                                ("usage_quantity", "사용량", "number3"),
+                                ("unit_code", "단위"),
+                                ("row_count", "건수", "number0"),
+                            ),
+                        ),
+                        len(billing.usage_summary),
+                        collapsed=True,
+                        collapsed_summary=usage_summary,
+                    ),
+                )
+            )
 
         organization_billing_html = (
             self._organization_cost_sections(display.billing.account_costs)
-            if display.organization_billing_enabled else ""
+            if display.organization_billing_enabled
+            else ""
         )
         return {
             "billing": billing_html,
@@ -2617,15 +2490,14 @@ class HtmlReportRenderer:
             if display.report_options.section_enabled("insight_events")
             else ""
         )
-        activity_summary_html, activity_collapsed_summary = (
-            self._activity_attention_summary(report, display.activity_events)
+        activity_summary_html, activity_collapsed_summary = self._activity_attention_summary(
+            report, display.activity_events
         )
         activity_html = (
             self._section(
                 "Cloud Activity Tracer",
                 "보고 기간에 기록된 계정 및 리소스 작업 이력입니다.",
-                activity_summary_html
-                + self._activity_table(display.activity_events),
+                activity_summary_html + self._activity_table(display.activity_events),
                 len(display.activity_events),
                 collapsed=True,
                 collapsed_summary=activity_collapsed_summary,
@@ -2671,20 +2543,13 @@ class HtmlReportRenderer:
         display: ReportDisplayData,
     ) -> str:
         sections = {
-            "executive_summary": self._render_summary_section(
-                report, display
-            ),
-            "infrastructure_inventory": (
-                self._render_infrastructure_sections(report, display)
-            ),
+            "executive_summary": self._render_summary_section(report, display),
+            "infrastructure_inventory": (self._render_infrastructure_sections(report, display)),
             "monitoring": self._render_monitoring_sections(report, display),
             **self._render_billing_sections(display),
             **self._render_event_diagnostic_sections(report, display),
         }
-        return "".join(
-            sections.get(name, "")
-            for name in display.report_options.ordered_sections
-        )
+        return "".join(sections.get(name, "") for name in display.report_options.ordered_sections)
 
     def _render_document(
         self,
@@ -2696,20 +2561,14 @@ class HtmlReportRenderer:
         report_title = display.report_title
         interaction_script = (
             f"<script>{REPORT_INTERACTION_SCRIPT}</script>"
-            if (
-                "data-chart-" in sections
-                or "data-resource-filter" in sections
-            )
+            if ("data-chart-" in sections or "data-resource-filter" in sections)
             else ""
         )
         logo = (
             f'<img src="{self._text(display.customer_logo_data_uri)}" '
             f'alt="{self._text(display.customer_name)} 로고">'
             if display.customer_logo_data_uri
-            else (
-                f'<span aria-hidden="true">'
-                f'{self._text(display.customer_initials)}</span>'
-            )
+            else (f'<span aria-hidden="true">{self._text(display.customer_initials)}</span>')
         )
 
         return f"""<!doctype html>
@@ -2804,14 +2663,10 @@ class HtmlReportRenderer:
         collapsed_summary: str = "",
     ) -> str:
         status_class = " warning" if warning else ""
-        count_html = (
-            f'<span class="count">{count:,}건</span>'
-            if count is not None
-            else ""
-        )
+        count_html = f'<span class="count">{count:,}건</span>' if count is not None else ""
         summary_html = (
             '<small class="section-description section-summary">'
-            f'<strong>핵심</strong> · {self._text(collapsed_summary)}</small>'
+            f"<strong>핵심</strong> · {self._text(collapsed_summary)}</small>"
             if collapsed_summary
             else ""
         )
@@ -2852,18 +2707,14 @@ class HtmlReportRenderer:
         counts: Dict[str, int] = defaultdict(int)
         keys = (key,) if isinstance(key, str) else key
         for row in rows:
-            raw_value = self._first_present(
-                *(row.get(candidate) for candidate in keys)
-            ).strip()
+            raw_value = self._first_present(*(row.get(candidate) for candidate in keys)).strip()
             if not raw_value:
                 continue
             normalized = raw_value.upper()
             counts[labels.get(normalized, raw_value)] += 1
         if not counts:
             return empty
-        priority = {
-            label: index for index, label in enumerate(priority_labels)
-        }
+        priority = {label: index for index, label in enumerate(priority_labels)}
         ranked = sorted(
             counts,
             key=lambda value: (
@@ -2872,10 +2723,7 @@ class HtmlReportRenderer:
                 value,
             ),
         )
-        parts = [
-            f"{value} {counts[value]:,}건"
-            for value in ranked[:3]
-        ]
+        parts = [f"{value} {counts[value]:,}건" for value in ranked[:3]]
         if len(ranked) > 3:
             parts.append(f"기타 {sum(counts[value] for value in ranked[3:]):,}건")
         return " · ".join(parts)
@@ -2897,11 +2745,14 @@ class HtmlReportRenderer:
         if not values:
             return empty
         top_value, top_row = max(values, key=lambda item: item[0])
-        top_label = self._first_present(
-            top_row.get("item_name"),
-            top_row.get("name"),
-            top_row.get("service_name"),
-        ) or "항목"
+        top_label = (
+            self._first_present(
+                top_row.get("item_name"),
+                top_row.get("name"),
+                top_row.get("service_name"),
+            )
+            or "항목"
+        )
         return (
             f"합계 {self._number(sum(value for value, _ in values), decimals)}{unit}"
             f" · 최대 {top_label} {self._number(top_value, decimals)}{unit}"
@@ -2931,21 +2782,14 @@ class HtmlReportRenderer:
                     if value is None:
                         continue
                     mount = self._first_present(detail.get("mount")) or "-"
-                    candidates.append(
-                        (value, row, f"파일시스템 {mount}")
-                    )
+                    candidates.append((value, row, f"파일시스템 {mount}"))
                     server_values.append(value)
-            if any(
-                value >= UTILIZATION_ALERT_MIN_PERCENT
-                for value in server_values
-            ):
+            if any(value >= UTILIZATION_ALERT_MIN_PERCENT for value in server_values):
                 threshold_count += 1
         if not candidates:
             return "사용률 데이터 없음"
         value, row, label = max(candidates, key=lambda item: item[0])
-        server_name = self._first_present(
-            row.get("server_name"), row.get("server_id")
-        ) or "서버"
+        server_name = self._first_present(row.get("server_name"), row.get("server_id")) or "서버"
         return (
             "평균 "
             f"{self._number(UTILIZATION_ALERT_MIN_PERCENT, 0)}% 이상 "
@@ -2968,9 +2812,7 @@ class HtmlReportRenderer:
         if not resources:
             return ""
 
-        allowed = {
-            category for category, _ in self.INFRASTRUCTURE_CATEGORIES
-        }
+        allowed = {category for category, _ in self.INFRASTRUCTURE_CATEGORIES}
         counts = defaultdict(int)
         prepared = []
 
@@ -2991,31 +2833,29 @@ class HtmlReportRenderer:
                 )
                 if value
             )
-            prepared.append({
-                **resource,
-                "location": region_zone or "-",
-                "details_text": self._infrastructure_details_text(
-                    details
-                ),
-                "size_summary": resource_size_summary(category, details),
-                "connection_summary": resource_connection_summary(
-                    category,
-                    details,
-                ),
-                "create_time_text": self._infrastructure_create_time(
-                    resource.get("create_time")
-                ),
-                "historical_presence_text": (
-                    self._historical_confidence_text(
-                        details.get("historical_presence_confidence")
-                    )
-                ),
-                "historical_source_state_text": self._source_state_text(
-                    historical_source_state(
-                        details.get("historical_presence_confidence")
-                    )
-                ),
-            })
+            prepared.append(
+                {
+                    **resource,
+                    "location": region_zone or "-",
+                    "details_text": self._infrastructure_details_text(details),
+                    "size_summary": resource_size_summary(category, details),
+                    "connection_summary": resource_connection_summary(
+                        category,
+                        details,
+                    ),
+                    "create_time_text": self._infrastructure_create_time(
+                        resource.get("create_time")
+                    ),
+                    "historical_presence_text": (
+                        self._historical_confidence_text(
+                            details.get("historical_presence_confidence")
+                        )
+                    ),
+                    "historical_source_state_text": self._source_state_text(
+                        historical_source_state(details.get("historical_presence_confidence"))
+                    ),
+                }
+            )
 
         if not prepared:
             return ""
@@ -3056,17 +2896,11 @@ class HtmlReportRenderer:
             ("create_time_text", "생성 시각 (KST)"),
         ]
         if any(
-            self._mapping(resource.get("details")).get(
-                "historical_presence_confidence"
-            )
+            self._mapping(resource.get("details")).get("historical_presence_confidence")
             for resource in prepared
         ):
-            columns.append(
-                ("historical_presence_text", "기간 존재 판단")
-            )
-            columns.append(
-                ("historical_source_state_text", "출처 상태")
-            )
+            columns.append(("historical_presence_text", "기간 존재 판단"))
+            columns.append(("historical_source_state_text", "출처 상태"))
         table = self._table(
             prepared,
             tuple(columns),
@@ -3076,7 +2910,8 @@ class HtmlReportRenderer:
             f'<div class="infra-summary-grid">{summary_cards}</div>'
             '<p class="resource-filter-status" data-resource-filter-status '
             f'role="status" aria-live="polite">전체 {len(prepared):,}건 표시 중</p>'
-            if summary_cards else ""
+            if summary_cards
+            else ""
         )
         content = summary + f'<div id="{table_id}">{table}</div>'
         return self._section(
@@ -3111,39 +2946,37 @@ class HtmlReportRenderer:
         for candidate in self._records(resources):
             resource = merge_server_details(candidate, servers)
             details = self._mapping(resource.get("details"))
-            private_ips = details.get("all_private_ips") or details.get(
-                "private_ip"
+            private_ips = details.get("all_private_ips") or details.get("private_ip")
+            prepared.append(
+                {
+                    **resource,
+                    "server_name": resource.get("resource_name"),
+                    "server_spec": server_spec_summary(details),
+                    "vpc": self._resource_membership_label(
+                        details.get("vpc_no"),
+                        "VPC",
+                        infrastructure,
+                    ),
+                    "subnet": self._resource_membership_label(
+                        details.get("subnet_no"),
+                        "SUBNET",
+                        infrastructure,
+                    ),
+                    "public_ip": self._compact_values(details.get("public_ip")),
+                    "private_ip": self._compact_values(private_ips),
+                    "create_time_text": self._infrastructure_create_time(
+                        resource.get("create_time")
+                    ),
+                    "historical_presence_text": (
+                        self._historical_confidence_text(
+                            details.get("historical_presence_confidence")
+                        )
+                    ),
+                    "historical_source_state_text": self._source_state_text(
+                        historical_source_state(details.get("historical_presence_confidence"))
+                    ),
+                }
             )
-            prepared.append({
-                **resource,
-                "server_name": resource.get("resource_name"),
-                "server_spec": server_spec_summary(details),
-                "vpc": self._resource_membership_label(
-                    details.get("vpc_no"),
-                    "VPC",
-                    infrastructure,
-                ),
-                "subnet": self._resource_membership_label(
-                    details.get("subnet_no"),
-                    "SUBNET",
-                    infrastructure,
-                ),
-                "public_ip": self._compact_values(details.get("public_ip")),
-                "private_ip": self._compact_values(private_ips),
-                "create_time_text": self._infrastructure_create_time(
-                    resource.get("create_time")
-                ),
-                "historical_presence_text": (
-                    self._historical_confidence_text(
-                        details.get("historical_presence_confidence")
-                    )
-                ),
-                "historical_source_state_text": self._source_state_text(
-                    historical_source_state(
-                        details.get("historical_presence_confidence")
-                    )
-                ),
-            })
 
         columns = [
             ("server_name", "서버명"),
@@ -3156,9 +2989,7 @@ class HtmlReportRenderer:
             ("create_time_text", "생성 시각 (KST)"),
         ]
         if any(
-            self._mapping(resource.get("details")).get(
-                "historical_presence_confidence"
-            )
+            self._mapping(resource.get("details")).get("historical_presence_confidence")
             for resource in prepared
         ):
             columns.append(("historical_presence_text", "기간 존재 판단"))
@@ -3166,10 +2997,7 @@ class HtmlReportRenderer:
 
         return self._section(
             "서버 현황",
-            (
-                "서버별 상태, NCP 상품·컴퓨팅 사양, 연결 스토리지, "
-                "소속 네트워크와 IP를 표시합니다."
-            ),
+            ("서버별 상태, NCP 상품·컴퓨팅 사양, 연결 스토리지, 소속 네트워크와 IP를 표시합니다."),
             self._table(prepared, tuple(columns)),
             len(prepared),
             collapsed=True,
@@ -3186,9 +3014,7 @@ class HtmlReportRenderer:
                     "TERMINATED": "반납",
                 },
                 empty="서버 상태 정보 없음",
-                priority_labels=(
-                    "정지", "반납", "생성 중", "초기화", "운영"
-                ),
+                priority_labels=("정지", "반납", "생성 중", "초기화", "운영"),
             ),
         )
 
@@ -3241,25 +3067,15 @@ class HtmlReportRenderer:
             for resource in self._records(resources)
             if str(resource.get("category") or "").upper() in categories
         ]
-        captured_at = self._infrastructure_create_time(
-            metadata.get("captured_at")
-        )
-        backup_captured_at = self._infrastructure_create_time(
-            metadata.get("backup_captured_at")
-        )
+        captured_at = self._infrastructure_create_time(metadata.get("captured_at"))
+        backup_captured_at = self._infrastructure_create_time(metadata.get("backup_captured_at"))
         in_period = metadata.get("is_report_period_snapshot") is True
         period_basis = (
-            "보고 기간 내 단일 시점 관측"
-            if in_period
-            else "보고 기간 외 · 생성시점 현재 상태"
+            "보고 기간 내 단일 시점 관측" if in_period else "보고 기간 외 · 생성시점 현재 상태"
         )
         source_label = {
-            "STORED_NETWORK_CONFIGURATION_SNAPSHOT": (
-                "별도 저장된 과거 네트워크 스냅샷"
-            ),
-            "REPORT_GENERATION_SNAPSHOT": (
-                "이번 보고서 생성 과정의 네트워크 스냅샷"
-            ),
+            "STORED_NETWORK_CONFIGURATION_SNAPSHOT": ("별도 저장된 과거 네트워크 스냅샷"),
+            "REPORT_GENERATION_SNAPSHOT": ("이번 보고서 생성 과정의 네트워크 스냅샷"),
         }.get(str(metadata.get("source") or ""), "네트워크 구성 스냅샷")
         metadata_html = f"""
       <div class="network-snapshot-basis">
@@ -3280,147 +3096,159 @@ class HtmlReportRenderer:
         for resource in configurations:
             category = str(resource.get("category") or "").upper()
             details = self._mapping(resource.get("details"))
-            summary_rows.append({
-                "category": resource.get("category_label") or category,
-                "name": resource.get("resource_name"),
-                "id": resource.get("resource_id"),
-                "vpc_no": details.get("vpc_no"),
-                "status": resource.get("status"),
-                "default": "기본" if details.get("default") is True else "-",
-                "association_count": details.get(
-                    "associated_subnet_count"
-                ),
-                "rule_count": details.get("rule_count")
-                if category != "ROUTE_TABLE"
-                else details.get("route_count"),
-            })
+            summary_rows.append(
+                {
+                    "category": resource.get("category_label") or category,
+                    "name": resource.get("resource_name"),
+                    "id": resource.get("resource_id"),
+                    "vpc_no": details.get("vpc_no"),
+                    "status": resource.get("status"),
+                    "default": "기본" if details.get("default") is True else "-",
+                    "association_count": details.get("associated_subnet_count"),
+                    "rule_count": details.get("rule_count")
+                    if category != "ROUTE_TABLE"
+                    else details.get("route_count"),
+                }
+            )
             if category == "ROUTE_TABLE":
-                subnet_names = ", ".join(
-                    str(subnet.get("subnet_name") or subnet.get("subnet_no"))
-                    for subnet in self._records(
-                        details.get("associated_subnets")
+                subnet_names = (
+                    ", ".join(
+                        str(subnet.get("subnet_name") or subnet.get("subnet_no"))
+                        for subnet in self._records(details.get("associated_subnets"))
                     )
-                ) or "-"
+                    or "-"
+                )
                 for route in self._records(details.get("routes")):
-                    route_rows.append({
-                        "route_table": resource.get("resource_name"),
-                        "vpc_no": details.get("vpc_no"),
-                        "subnets": subnet_names,
-                        "destination": route.get("destination_cidr"),
-                        "target_type": route.get("target_type"),
-                        "target": route.get("target_name")
-                        or route.get("target_no"),
-                        "default": "기본" if route.get("default") is True else "-",
-                    })
+                    route_rows.append(
+                        {
+                            "route_table": resource.get("resource_name"),
+                            "vpc_no": details.get("vpc_no"),
+                            "subnets": subnet_names,
+                            "destination": route.get("destination_cidr"),
+                            "target_type": route.get("target_type"),
+                            "target": route.get("target_name") or route.get("target_no"),
+                            "default": "기본" if route.get("default") is True else "-",
+                        }
+                    )
             elif category == "ACCESS_CONTROL_GROUP":
                 rules = self._records(details.get("rules"))
                 acg_rule_count += len(rules)
                 if not rules:
-                    acg_rule_rows.append({
-                        "group": resource.get("resource_name"),
-                        "vpc_no": details.get("vpc_no"),
-                        "description": (
-                            "ACG 수집 완료, 명시 규칙 0건"
-                            if details.get("rule_snapshot_available") is True
-                            else "규칙 수집 결과 없음"
-                        ),
-                    })
+                    acg_rule_rows.append(
+                        {
+                            "group": resource.get("resource_name"),
+                            "vpc_no": details.get("vpc_no"),
+                            "description": (
+                                "ACG 수집 완료, 명시 규칙 0건"
+                                if details.get("rule_snapshot_available") is True
+                                else "규칙 수집 결과 없음"
+                            ),
+                        }
+                    )
                 for rule in rules:
-                    acg_rule_rows.append({
-                        "group": resource.get("resource_name"),
-                        "vpc_no": details.get("vpc_no"),
-                        "direction": rule.get("direction"),
-                        "protocol": rule.get("protocol"),
-                        "source": rule.get("source_ip_block")
-                        or rule.get("source_access_control_group_no"),
-                        "port": rule.get("port_range"),
-                        "description": rule.get("description"),
-                    })
+                    acg_rule_rows.append(
+                        {
+                            "group": resource.get("resource_name"),
+                            "vpc_no": details.get("vpc_no"),
+                            "direction": rule.get("direction"),
+                            "protocol": rule.get("protocol"),
+                            "source": rule.get("source_ip_block")
+                            or rule.get("source_access_control_group_no"),
+                            "port": rule.get("port_range"),
+                            "description": rule.get("description"),
+                        }
+                    )
             elif category == "NETWORK_ACL":
                 rules = self._records(details.get("rules"))
                 network_acl_rule_count += len(rules)
                 if not rules:
-                    network_acl_rule_rows.append({
-                        "network_acl": resource.get("resource_name"),
-                        "vpc_no": details.get("vpc_no"),
-                        "description": (
-                            "NACL 수집 완료, 명시 규칙 0건"
-                            if details.get("rule_snapshot_available") is True
-                            else "규칙 수집 결과 없음"
-                        ),
-                    })
+                    network_acl_rule_rows.append(
+                        {
+                            "network_acl": resource.get("resource_name"),
+                            "vpc_no": details.get("vpc_no"),
+                            "description": (
+                                "NACL 수집 완료, 명시 규칙 0건"
+                                if details.get("rule_snapshot_available") is True
+                                else "규칙 수집 결과 없음"
+                            ),
+                        }
+                    )
                 for rule in rules:
-                    network_acl_rule_rows.append({
-                        "network_acl": resource.get("resource_name"),
-                        "vpc_no": details.get("vpc_no"),
-                        "priority": rule.get("priority"),
-                        "direction": rule.get("direction"),
-                        "protocol": rule.get("protocol"),
-                        "source": rule.get("source_ip_block")
-                        or rule.get("deny_allow_group_no"),
-                        "port": rule.get("port_range"),
-                        "action": rule.get("action"),
-                        "description": rule.get("description"),
-                    })
+                    network_acl_rule_rows.append(
+                        {
+                            "network_acl": resource.get("resource_name"),
+                            "vpc_no": details.get("vpc_no"),
+                            "priority": rule.get("priority"),
+                            "direction": rule.get("direction"),
+                            "protocol": rule.get("protocol"),
+                            "source": rule.get("source_ip_block")
+                            or rule.get("deny_allow_group_no"),
+                            "port": rule.get("port_range"),
+                            "action": rule.get("action"),
+                            "description": rule.get("description"),
+                        }
+                    )
 
-        tables = "".join((
-            '<div class="network-config-group"><h3>구성 객체</h3>',
-            self._table(
-                summary_rows,
-                (
-                    ("category", "구분"),
-                    ("name", "이름"),
-                    ("id", "ID"),
-                    ("vpc_no", "VPC No."),
-                    ("status", "상태"),
-                    ("default", "기본 여부"),
-                    ("association_count", "연결 Subnet", "number0"),
-                    ("rule_count", "규칙", "number0"),
+        tables = "".join(
+            (
+                '<div class="network-config-group"><h3>구성 객체</h3>',
+                self._table(
+                    summary_rows,
+                    (
+                        ("category", "구분"),
+                        ("name", "이름"),
+                        ("id", "ID"),
+                        ("vpc_no", "VPC No."),
+                        ("status", "상태"),
+                        ("default", "기본 여부"),
+                        ("association_count", "연결 Subnet", "number0"),
+                        ("rule_count", "규칙", "number0"),
+                    ),
                 ),
-            ),
-            '</div><div class="network-config-group"><h3>Route 규칙</h3>',
-            self._table(
-                route_rows,
-                (
-                    ("route_table", "Route Table"),
-                    ("vpc_no", "VPC No."),
-                    ("subnets", "연결 Subnet"),
-                    ("destination", "Destination CIDR"),
-                    ("target_type", "Target 유형"),
-                    ("target", "Target"),
-                    ("default", "기본 여부"),
+                '</div><div class="network-config-group"><h3>Route 규칙</h3>',
+                self._table(
+                    route_rows,
+                    (
+                        ("route_table", "Route Table"),
+                        ("vpc_no", "VPC No."),
+                        ("subnets", "연결 Subnet"),
+                        ("destination", "Destination CIDR"),
+                        ("target_type", "Target 유형"),
+                        ("target", "Target"),
+                        ("default", "기본 여부"),
+                    ),
                 ),
-            ),
-            '</div><div class="network-config-group"><h3>ACG 규칙</h3>',
-            self._table(
-                acg_rule_rows,
-                (
-                    ("group", "ACG"),
-                    ("vpc_no", "VPC No."),
-                    ("direction", "방향"),
-                    ("protocol", "프로토콜"),
-                    ("source", "접근 소스"),
-                    ("port", "포트"),
-                    ("description", "설명"),
+                '</div><div class="network-config-group"><h3>ACG 규칙</h3>',
+                self._table(
+                    acg_rule_rows,
+                    (
+                        ("group", "ACG"),
+                        ("vpc_no", "VPC No."),
+                        ("direction", "방향"),
+                        ("protocol", "프로토콜"),
+                        ("source", "접근 소스"),
+                        ("port", "포트"),
+                        ("description", "설명"),
+                    ),
                 ),
-            ),
-            '</div><div class="network-config-group"><h3>Network ACL 규칙</h3>',
-            self._table(
-                network_acl_rule_rows,
-                (
-                    ("network_acl", "Network ACL"),
-                    ("vpc_no", "VPC No."),
-                    ("priority", "우선순위", "number0"),
-                    ("direction", "방향"),
-                    ("protocol", "프로토콜"),
-                    ("source", "IP / Deny-Allow Group"),
-                    ("port", "포트"),
-                    ("action", "동작"),
-                    ("description", "설명"),
+                '</div><div class="network-config-group"><h3>Network ACL 규칙</h3>',
+                self._table(
+                    network_acl_rule_rows,
+                    (
+                        ("network_acl", "Network ACL"),
+                        ("vpc_no", "VPC No."),
+                        ("priority", "우선순위", "number0"),
+                        ("direction", "방향"),
+                        ("protocol", "프로토콜"),
+                        ("source", "IP / Deny-Allow Group"),
+                        ("port", "포트"),
+                        ("action", "동작"),
+                        ("description", "설명"),
+                    ),
                 ),
-            ),
-            "</div>",
-        ))
+                "</div>",
+            )
+        )
         description = (
             "보고 기간 안에 저장된 단일 시점의 Route Table·ACG·Network ACL "
             "구성입니다. 기간 전체의 변경 이력을 의미하지 않습니다."
@@ -3495,11 +3323,7 @@ class HtmlReportRenderer:
         if timestamp is not None:
             parsed = datetime.fromtimestamp(timestamp / 1000, tz=self.KST)
             return parsed.strftime("%Y-%m-%d %H:%M KST")
-        return (
-            str(value).strip()
-            if isinstance(value, str) and value.strip()
-            else "-"
-        )
+        return str(value).strip() if isinstance(value, str) and value.strip() else "-"
 
     def _infrastructure_metric_section(
         self,
@@ -3520,13 +3344,12 @@ class HtmlReportRenderer:
             if category != "SERVER"
         }
         present_categories = {
-            str(item.get("category") or "").upper()
-            for item in self._records(infrastructure)
+            str(item.get("category") or "").upper() for item in self._records(infrastructure)
         } & set(monitored_categories)
         groups = [
-            group for group in self._records(metric_groups)
-            if str(group.get("category") or "").upper()
-            in monitored_categories
+            group
+            for group in self._records(metric_groups)
+            if str(group.get("category") or "").upper() in monitored_categories
         ]
 
         if not present_categories and not groups:
@@ -3540,50 +3363,42 @@ class HtmlReportRenderer:
             interval = str(group.get("interval") or "Min5")
             aggregation = str(group.get("aggregation") or "AVG")
             unit = str(group.get("unit") or "")
-            metric_label = str(
-                group.get("metric_label")
-                or group.get("metric")
-                or "Metric"
-            )
+            metric_label = str(group.get("metric_label") or group.get("metric") or "Metric")
             product_name_value = str(group.get("product_name") or "").strip()
             product_name = product_name_value or "Cloud Insight"
             resource_label = (
                 "Load Balancer"
-                if str(group.get("metric_scope") or "").upper()
-                == "TARGET_GROUP"
+                if str(group.get("metric_scope") or "").upper() == "TARGET_GROUP"
                 else (
-                    diagnostic_service_name({
-                        "product_name": product_name_value,
-                        "category": category,
-                    })
+                    diagnostic_service_name(
+                        {
+                            "product_name": product_name_value,
+                            "category": category,
+                        }
+                    )
                     if category == "CLOUD_DB" and product_name_value
                     else monitored_categories[category]
                 )
             )
             title = f"{resource_label} · {metric_label}"
-            description = (
-                f"{product_name} · {self._metric_interval_label(interval)} "
-                f"{aggregation}"
-            )
+            description = f"{product_name} · {self._metric_interval_label(interval)} {aggregation}"
             if unit:
                 description += f" · 단위 {unit}"
-            y_axis = (
-                "fixed"
-                if self._is_percent_unit(unit)
-                else "auto"
-            )
+            y_axis = "fixed" if self._is_percent_unit(unit) else "auto"
             cards.append(f"""
       <article class="chart-card">
         {self._chart_heading(title, description)}
-        {self._line_chart(
-            title,
-            series,
-            period,
-            y_axis,
-            interval,
-            unit=unit,
-            chart_id=f"infrastructure-chart-{chart_index}",
-        )}
+        {
+                self._line_chart(
+                    title,
+                    series,
+                    period,
+                    y_axis,
+                    interval,
+                    unit=unit,
+                    chart_id=f"infrastructure-chart-{chart_index}",
+                )
+            }
       </article>""")
             rendered_categories.add(category)
 
@@ -3607,7 +3422,7 @@ class HtmlReportRenderer:
         </div>
         <span class="count">{len(groups):,}개 그래프</span>
       </div>
-      <div class="chart-grid">{''.join(cards)}</div>
+      <div class="chart-grid">{"".join(cards)}</div>
     </section>"""
 
     def _infrastructure_metric_series(
@@ -3620,9 +3435,7 @@ class HtmlReportRenderer:
             if not points:
                 continue
             label = str(
-                item.get("resource_name")
-                or item.get("resource_id")
-                or f"resource-{index + 1}"
+                item.get("resource_name") or item.get("resource_id") or f"resource-{index + 1}"
             )
             dimensions = item.get("dimensions")
             if isinstance(dimensions, dict):
@@ -3635,10 +3448,7 @@ class HtmlReportRenderer:
                     or dimensions.get("role")
                 )
                 qualifier_text = str(qualifier or "").strip()
-                if (
-                    qualifier_text
-                    and qualifier_text.casefold() not in label.casefold()
-                ):
+                if qualifier_text and qualifier_text.casefold() not in label.casefold():
                     label = f"{label} · {qualifier_text}"
             unique_label = label
             suffix = 2
@@ -3656,12 +3466,8 @@ class HtmlReportRenderer:
         prepared = [
             {
                 **row,
-                "os_fs": self._filesystem_text(
-                    row.get("os_fs_details")
-                ),
-                "data_fs": self._filesystem_text(
-                    row.get("data_fs_details")
-                ),
+                "os_fs": self._filesystem_text(row.get("os_fs_details")),
+                "data_fs": self._filesystem_text(row.get("data_fs_details")),
             }
             for row in rows
         ]
@@ -3738,17 +3544,18 @@ class HtmlReportRenderer:
             f"""
       <article class="chart-card">
         {self._chart_heading(title, description)}
-        {self._line_chart(
-            title,
-            series,
-            period,
-            y_axis,
-            interval,
-            chart_id=f"server-chart-{index}",
-        )}
+        {
+                self._line_chart(
+                    title,
+                    series,
+                    period,
+                    y_axis,
+                    interval,
+                    chart_id=f"server-chart-{index}",
+                )
+            }
       </article>"""
-            for index, (title, description, series, y_axis)
-            in enumerate(charts, start=1)
+            for index, (title, description, series, y_axis) in enumerate(charts, start=1)
         )
 
         return f"""
@@ -3786,17 +3593,17 @@ class HtmlReportRenderer:
         filesystem_group: str | None = None,
     ) -> Dict[str, List[Tuple[int, float]]]:
         period_start, period_end = self._period_bounds(period)
-        buckets: Dict[str, Dict[int, List[float]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
+        buckets: Dict[str, Dict[int, List[float]]] = defaultdict(lambda: defaultdict(list))
         server_name_counts: Dict[str, int] = defaultdict(int)
         for server_metric in server_metrics:
             if isinstance(server_metric, dict):
-                server_name_counts[str(
-                    server_metric.get("server_name")
-                    or server_metric.get("server_id")
-                    or "unknown"
-                )] += 1
+                server_name_counts[
+                    str(
+                        server_metric.get("server_name")
+                        or server_metric.get("server_id")
+                        or "unknown"
+                    )
+                ] += 1
 
         for server_metric in server_metrics:
             if not isinstance(server_metric, dict):
@@ -3815,26 +3622,16 @@ class HtmlReportRenderer:
                 continue
 
             server_name = str(
-                server_metric.get("server_name")
-                or server_metric.get("server_id")
-                or "unknown"
+                server_metric.get("server_name") or server_metric.get("server_id") or "unknown"
             )
             server_id = str(server_metric.get("server_id") or "").strip()
-            if (
-                server_name_counts[server_name] > 1
-                and server_id
-                and server_id != server_name
-            ):
+            if server_name_counts[server_name] > 1 and server_id and server_id != server_name:
                 server_name = f"{server_name} ({server_id})"
             filesystem_mounts = set()
             if filesystem_group:
                 filesystem_mounts = {
                     str(detail.get("mount") or "").strip()
-                    for detail in self._records(
-                        server_metric.get(
-                            f"{filesystem_group}_fs_details"
-                        )
-                    )
+                    for detail in self._records(server_metric.get(f"{filesystem_group}_fs_details"))
                 }
             for entry in entries:
                 if not isinstance(entry, dict):
@@ -3846,19 +3643,14 @@ class HtmlReportRenderer:
                 label = server_name
                 if filesystem_group:
                     mount_name = str(
-                        dimensions.get("mnt_nm")
-                        or dimensions.get("mount")
-                        or ""
+                        dimensions.get("mnt_nm") or dimensions.get("mount") or ""
                     ).strip()
                     if mount_name not in filesystem_mounts:
                         continue
                     label = f"{server_name} · {mount_name}"
 
                 for point_time, point_value in self._metric_points(entry):
-                    if (
-                        period_start is not None
-                        and point_time < period_start
-                    ):
+                    if period_start is not None and point_time < period_start:
                         continue
                     if period_end is not None and point_time > period_end:
                         continue
@@ -3929,12 +3721,8 @@ class HtmlReportRenderer:
         period: Dict[str, Any],
     ) -> Tuple[int | None, int | None]:
         return (
-            event_timestamp_millis(
-                period.get("start_time") or period.get("start_dt")
-            ),
-            event_timestamp_millis(
-                period.get("end_time") or period.get("end_dt")
-            ),
+            event_timestamp_millis(period.get("start_time") or period.get("start_dt")),
+            event_timestamp_millis(period.get("end_time") or period.get("end_dt")),
         )
 
     def _is_single_day_period(self, period: Dict[str, Any]) -> bool:
@@ -3995,24 +3783,12 @@ class HtmlReportRenderer:
         *,
         chart_id: str,
     ) -> str:
-        populated = {
-            label: points
-            for label, points in series.items()
-            if points
-        }
+        populated = {label: points for label, points in series.items() if points}
         if not populated:
-            return (
-                '<p class="empty-state chart-empty">'
-                "표시할 시계열 데이터가 없습니다."
-                "</p>"
-            )
+            return '<p class="empty-state chart-empty">표시할 시계열 데이터가 없습니다.</p>'
 
         all_times = sorted(
-            {
-                point_time
-                for points in populated.values()
-                for point_time, _ in points
-            }
+            {point_time for points in populated.values() for point_time, _ in points}
         )
         period_start, period_end = self._period_bounds(period)
         first_time = period_start if period_start is not None else all_times[0]
@@ -4020,11 +3796,7 @@ class HtmlReportRenderer:
         time_span = max(last_time - first_time, 1)
         single_day = self._is_single_day_period(period)
         aggregation_label = self._metric_interval_label(interval)
-        y_max = (
-            100.0
-            if y_axis == "fixed"
-            else self._auto_axis_max(populated)
-        )
+        y_max = 100.0 if y_axis == "fixed" else self._auto_axis_max(populated)
 
         width = 1000
         height = 300
@@ -4051,17 +3823,12 @@ class HtmlReportRenderer:
 
         x_ticks = (first_time, first_time + time_span // 2, last_time)
         for tick_time in x_ticks:
-            x = (
-                left
-                + ((tick_time - first_time) / time_span * plot_width)
-            )
+            x = left + ((tick_time - first_time) / time_span * plot_width)
             tick_dt = datetime.fromtimestamp(
                 tick_time / 1000,
                 tz=self.KST,
             )
-            tick_label = tick_dt.strftime(
-                "%H:%M" if single_day else "%m-%d"
-            )
+            tick_label = tick_dt.strftime("%H:%M" if single_day else "%m-%d")
             grid_parts.append(
                 f'<text x="{x:.2f}" y="{height - 12}" '
                 'class="chart-axis-label" text-anchor="middle">'
@@ -4088,24 +3855,17 @@ class HtmlReportRenderer:
                 tooltip_points = []
                 show_markers = len(segment) <= 60
                 for point_time, value in segment:
-                    x = (
-                        left
-                        + (
-                            (point_time - first_time)
-                            / time_span
-                            * plot_width
-                        )
-                    )
+                    x = left + ((point_time - first_time) / time_span * plot_width)
                     clamped_value = min(max(value, 0), y_max)
-                    y = top + plot_height - (
-                        clamped_value / y_max * plot_height
-                    )
+                    y = top + plot_height - (clamped_value / y_max * plot_height)
                     coordinates.append(f"{x:.2f},{y:.2f}")
-                    tooltip_points.append([
-                        round(x, 2),
-                        point_time,
-                        value,
-                    ])
+                    tooltip_points.append(
+                        [
+                            round(x, 2),
+                            point_time,
+                            value,
+                        ]
+                    )
                     if show_markers:
                         circles.append(
                             f'<circle cx="{x:.2f}" cy="{y:.2f}" '
@@ -4116,16 +3876,14 @@ class HtmlReportRenderer:
                             "</title></circle>"
                         )
 
-                tooltip_data = self._text(json.dumps(
-                    tooltip_points,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ))
-                hit_coordinates = (
-                    coordinates
-                    if len(coordinates) > 1
-                    else coordinates * 2
+                tooltip_data = self._text(
+                    json.dumps(
+                        tooltip_points,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
                 )
+                hit_coordinates = coordinates if len(coordinates) > 1 else coordinates * 2
                 series_parts.append(
                     f'<polyline points="{" ".join(coordinates)}" '
                     f'stroke="{color}" class="chart-line"><title>'
@@ -4138,9 +3896,7 @@ class HtmlReportRenderer:
                     f'data-chart-unit="{self._text(unit)}"/>'
                 )
             line_parts.append(
-                f'<g id="{series_id}" data-chart-series>'
-                + "".join(series_parts)
-                + "</g>"
+                f'<g id="{series_id}" data-chart-series>' + "".join(series_parts) + "</g>"
             )
             legend_parts.append(
                 '<button type="button" class="chart-legend-item" '
@@ -4156,27 +3912,29 @@ class HtmlReportRenderer:
             f'aria-label="{self._text(title)} '
             f'{self._text(aggregation_label)} 변화 그래프">'
             '<div class="chart-toolbar">'
-            '<label>PNG 크기 <select data-chart-export-width>'
+            "<label>PNG 크기 <select data-chart-export-width>"
             '<option value="1000">1000 × 300</option>'
             '<option value="2000" selected>2000 × 600</option>'
             '<option value="3000">3000 × 900</option>'
-            '</select></label>'
+            "</select></label>"
             '<button type="button" data-chart-download>그래프 PNG 저장</button>'
-            '</div>'
+            "</div>"
             f'<svg viewBox="0 0 {width} {height}" '
             'preserveAspectRatio="xMidYMid meet" role="img" '
             f'aria-label="{self._text(title)}">'
-            '<style>.chart-grid-line{stroke:#e2e8f0;stroke-width:1}'
-            '.chart-axis-label{fill:#64748b;font:13px Arial,sans-serif}'
-            '.chart-line{fill:none;stroke-width:2.4;stroke-linejoin:round;'
-            'stroke-linecap:round}.chart-hit-line{fill:none;stroke:transparent;'
-            'stroke-width:18;stroke-linecap:round;pointer-events:stroke}'
-            '.chart-series-hidden{display:none}</style>'
+            "<style>.chart-grid-line{stroke:#e2e8f0;stroke-width:1}"
+            ".chart-axis-label{fill:#64748b;font:13px Arial,sans-serif}"
+            ".chart-line{fill:none;stroke-width:2.4;stroke-linejoin:round;"
+            "stroke-linecap:round}.chart-hit-line{fill:none;stroke:transparent;"
+            "stroke-width:18;stroke-linecap:round;pointer-events:stroke}"
+            ".chart-series-hidden{display:none}</style>"
             + "".join(grid_parts)
             + "".join(line_parts)
-            + ('</svg><div class="chart-tooltip" data-chart-tooltip '
-               'role="status" aria-live="polite" aria-atomic="true" '
-               'hidden></div><div class="chart-legend">')
+            + (
+                '</svg><div class="chart-tooltip" data-chart-tooltip '
+                'role="status" aria-live="polite" aria-atomic="true" '
+                'hidden></div><div class="chart-legend">'
+            )
             + "".join(legend_parts)
             + "</div></div>"
         )
@@ -4195,7 +3953,11 @@ class HtmlReportRenderer:
             return f"{value:.{precision}f}%"
 
         byte_rate_units = {
-            "b/s", "byte/s", "bytes/s", "byte/sec", "bytes/sec",
+            "b/s",
+            "byte/s",
+            "bytes/s",
+            "byte/sec",
+            "bytes/sec",
             "bps",
         }
         byte_units = {"b", "byte", "bytes"}
@@ -4221,11 +3983,7 @@ class HtmlReportRenderer:
                 if absolute >= divisor:
                     return f"{value / divisor:.1f}{suffix}"
 
-        number = (
-            f"{value:,.0f}"
-            if abs(value) >= 1 or value == 0
-            else f"{value:,.2f}"
-        )
+        number = f"{value:,.0f}" if abs(value) >= 1 or value == 0 else f"{value:,.2f}"
         if normalized in {"", "num", "number", "count", "ea"}:
             return number
         if normalized in {"num/s", "number/s", "count/s", "count/sec"}:
@@ -4246,11 +4004,7 @@ class HtmlReportRenderer:
         self,
         series: Dict[str, List[Tuple[int, float]]],
     ) -> float:
-        maximum = max(
-            value
-            for points in series.values()
-            for _, value in points
-        )
+        maximum = max(value for points in series.values() for _, value in points)
         target = max(maximum * 1.1, 1)
         magnitude = 10 ** math.floor(math.log10(target))
         normalized = target / magnitude
@@ -4297,7 +4051,7 @@ class HtmlReportRenderer:
         bucket_size = max(math.ceil(len(interior) / bucket_count), 1)
         selected = [points[0]]
         for start in range(0, len(interior), bucket_size):
-            bucket = interior[start:start + bucket_size]
+            bucket = interior[start : start + bucket_size]
             extrema = {
                 min(range(len(bucket)), key=lambda index: bucket[index][1]),
                 max(range(len(bucket)), key=lambda index: bucket[index][1]),
@@ -4388,14 +4142,10 @@ class HtmlReportRenderer:
         criteria = self._first_present(row.get("criteria"))
         unit = self._first_present(row.get("unit"))
 
-        condition = " ".join(
-            part for part in (metric, operator, criteria) if part
-        )
+        condition = " ".join(part for part in (metric, operator, criteria) if part)
         if detected:
             condition = (
-                f"{condition} / 감지 {detected}{unit}"
-                if condition
-                else f"감지 {detected}{unit}"
+                f"{condition} / 감지 {detected}{unit}" if condition else f"감지 {detected}{unit}"
             )
         return condition or "-"
 
@@ -4451,9 +4201,7 @@ class HtmlReportRenderer:
         return (
             '<details class="event-details"><summary>'
             "상세 정보"
-            "</summary><dl>"
-            + "".join(items)
-            + "</dl></details>"
+            "</summary><dl>" + "".join(items) + "</dl></details>"
         )
 
     def _collection_diagnostics(
@@ -4521,15 +4269,9 @@ class HtmlReportRenderer:
 
         actions = row.get("permission_actions")
         safe_actions = (
-            [str(action) for action in actions]
-            if isinstance(actions, (list, tuple))
-            else []
+            [str(action) for action in actions] if isinstance(actions, (list, tuple)) else []
         )
-        service_name = str(
-            row.get("permission_service_name")
-            or row.get("service_name")
-            or "NCP"
-        )
+        service_name = str(row.get("permission_service_name") or row.get("service_name") or "NCP")
         if source == "provider_response":
             basis = "NCP 응답 확인"
         else:
@@ -4562,10 +4304,7 @@ class HtmlReportRenderer:
 
         managed_policy = row.get("permission_managed_policy")
         if managed_policy:
-            parts.append(
-                "관리형 대안(공식 권한표 기준): "
-                + str(managed_policy)
-            )
+            parts.append("관리형 대안(공식 권한표 기준): " + str(managed_policy))
 
         security_note = row.get("permission_security_note")
         if security_note:
@@ -4584,10 +4323,7 @@ class HtmlReportRenderer:
                 {
                     **row,
                     "source_state_text": self._source_state_text(OBSERVED),
-                    "display_event_time": (
-                        row.get("event_time_kst")
-                        or row.get("event_time")
-                    ),
+                    "display_event_time": (row.get("event_time_kst") or row.get("event_time")),
                     "actor": self._activity_actor(row),
                     "target": self._activity_target(row),
                     "details": self._activity_details(row),
@@ -4616,14 +4352,10 @@ class HtmlReportRenderer:
     ) -> Tuple[str, str]:
         summary = summarize_activity_events(rows)
         groups = group_activity_events(rows)
-        changes = self._mapping(
-            self._mapping(report.analysis).get("changes")
-        )
+        changes = self._mapping(self._mapping(report.analysis).get("changes"))
         collection_status = str(changes.get("status") or "").upper()
         if not collection_status:
-            collection_status = (
-                "AVAILABLE" if summary["total_count"] else "UNAVAILABLE"
-            )
+            collection_status = "AVAILABLE" if summary["total_count"] else "UNAVAILABLE"
 
         if not rows and collection_status != "COLLECTED_EMPTY":
             label = {
@@ -4637,8 +4369,8 @@ class HtmlReportRenderer:
             return (
                 '<section class="activity-attention-summary" '
                 'aria-label="Activity Tracer 담당자 확인 요약">'
-                '<h3>담당자 확인 요약</h3>'
-                f'<p>{self._text(label)}</p>'
+                "<h3>담당자 확인 요약</h3>"
+                f"<p>{self._text(label)}</p>"
                 '<div class="operational-status-grid">'
                 + self._analysis_status_card(
                     "Activity Tracer",
@@ -4654,8 +4386,8 @@ class HtmlReportRenderer:
                     ),
                     details_html=(
                         '<p class="status-evidence-copy">'
-                        f'{self._text(label)}. Activity Tracer 수집 상태와 '
-                        '수집 진단을 확인한 뒤 다시 수집하십시오.</p>'
+                        f"{self._text(label)}. Activity Tracer 수집 상태와 "
+                        "수집 진단을 확인한 뒤 다시 수집하십시오.</p>"
                     ),
                 )
                 + "</div></section>",
@@ -4666,7 +4398,7 @@ class HtmlReportRenderer:
         cards = [
             self._analysis_status_card(
                 label,
-                f'{summary[key]:,}건',
+                f"{summary[key]:,}건",
                 active_status if summary[key] else "normal",
                 source_state,
                 details_html=self._activity_summary_detail(
@@ -4706,54 +4438,48 @@ class HtmlReportRenderer:
             )
         ]
         if summary["unknown_result_count"]:
-            cards.append(self._analysis_status_card(
-                "결과 미확인",
-                f'{summary["unknown_result_count"]:,}건',
-                "caution",
-                source_state,
-                details_html=self._activity_summary_detail(
-                    groups["unknown_result"],
-                    "결과 값이 성공 또는 실패·오류·거부로 식별되지 않은 이벤트입니다.",
-                ),
-            ))
+            cards.append(
+                self._analysis_status_card(
+                    "결과 미확인",
+                    f"{summary['unknown_result_count']:,}건",
+                    "caution",
+                    source_state,
+                    details_html=self._activity_summary_detail(
+                        groups["unknown_result"],
+                        "결과 값이 성공 또는 실패·오류·거부로 식별되지 않은 이벤트입니다.",
+                    ),
+                )
+            )
 
         status_prefix = {
-            "PARTIAL": (
-                f'부분 수집 · 확인된 {summary["total_count"]:,}건 기준'
-            ),
+            "PARTIAL": (f"부분 수집 · 확인된 {summary['total_count']:,}건 기준"),
             "COLLECTED_EMPTY": "수집 완료 · 이력 없음",
-            "FAILED": (
-                f'수집 실패 · 확인된 {summary["total_count"]:,}건만 표시'
-            ),
-            "UNAVAILABLE": (
-                f'수집 상태 미확인 · 표시된 {summary["total_count"]:,}건 기준'
-            ),
+            "FAILED": (f"수집 실패 · 확인된 {summary['total_count']:,}건만 표시"),
+            "UNAVAILABLE": (f"수집 상태 미확인 · 표시된 {summary['total_count']:,}건 기준"),
         }.get(
             collection_status,
-            f'관측 {summary["total_count"]:,}건 기준',
+            f"관측 {summary['total_count']:,}건 기준",
         )
-        failure_text = f'전체 실패·거부 {summary["failure_count"]:,}건'
+        failure_text = f"전체 실패·거부 {summary['failure_count']:,}건"
         if summary["login_failure_count"]:
-            failure_text += f' (로그인 {summary["login_failure_count"]:,}건)'
+            failure_text += f" (로그인 {summary['login_failure_count']:,}건)"
         collapsed_parts = [
             status_prefix,
             failure_text,
-            f'생성·추가 성공 {summary["created_success_count"]:,}건',
-            f'삭제·분리 성공 {summary["deleted_success_count"]:,}건',
+            f"생성·추가 성공 {summary['created_success_count']:,}건",
+            f"삭제·분리 성공 {summary['deleted_success_count']:,}건",
         ]
         if summary["unknown_result_count"]:
-            collapsed_parts.append(
-                f'결과 미확인 {summary["unknown_result_count"]:,}건'
-            )
+            collapsed_parts.append(f"결과 미확인 {summary['unknown_result_count']:,}건")
         collapsed_summary = " · ".join(collapsed_parts)
         content = (
             '<section class="activity-attention-summary" '
             'aria-label="Activity Tracer 담당자 확인 요약">'
-            '<h3>담당자 확인 요약</h3>'
-            '<p>성공으로 기록된 명시적 생성·추가·삭제·분리 작업과 실패 기록을 '
-            '요약합니다. 실제 자원 상태는 인벤토리와 함께 확인하십시오.</p>'
+            "<h3>담당자 확인 요약</h3>"
+            "<p>성공으로 기록된 명시적 생성·추가·삭제·분리 작업과 실패 기록을 "
+            "요약합니다. 실제 자원 상태는 인벤토리와 함께 확인하십시오.</p>"
             f'<div class="operational-status-grid">{"".join(cards)}</div>'
-            '</section>'
+            "</section>"
         )
         return content, collapsed_summary
 
@@ -4765,11 +4491,7 @@ class HtmlReportRenderer:
         safe_rows = [
             {
                 "event_time": row.get("event_time_kst") or row.get("event_time"),
-                "product": (
-                    row.get("product_display_name")
-                    or row.get("product_name")
-                    or "-"
-                ),
+                "product": (row.get("product_display_name") or row.get("product_name") or "-"),
                 "target": row.get("resource_name") or row.get("resource_id") or "-",
                 "action": row.get("action_name") or "-",
                 "result": row.get("result") or "-",
@@ -4792,8 +4514,8 @@ class HtmlReportRenderer:
         )
         return (
             f'<p class="status-evidence-copy">{self._text(criteria)} '
-            '계정·접속 IP·원시 응답은 이 요약에 표시하지 않습니다.</p>'
-            f'{evidence}'
+            "계정·접속 IP·원시 응답은 이 요약에 표시하지 않습니다.</p>"
+            f"{evidence}"
         )
 
     def _activity_actor(self, row: Dict[str, Any]) -> str:
@@ -4877,27 +4599,15 @@ class HtmlReportRenderer:
 
         visible_items = items[:30]
         remaining = len(items) - len(visible_items)
-        remaining_text = (
-            f'<p class="detail-more">외 {remaining:,}개 필드</p>'
-            if remaining
-            else ""
-        )
+        remaining_text = f'<p class="detail-more">외 {remaining:,}개 필드</p>' if remaining else ""
         return (
             '<details class="event-details"><summary>'
             "상세 정보"
-            "</summary><dl>"
-            + "".join(visible_items)
-            + "</dl>"
-            + remaining_text
-            + "</details>"
+            "</summary><dl>" + "".join(visible_items) + "</dl>" + remaining_text + "</details>"
         )
 
     def _is_sensitive_detail_key(self, key: str) -> bool:
-        normalized = "".join(
-            character
-            for character in key.lower()
-            if character.isalnum()
-        )
+        normalized = "".join(character for character in key.lower() if character.isalnum())
         sensitive_terms = (
             "password",
             "secret",
@@ -4930,16 +4640,11 @@ class HtmlReportRenderer:
             return '<p class="empty-state">표시할 데이터가 없습니다.</p>'
 
         detail_columns = [
-            column
-            for column in columns
-            if len(column) > 2 and column[2] == "details"
+            column for column in columns if len(column) > 2 and column[2] == "details"
         ]
-        visible_columns = [
-            column for column in columns if column not in detail_columns
-        ]
+        visible_columns = [column for column in columns if column not in detail_columns]
         header = "".join(
-            f"<th scope=\"col\">{self._text(column[1])}</th>"
-            for column in visible_columns
+            f'<th scope="col">{self._text(column[1])}</th>' for column in visible_columns
         )
         body_rows = []
 
@@ -4951,15 +4656,12 @@ class HtmlReportRenderer:
                 value = self._format_value(row.get(key), format_name)
                 numeric_class = (
                     ' class="numeric"'
-                    if format_name.startswith("number")
-                    or format_name == "percent"
+                    if format_name.startswith("number") or format_name == "percent"
                     else ""
                 )
                 cells.append(f"<td{numeric_class}>{value}</td>")
             category_attribute = (
-                ' data-resource-category="'
-                + self._text(row.get(resource_category_key))
-                + '"'
+                ' data-resource-category="' + self._text(row.get(resource_category_key)) + '"'
                 if resource_category_key
                 else ""
             )
@@ -4981,28 +4683,18 @@ class HtmlReportRenderer:
             ]
             detail_row = (
                 '<tr class="table-detail-row"><td '
-                f'colspan="{len(visible_columns)}">'
-                + "".join(detail_values)
-                + "</td></tr>"
+                f'colspan="{len(visible_columns)}">' + "".join(detail_values) + "</td></tr>"
                 if detail_values
                 else ""
             )
-            record_class = (
-                "table-record has-detail" if detail_row else "table-record"
-            )
-            body_rows.append(
-                f'<tbody class="{record_class}">{data_row}{detail_row}</tbody>'
-            )
+            record_class = "table-record has-detail" if detail_row else "table-record"
+            body_rows.append(f'<tbody class="{record_class}">{data_row}{detail_row}</tbody>')
 
         if detail_columns:
             return (
                 '<div class="table-wrap table-wrap-with-details">'
                 '<table class="table-with-details">'
-                "<thead><tr>"
-                + header
-                + "</tr></thead>"
-                + "".join(body_rows)
-                + "</table></div>"
+                "<thead><tr>" + header + "</tr></thead>" + "".join(body_rows) + "</table></div>"
             )
         return (
             '<div class="table-wrap"><table><thead><tr>'
@@ -5040,17 +4732,9 @@ class HtmlReportRenderer:
             mount = entry.get("mount") or "-"
             average = self._finite_number(entry.get("avg"))
             maximum = self._finite_number(entry.get("max"))
-            average_text = (
-                f"{self._number(average, decimals=2)}%"
-                if average is not None else "-"
-            )
-            maximum_text = (
-                f"{self._number(maximum, decimals=2)}%"
-                if maximum is not None else "-"
-            )
-            items.append(
-                f"{mount} · 평균 {average_text} / 최대 {maximum_text}"
-            )
+            average_text = f"{self._number(average, decimals=2)}%" if average is not None else "-"
+            maximum_text = f"{self._number(maximum, decimals=2)}%" if maximum is not None else "-"
+            items.append(f"{mount} · 평균 {average_text} / 최대 {maximum_text}")
         return ", ".join(items) or "-"
 
     def _first(self, row: Dict[str, Any], *keys: str) -> Any:
@@ -5097,17 +4781,11 @@ class HtmlReportRenderer:
             "PRE_DISCOUNT_LIST_PRICE": "사용량 × 단가 (할인·VAT 전)",
             "DAILY_RUN_RATE_PROJECTION": "월 누적 일평균 추세 예측",
             "NCP_PRODUCT_DEMAND_USE_AMOUNT": "NCP 서비스별 누적 사용금액 (할인·VAT 전)",
-            "NCP_CONTRACT_DEMAND_USE_AMOUNT": (
-                "NCP 계약별 사용금액 fallback (할인·VAT 전)"
-            ),
-            "NCP_CURRENT_USE_AMOUNT_FALLBACK": (
-                "NCP 현재월 반환 사용금액 (복합요금 fallback)"
-            ),
+            "NCP_CONTRACT_DEMAND_USE_AMOUNT": ("NCP 계약별 사용금액 fallback (할인·VAT 전)"),
+            "NCP_CURRENT_USE_AMOUNT_FALLBACK": ("NCP 현재월 반환 사용금액 (복합요금 fallback)"),
             "PROJECTED_USAGE_RERATED": "월말 예상 사용량에 요금제를 다시 적용",
             "NCP_ACCRUED_PLUS_USAGE_FORECAST": "NCP 누적 사용금액 + 월말 사용량 예측",
-            "NCP_ACCRUED_LOWER_BOUND": (
-                "NCP 현재 누적 사용금액 (복합요금 월말 하한)"
-            ),
+            "NCP_ACCRUED_LOWER_BOUND": ("NCP 현재 누적 사용금액 (복합요금 월말 하한)"),
         }
         cards = []
         for fact in facts:
@@ -5118,22 +4796,18 @@ class HtmlReportRenderer:
                 if collected_source_state != OBSERVED
                 else (
                     OBSERVED
-                    if str(fact.get("cost_type") or "").upper()
-                    == "CONFIRMED"
+                    if str(fact.get("cost_type") or "").upper() == "CONFIRMED"
                     else CALCULATED
                 )
             )
             amount = (
                 self._number(fact.get("total_amount"), 0) + "원"
-                if fact.get("total_amount") is not None else "조회 불가"
+                if fact.get("total_amount") is not None
+                else "조회 불가"
             )
-            period_text = (
-                f"{fact.get('period_start') or '-'} ~ "
-                f"{fact.get('period_end') or '-'}"
-            )
+            period_text = f"{fact.get('period_start') or '-'} ~ {fact.get('period_end') or '-'}"
             coverage_text = (
-                f"{fact.get('coverage_start') or '-'} ~ "
-                f"{fact.get('coverage_end') or '-'}"
+                f"{fact.get('coverage_start') or '-'} ~ {fact.get('coverage_end') or '-'}"
             )
             invoice_breakdown = ""
             if fact.get("cost_type") == "CONFIRMED" and status == "AVAILABLE":
@@ -5159,12 +4833,8 @@ class HtmlReportRenderer:
                 f"할인 {'포함' if fact.get('includes_discount') else '미포함'}, "
                 f"VAT {'포함' if fact.get('includes_vat') else '미포함'}"
             )
-            breakdown_rows = self._records(
-                fact.get("_service_breakdown")
-            )
-            service_count = sum(
-                not row.get("is_adjustment") for row in breakdown_rows
-            )
+            breakdown_rows = self._records(fact.get("_service_breakdown"))
+            service_count = sum(not row.get("is_adjustment") for row in breakdown_rows)
             breakdown_html = (
                 self._table(
                     breakdown_rows,
@@ -5175,8 +4845,7 @@ class HtmlReportRenderer:
                 )
                 if breakdown_rows
                 else (
-                    '<p class="empty-state">이 기준에 연결된 서비스별 '
-                    "금액 데이터가 없습니다.</p>"
+                    '<p class="empty-state">이 기준에 연결된 서비스별 금액 데이터가 없습니다.</p>'
                 )
             )
             cost_type = str(fact.get("cost_type") or "")
@@ -5187,12 +4856,8 @@ class HtmlReportRenderer:
                 "MONTH_END_PROJECTION": "billing-cost-month-end",
             }.get(cost_type, "")
             id_attribute = f' id="{card_id}"' if card_id else ""
-            body_id_attribute = (
-                f' id="{card_id}-detail"' if card_id else ""
-            )
-            controls_attribute = (
-                f' aria-controls="{card_id}-detail"' if card_id else ""
-            )
+            body_id_attribute = f' id="{card_id}-detail"' if card_id else ""
+            controls_attribute = f' aria-controls="{card_id}-detail"' if card_id else ""
             cards.append(
                 f'<details class="billing-fact"{id_attribute}>'
                 f"<summary{controls_attribute}>"
@@ -5214,21 +4879,15 @@ class HtmlReportRenderer:
                 f"{estimate_quality}"
                 f"{invoice_breakdown}"
                 "</ul>"
-                '<h4>서비스별 금액 구성</h4>'
+                "<h4>서비스별 금액 구성</h4>"
                 f"{breakdown_html}"
                 '<p class="billing-fact-total"><span>카드 합계</span>'
                 f"<strong>{self._text(amount)}</strong></p>"
                 "</div></details>"
             )
-        return (
-            '<div class="billing-facts" id="billing-cost-basis">'
-            + "".join(cards)
-            + "</div>"
-        )
+        return '<div class="billing-facts" id="billing-cost-basis">' + "".join(cards) + "</div>"
 
-    def _organization_cost_sections(
-        self, accounts: List[Dict[str, Any]]
-    ) -> str:
+    def _organization_cost_sections(self, accounts: List[Dict[str, Any]]) -> str:
         if not accounts:
             return ""
         articles = []
@@ -5251,12 +4910,11 @@ class HtmlReportRenderer:
                     cost_totals[cost_type] += amount
                     available_cost_types.add(cost_type)
             confirmed_services = self._records(account.get("service_summary"))
-            expected_services = self._records(
-                account.get("current_service_summary")
-            )
+            expected_services = self._records(account.get("current_service_summary"))
             confirmed_text = (
                 self._number(confirmed.get("total_amount"), 0) + "원"
-                if confirmed.get("total_amount") is not None else "조회 불가"
+                if confirmed.get("total_amount") is not None
+                else "조회 불가"
             )
             provisional_text = (
                 self._number(current_provisional.get("total_amount"), 0) + "원"
@@ -5265,7 +4923,8 @@ class HtmlReportRenderer:
             )
             projection_text = (
                 self._number(projection.get("total_amount"), 0) + "원"
-                if projection.get("total_amount") is not None else "해당 없음"
+                if projection.get("total_amount") is not None
+                else "해당 없음"
             )
             metrics = (
                 f"<li><span>확정 청구액</span><strong>{confirmed_text}</strong></li>"
@@ -5278,26 +4937,31 @@ class HtmlReportRenderer:
                 f" <small>{self._text(account.get('member_no'))}</small></h3>"
                 f"<ul>{metrics}</ul>"
                 "<h4>확정 서비스별 비용</h4>"
-                + self._table(confirmed_services, (
-                    ("service_name", "서비스"), ("amount", "금액", "number0"),
-                    ("row_count", "항목", "number0"),
-                ))
+                + self._table(
+                    confirmed_services,
+                    (
+                        ("service_name", "서비스"),
+                        ("amount", "금액", "number0"),
+                        ("row_count", "항목", "number0"),
+                    ),
+                )
                 + "<h4>NCP 현재월 서비스별 예상 비용</h4>"
-                + self._table(expected_services, (
-                    ("service_name", "서비스"), ("amount", "금액(VAT 전)", "number0"),
-                    ("row_count", "항목", "number0"),
-                ))
+                + self._table(
+                    expected_services,
+                    (
+                        ("service_name", "서비스"),
+                        ("amount", "금액(VAT 전)", "number0"),
+                        ("row_count", "항목", "number0"),
+                    ),
+                )
                 + "</article>"
             )
         cost_summary = []
         if "CONFIRMED" in available_cost_types:
-            cost_summary.append(
-                f"확정 합계 {self._number(cost_totals['CONFIRMED'], 0)}원"
-            )
+            cost_summary.append(f"확정 합계 {self._number(cost_totals['CONFIRMED'], 0)}원")
         if "CURRENT_PROVISIONAL" in available_cost_types:
             cost_summary.append(
-                "현재월 예상 합계(VAT 전) "
-                f"{self._number(cost_totals['CURRENT_PROVISIONAL'], 0)}원"
+                f"현재월 예상 합계(VAT 전) {self._number(cost_totals['CURRENT_PROVISIONAL'], 0)}원"
             )
         return self._section(
             "Organization 계정별 비용",
@@ -5326,11 +4990,7 @@ class HtmlReportRenderer:
         seen = set()
         for rows in value.values():
             for row in self._records(rows):
-                identity = (
-                    row.get("event_id")
-                    or row.get("historyId")
-                    or id(row)
-                )
+                identity = row.get("event_id") or row.get("historyId") or id(row)
                 if identity in seen:
                     continue
                 seen.add(identity)

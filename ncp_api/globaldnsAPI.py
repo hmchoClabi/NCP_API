@@ -11,15 +11,14 @@ from typing import Dict, Optional
 from ncp_api.base import BaseNCPAPI
 
 
-
 class GlobaldnsAPI(BaseNCPAPI):
     """
     Global DNS 리소스 API 클래스
 
     Global DNS 인스턴스 및 관련 정보를 조회합니다.
     """
-    ENDPOINT_KEY = "globaldns"
 
+    ENDPOINT_KEY = "globaldns"
 
     """
     ================================================================
@@ -51,31 +50,24 @@ class GlobaldnsAPI(BaseNCPAPI):
             and base_time_unit is not None
             and base_time_unix != base_time_unit
         ):
-            raise ValueError(
-                "base_time_unix와 base_time_unit에 "
-                "서로 다른 값을 지정할 수 없습니다."
-            )
-        selected_time_unit = (
-            base_time_unit
-            if base_time_unit is not None
-            else base_time_unix
-        )
+            raise ValueError("base_time_unix와 base_time_unit에 서로 다른 값을 지정할 수 없습니다.")
+        selected_time_unit = base_time_unit if base_time_unit is not None else base_time_unix
         if selected_time_unit is None:
             raise ValueError("base_time_unit은 필수입니다.")
 
         params = {
-            'baseTimeUnit': selected_time_unit,
+            "baseTimeUnit": selected_time_unit,
         }
         if domain_id is not None:
-            params['domainId'] = domain_id
-        return self.client.get('/ncpdns/domain/monitoring', params=params)
+            params["domainId"] = domain_id
+        return self.client.get("/ncpdns/domain/monitoring", params=params)
 
     def get_lb_record(
         self,
-        platform_type : str,
-        record_type : str,
-        search_content : Optional[str] = None,
-        lb_region_code : Optional[str] = None
+        platform_type: str,
+        record_type: str,
+        search_content: Optional[str] = None,
+        lb_region_code: Optional[str] = None,
     ) -> Dict:
         """
         지정한 조건을 만족하는 Global DNS 로드밸런서 레코드 정보를 조회합니다.
@@ -91,15 +83,12 @@ class GlobaldnsAPI(BaseNCPAPI):
         """
         params = {}
         if search_content is not None:
-            params['searchContent'] = search_content    
+            params["searchContent"] = search_content
         if lb_region_code is not None:
-            params['lbRegionCode'] = lb_region_code
-        return self.client.get(f'/ncpdns/lb-record/{platform_type}/{record_type}', params=params)
+            params["lbRegionCode"] = lb_region_code
+        return self.client.get(f"/ncpdns/lb-record/{platform_type}/{record_type}", params=params)
 
-    def get_domain_detail(
-        self,
-        domain_id : int
-    ) -> Dict:
+    def get_domain_detail(self, domain_id: int) -> Dict:
         """
         Global DNS 도메인 상세 정보를 조회합니다.
 
@@ -109,16 +98,11 @@ class GlobaldnsAPI(BaseNCPAPI):
         Returns:
             Dict: Global DNS 도메인 상세 정보 응답
         """
-        
-        params = {}
-        return self.client.get(f'/ncpdns/domain/{domain_id}', params=params)
 
-    def get_domain(
-        self,
-        page : int,
-        size : int, 
-        domain_name : Optional[str] = None
-    ) -> Dict:
+        params = {}
+        return self.client.get(f"/ncpdns/domain/{domain_id}", params=params)
+
+    def get_domain(self, page: int, size: int, domain_name: Optional[str] = None) -> Dict:
         """
         지정한 조건에 따라 도메인 정보를 조회합니다.
 
@@ -130,25 +114,22 @@ class GlobaldnsAPI(BaseNCPAPI):
         Returns:
             Dict: Global DNS 도메인 정보 응답
         """
-        params = {  
-            'page': page,
-            'size': size
-        }
+        params = {"page": page, "size": size}
         if domain_name:
-            params['domainName'] = domain_name
-        return self.client.get('/ncpdns/domain', params=params)
-    
+            params["domainName"] = domain_name
+        return self.client.get("/ncpdns/domain", params=params)
+
     def get_record(
         self,
-        page : int,
-        size : int,
-        domain_id : str,
-        record_type : Optional[str] = None,
-        search_content : Optional[str] = None
+        page: int,
+        size: int,
+        domain_id: str,
+        record_type: Optional[str] = None,
+        search_content: Optional[str] = None,
     ) -> Dict:
         """
         지정한 조건에 따라 레코드 정보를 조회합니다.
-    
+
         args:
             str domain_id: 도메인 ID
             int page: 페이지 번호
@@ -160,13 +141,10 @@ class GlobaldnsAPI(BaseNCPAPI):
         Returns:
             Dict: Global DNS 도메인 레코드 응답
         """
-        params = {
-            'page' : page,
-            'size' : size      
-        }
+        params = {"page": page, "size": size}
         if record_type is not None:
-            params['recordType'] = record_type
+            params["recordType"] = record_type
         if search_content is not None:
-            params['searchContent'] = search_content
-        
-        return self.client.get(f'/ncpdns/record/{domain_id}', params=params)
+            params["searchContent"] = search_content
+
+        return self.client.get(f"/ncpdns/record/{domain_id}", params=params)

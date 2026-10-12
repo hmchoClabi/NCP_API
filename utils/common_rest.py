@@ -53,9 +53,8 @@ def _normalized_key(value: Any) -> str:
 
 def _is_sensitive_key(key: Any) -> bool:
     normalized = _normalized_key(key)
-    return (
-        normalized in _SENSITIVE_KEY_NAMES
-        or any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
+    return normalized in _SENSITIVE_KEY_NAMES or any(
+        fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS
     )
 
 
@@ -150,12 +149,9 @@ def safe_exception_message(exc: BaseException) -> str:
 
         if absolute_indexes:
             url_index = min(absolute_indexes)
-            candidate = (
-                candidate[:url_index]
-                + _safe_url(
-                    candidate[url_index:],
-                    include_query=False,
-                )
+            candidate = candidate[:url_index] + _safe_url(
+                candidate[url_index:],
+                include_query=False,
             )
         elif "?" in candidate or "#" in candidate:
             path_index = candidate.find("/")
@@ -213,11 +209,11 @@ def _origin(url: str) -> tuple[str, str, int]:
 class NCPBaseClient:
     """
     네이버 클라우드 플랫폼 RESTful API 공용 클라이언트
-    
+
     모든 HTTP 메서드(GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)를 지원하며,
     다양한 파라미터 타입(string, int, float, list, dict, array)을 처리할 수 있습니다.
     """
-    
+
     def __init__(
         self,
         access_key: str,
@@ -228,7 +224,7 @@ class NCPBaseClient:
     ):
         """
         API 클라이언트를 초기화합니다.
-        
+
         Args:
             access_key: NCP Access Key
             secret_key: NCP Secret Key
@@ -264,9 +260,7 @@ class NCPBaseClient:
 
         # 최상위 params가 list인 경우는 거의 없지만, 지원하려면 JSON으로 전달
         if isinstance(params, list):
-            return urlencode(
-                {"items": json.dumps(params, ensure_ascii=False)}
-            )
+            return urlencode({"items": json.dumps(params, ensure_ascii=False)})
 
         if isinstance(params, dict):
             for key, value in params.items():
@@ -311,7 +305,7 @@ class NCPBaseClient:
             headers={
                 'Content-Type': 'multipart/form-data'
             }
-        """    
+        """
 
         headers = {"Accept": "application/json"}
         # 기본 JSON 요청 헤더
@@ -340,9 +334,7 @@ class NCPBaseClient:
                 raise ValueError("absolute endpoint must include scheme and host")
             # NCP 인증 헤더가 외부 호스트로 전달되지 않도록 origin을 고정한다.
             if _origin(endpoint) != _origin(self.base_url):
-                raise ValueError(
-                    "absolute endpoint origin must match the configured base_url"
-                )
+                raise ValueError("absolute endpoint origin must match the configured base_url")
             return endpoint
         return f"{self.base_url}/{endpoint.lstrip('/')}"
 
@@ -354,9 +346,7 @@ class NCPBaseClient:
         """전송 URL과 정확히 같은 query를 포함한 서명 URI를 반환한다."""
         query_string = self._prepare_params(params)
         parsed_url = urlparse(url)
-        merged_query = "&".join(
-            part for part in (parsed_url.query, query_string) if part
-        )
+        merged_query = "&".join(part for part in (parsed_url.query, query_string) if part)
         parsed_url = parsed_url._replace(query=merged_query, fragment="")
         request_url = urlunparse(parsed_url)
         signature_uri = parsed_url.path
@@ -463,10 +453,7 @@ class NCPBaseClient:
         if has_files:
             logger.debug(
                 "  - Request File Fields: %s",
-                [
-                    _REDACTED if _is_sensitive_key(key) else key
-                    for key in files
-                ],
+                [_REDACTED if _is_sensitive_key(key) else key for key in files],
             )
 
         if params:
@@ -497,17 +484,9 @@ class NCPBaseClient:
                 return response
             except requests.RequestException as exc:
                 last_exception = exc
-                status_code = (
-                    exc.response.status_code
-                    if exc.response is not None
-                    else None
-                )
-                is_transient_http_error = (
-                    status_code == 429
-                    or (
-                        status_code is not None
-                        and 500 <= status_code <= 599
-                    )
+                status_code = exc.response.status_code if exc.response is not None else None
+                is_transient_http_error = status_code == 429 or (
+                    status_code is not None and 500 <= status_code <= 599
                 )
                 is_connection_error = isinstance(
                     exc,
@@ -520,14 +499,11 @@ class NCPBaseClient:
                 )
 
                 if should_retry:
-                    wait_time = 2 ** attempt
+                    wait_time = 2**attempt
                     logger.warning(
-                        "Transient request failure "
-                        "(method=%s, status=%s, attempt=%s/%s)",
+                        "Transient request failure (method=%s, status=%s, attempt=%s/%s)",
                         method,
-                        status_code
-                        if status_code is not None
-                        else type(exc).__name__,
+                        status_code if status_code is not None else type(exc).__name__,
                         attempt + 1,
                         max_attempts,
                     )
@@ -535,12 +511,9 @@ class NCPBaseClient:
                     time.sleep(wait_time)
                 else:
                     logger.error(
-                        "Request failed "
-                        "(method=%s, status=%s, attempts=%s)",
+                        "Request failed (method=%s, status=%s, attempts=%s)",
                         method,
-                        status_code
-                        if status_code is not None
-                        else type(exc).__name__,
+                        status_code if status_code is not None else type(exc).__name__,
                         attempt + 1,
                     )
                     raise
@@ -673,7 +646,7 @@ class NCPBaseClient:
             logger.info("  - Response Type: %s", type(json_response).__name__)
         logger.debug("  - Response Body: %s", _safe_json(json_response))
         return json_response
-    
+
     def request(
         self,
         method: str,
@@ -688,9 +661,9 @@ class NCPBaseClient:
     ) -> Any:
         """
         API 요청을 실행하고 응답을 반환합니다.
-        
+
         모든 HTTP 메서드를 지원하며, 다양한 파라미터 타입을 처리할 수 있습니다.
-        
+
         Args:
             method: HTTP 메서드 (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
             endpoint: API 엔드포인트 경로
@@ -701,29 +674,29 @@ class NCPBaseClient:
             files: 파일 업로드용 파일 딕셔너리
             timeout: 요청 타임아웃 (초)
             retry_safe: 읽기 전용 POST처럼 안전한 요청의 재시도 허용 여부
-        
+
         Returns:
             Any: JSON은 디코딩된 값(dict/list/scalar), XML·텍스트는
             ``{"text": ..., "status_code": ...}``, 빈 본문은
             ``{"status_code": ..., "empty": True}``
-        
+
         Raises:
             requests.RequestException: 요청 실패 시
             requests.exceptions.JSONDecodeError: JSON Content-Type 응답의
                 JSON 파싱 실패 시
-        
+
         Examples:
             # GET 요청
             response = client.request('GET', '/vserver/v2/getServerInstanceList')
-            
+
             # POST 요청 (JSON)
-            response = client.request('POST', '/vserver/v2/createServerInstances', 
+            response = client.request('POST', '/vserver/v2/createServerInstances',
                                     json_data={'serverName': 'test'})
-            
+
             # PUT 요청 (파라미터)
             response = client.request('PUT', '/vserver/v2/changeServerInstanceSpec',
                                     params={'serverInstanceNo': '123'})
-            
+
             # PATCH 요청 (커스텀 헤더)
             response = client.request('PATCH', '/vserver/v2/updateServer',
                                     json_data={'name': 'new_name'},
@@ -742,7 +715,7 @@ class NCPBaseClient:
         )
         self._log_response(response)
         return self._decode_response(response)
-    
+
     # 편의 메서드들
     def get(
         self,
@@ -759,7 +732,7 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-    
+
     def get_binary(
         self,
         endpoint: str,
@@ -782,7 +755,7 @@ class NCPBaseClient:
         logger.info(f"  - Content-Length: {response.headers.get('Content-Length')}")
 
         return response.content
-    
+
     def post(
         self,
         endpoint: str,
@@ -806,7 +779,7 @@ class NCPBaseClient:
             timeout=timeout,
             retry_safe=retry_safe,
         )
-    
+
     def put(
         self,
         endpoint: str,
@@ -826,7 +799,7 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-    
+
     def patch(
         self,
         endpoint: str,
@@ -846,7 +819,7 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-    
+
     def delete(
         self,
         endpoint: str,
@@ -862,7 +835,7 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-    
+
     def head(
         self,
         endpoint: str,
@@ -878,7 +851,7 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-    
+
     def options(
         self,
         endpoint: str,
@@ -894,4 +867,3 @@ class NCPBaseClient:
             headers=headers,
             timeout=timeout,
         )
-

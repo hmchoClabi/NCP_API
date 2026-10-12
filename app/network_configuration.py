@@ -8,9 +8,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from app.report_options import NETWORK_CONFIGURATION_CATEGORY_OPTIONS
 
 
-NETWORK_CONFIGURATION_CATEGORIES = frozenset(
-    NETWORK_CONFIGURATION_CATEGORY_OPTIONS
-)
+NETWORK_CONFIGURATION_CATEGORIES = frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
 
 
 def configuration_records(
@@ -21,8 +19,7 @@ def configuration_records(
     allowed = (
         NETWORK_CONFIGURATION_CATEGORIES
         if categories is None
-        else NETWORK_CONFIGURATION_CATEGORIES
-        & {str(category).upper() for category in categories}
+        else NETWORK_CONFIGURATION_CATEGORIES & {str(category).upper() for category in categories}
     )
     if not isinstance(resources, Sequence) or isinstance(
         resources,
@@ -62,8 +59,7 @@ def replace_configuration_records(
         for resource in resources
         if (
             isinstance(resource, Mapping)
-            and str(resource.get("category") or "").upper()
-            not in NETWORK_CONFIGURATION_CATEGORIES
+            and str(resource.get("category") or "").upper() not in NETWORK_CONFIGURATION_CATEGORIES
         )
     ]
     return [*base, *configuration_records(configuration)]
@@ -109,11 +105,7 @@ def build_generation_snapshot(
     )
     error_count = len(errors) if isinstance(errors, list) else 0
     warning_count = len(warnings) if isinstance(warnings, list) else 0
-    completeness = (
-        "PARTIAL"
-        if error_count or warning_count
-        else "COMPLETE_FOR_SELECTED_SCOPE"
-    )
+    completeness = "PARTIAL" if error_count or warning_count else "COMPLETE_FOR_SELECTED_SCOPE"
     return {
         "schema_version": "1.0",
         "source": "REPORT_GENERATION",

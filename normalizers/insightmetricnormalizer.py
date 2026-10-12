@@ -46,18 +46,11 @@ class InsightMetricNormalizer:
     ) -> None:
         if isinstance(response, dict):
             response = (
-                response.get("metrics")
-                or response.get("data")
-                or response.get("result")
-                or []
+                response.get("metrics") or response.get("data") or response.get("result") or []
             )
 
             if isinstance(response, dict):
-                response = (
-                    response.get("metrics")
-                    or response.get("items")
-                    or []
-                )
+                response = response.get("metrics") or response.get("items") or []
 
         if not isinstance(response, list):
             logger.warning("Cloud Insight 응답이 list가 아닙니다: %s", response)
@@ -67,12 +60,8 @@ class InsightMetricNormalizer:
             if not isinstance(item, dict):
                 continue
 
-            dimensions = self._normalize_dimensions(
-                item.get("dimensions")
-            )
-            instance_no = self._normalize_id(
-                dimensions.get("instanceNo")
-            )
+            dimensions = self._normalize_dimensions(item.get("dimensions"))
+            instance_no = self._normalize_id(dimensions.get("instanceNo"))
             metric_name = item.get("metric")
             dps = item.get("dps") or []
 
@@ -150,10 +139,7 @@ class InsightMetricNormalizer:
         self,
         servers: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        return [
-            self._create_base_report(server)
-            for server in servers
-        ]
+        return [self._create_base_report(server) for server in servers]
 
     def _create_base_report(
         self,
@@ -357,16 +343,8 @@ class InsightMetricNormalizer:
             if not isinstance(item, dict):
                 continue
 
-            name = (
-                item.get("dim")
-                or item.get("name")
-                or item.get("dimension")
-            )
-            item_value = (
-                item.get("val")
-                if item.get("val") is not None
-                else item.get("value")
-            )
+            name = item.get("dim") or item.get("name") or item.get("dimension")
+            item_value = item.get("val") if item.get("val") is not None else item.get("value")
 
             if name and item_value is not None:
                 result[str(name)] = item_value

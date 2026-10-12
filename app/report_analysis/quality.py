@@ -102,12 +102,8 @@ def analyze_data_quality(
             # 새 보고서는 runner가 데이터셋별 진단을 이미 분리해 기록한다.
             # 전역 오류의 부분 문자열을 다시 매칭하면 monitoring의
             # target_type=server가 infrastructure 오류로 중복 귀속된다.
-            error_count = _non_negative_count(
-                explicit_status.get("error_count")
-            )
-            warning_count = _non_negative_count(
-                explicit_status.get("warning_count")
-            )
+            error_count = _non_negative_count(explicit_status.get("error_count"))
+            warning_count = _non_negative_count(explicit_status.get("warning_count"))
         else:
             # 명시 상태가 없는 구형 스냅샷에만 보수적 휴리스틱을 쓴다.
             error_count = len(_related_issues(errors, key))
@@ -145,9 +141,7 @@ def analyze_data_quality(
                         {"label": "오류", "value": error_count, "unit": "건"},
                         {"label": "경고", "value": warning_count, "unit": "건"},
                     ],
-                    impact=(
-                        "해당 데이터에 의존하는 정상 여부와 추세를 확정할 수 없습니다."
-                    ),
+                    impact=("해당 데이터에 의존하는 정상 여부와 추세를 확정할 수 없습니다."),
                     recommendation=(
                         "호출 API, 계정 권한, 수집 범위와 수집 시각을 확인한 뒤 다시 수집하세요."
                     ),
@@ -155,17 +149,12 @@ def analyze_data_quality(
                 )
             )
 
-    requested = [
-        item for item in datasets if item["status"] != "NOT_REQUESTED"
-    ]
+    requested = [item for item in datasets if item["status"] != "NOT_REQUESTED"]
     if not requested:
         overall = "UNKNOWN"
     elif any(item["status"] == "FAILED" for item in requested):
         overall = "FAILED"
-    elif any(
-        item["status"] in {"PARTIAL", "UNAVAILABLE"}
-        for item in requested
-    ):
+    elif any(item["status"] in {"PARTIAL", "UNAVAILABLE"} for item in requested):
         overall = "PARTIAL"
     else:
         overall = "COMPLETE"
@@ -284,12 +273,8 @@ def _explicit_statuses(report: Any) -> dict[str, dict[str, Any]]:
         key = str(raw_key or "").strip()
         if not key:
             continue
-        value = dict(raw_value) if isinstance(raw_value, Mapping) else {
-            "status": raw_value
-        }
-        status = _STATUS_ALIASES.get(
-            str(value.get("status") or "").strip().upper()
-        )
+        value = dict(raw_value) if isinstance(raw_value, Mapping) else {"status": raw_value}
+        status = _STATUS_ALIASES.get(str(value.get("status") or "").strip().upper())
         if status:
             result[key] = {**value, "status": status}
     return result
@@ -341,10 +326,10 @@ def _record_count(report: Any, key: str) -> int:
     if key == "billing":
         billing = mapping(field(report, "billing", {}))
         return sum(
-            isinstance(value, Mapping)
-            and str(value.get("status") or "").upper() == "AVAILABLE"
+            isinstance(value, Mapping) and str(value.get("status") or "").upper() == "AVAILABLE"
             for name, value in billing.items()
-            if name in {
+            if name
+            in {
                 "invoice_summary",
                 "period_estimate",
                 "month_to_date_estimate",
@@ -374,9 +359,7 @@ def monitoring_observation_count(
                 for entries in stats.values():
                     for entry in records(entries):
                         raw = entry.get("raw")
-                        if isinstance(raw, Mapping) and isinstance(
-                            raw.get("dps"), list
-                        ):
+                        if isinstance(raw, Mapping) and isinstance(raw.get("dps"), list):
                             count += len(raw["dps"])
                         elif isinstance(entry.get("values"), list):
                             count += len(entry["values"])

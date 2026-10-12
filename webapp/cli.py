@@ -13,9 +13,7 @@ def prompt_new_password(environment_name: str, label: str) -> str:
     configured = os.getenv(environment_name)
     if configured is not None:
         if len(configured) < 12:
-            raise ValueError(
-                f"{environment_name} must contain at least 12 characters."
-            )
+            raise ValueError(f"{environment_name} must contain at least 12 characters.")
         return configured
 
     while True:
@@ -49,18 +47,12 @@ def main() -> None:
 
     try:
         if args.command == "bootstrap-admin":
-            password = prompt_new_password(
-                "BOOTSTRAP_MSP_PASSWORD", "Initial MSP"
-            )
+            password = prompt_new_password("BOOTSTRAP_MSP_PASSWORD", "Initial MSP")
             repository = PortalRepository(DatabaseSettings.from_env())
-            user_id = repository.bootstrap_msp_admin(
-                args.email, password, args.display_name
-            )
+            user_id = repository.bootstrap_msp_admin(args.email, password, args.display_name)
             print(f"MSP administrator is ready: {args.email} ({user_id})")
         elif args.command == "create-customer-user":
-            password = prompt_new_password(
-                "BOOTSTRAP_CUSTOMER_PASSWORD", "Initial customer"
-            )
+            password = prompt_new_password("BOOTSTRAP_CUSTOMER_PASSWORD", "Initial customer")
             repository = PortalRepository(DatabaseSettings.from_env())
             user_id = repository.create_customer_user(
                 args.email,

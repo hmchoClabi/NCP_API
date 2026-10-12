@@ -254,10 +254,7 @@ class InsightMetricCollector:
         return {
             "prodKey": prod_key,
             "metric": metric_config["metric"],
-            "interval": (
-                interval
-                or metric_config.get("interval", "Min5")
-            ),
+            "interval": (interval or metric_config.get("interval", "Min5")),
             "aggregation": aggregation,
             "queryAggregation": aggregation,
             "dimensions": dimensions,
@@ -322,16 +319,9 @@ class InsightMetricCollector:
                     except Exception as exc:
                         target_ids = sorted(
                             {
-                                str(
-                                    payload.get("dimensions", {}).get(
-                                        "instanceNo"
-                                    )
-                                )
+                                str(payload.get("dimensions", {}).get("instanceNo"))
                                 for payload in chunk
-                                if payload.get("dimensions", {}).get(
-                                    "instanceNo"
-                                )
-                                is not None
+                                if payload.get("dimensions", {}).get("instanceNo") is not None
                             }
                         )
                         metric_names = sorted(
@@ -348,10 +338,7 @@ class InsightMetricCollector:
                             target_id=",".join(target_ids) or None,
                             product_key=(
                                 str(chunk[0].get("prodKey"))
-                                if (
-                                    chunk
-                                    and chunk[0].get("prodKey") is not None
-                                )
+                                if (chunk and chunk[0].get("prodKey") is not None)
                                 else None
                             ),
                             metric=",".join(metric_names) or None,
@@ -372,10 +359,7 @@ class InsightMetricCollector:
                             api="get_query_data_multiple",
                             product_key=(
                                 str(chunk[0].get("prodKey"))
-                                if (
-                                    chunk
-                                    and chunk[0].get("prodKey") is not None
-                                )
+                                if (chunk and chunk[0].get("prodKey") is not None)
                                 else None
                             ),
                             stat_name=stat_name,
@@ -400,17 +384,11 @@ class InsightMetricCollector:
 
         if (
             normalized_instance_no
-            and normalized_instance_no
-            in self._filesystem_mount_candidates_by_instance
+            and normalized_instance_no in self._filesystem_mount_candidates_by_instance
         ):
-            return self._filesystem_mount_candidates_by_instance[
-                normalized_instance_no
-            ]
+            return self._filesystem_mount_candidates_by_instance[normalized_instance_no]
 
-        if (
-            not normalized_instance_no
-            and self._filesystem_mount_candidates is not None
-        ):
+        if not normalized_instance_no and self._filesystem_mount_candidates is not None:
             return self._filesystem_mount_candidates
 
         insight_api = self.api_factory.get("cloud_insight")
@@ -443,23 +421,16 @@ class InsightMetricCollector:
         metric_items = self._extract_metric_items(response)
         mount_points = self._extract_mount_points(
             metric_items=metric_items,
-            instance_no=(
-                normalized_instance_no
-                if self._supports_mount_dimension_filter
-                else None
-            ),
+            instance_no=(normalized_instance_no if self._supports_mount_dimension_filter else None),
         )
 
         if normalized_instance_no and self._supports_mount_dimension_filter:
-            self._filesystem_mount_candidates_by_instance[
-                normalized_instance_no
-            ] = mount_points
+            self._filesystem_mount_candidates_by_instance[normalized_instance_no] = mount_points
         else:
             self._filesystem_mount_candidates = mount_points
 
         logger.info(
-            "filesystem mnt_nm 후보 %s개를 캐싱했습니다"
-            " (instanceNo=%s): %s",
+            "filesystem mnt_nm 후보 %s개를 캐싱했습니다 (instanceNo=%s): %s",
             len(mount_points),
             normalized_instance_no or "all",
             sorted(mount_points),
@@ -475,11 +446,7 @@ class InsightMetricCollector:
         mount_points: Set[str] = set()
 
         for item in metric_items:
-            metric_name = (
-                item.get("metric")
-                or item.get("metricName")
-                or item.get("name")
-            )
+            metric_name = item.get("metric") or item.get("metricName") or item.get("name")
 
             if metric_name != self.FILESYSTEM_METRIC["metric"]:
                 continue
@@ -487,10 +454,7 @@ class InsightMetricCollector:
             dimensions = item.get("dimensions") or []
 
             if isinstance(dimensions, dict):
-                dimensions = [
-                    {"dim": name, "val": value}
-                    for name, value in dimensions.items()
-                ]
+                dimensions = [{"dim": name, "val": value} for name, value in dimensions.items()]
 
             item_instance_ids = set()
             item_mount_points = set()
@@ -500,9 +464,7 @@ class InsightMetricCollector:
                     continue
 
                 dim_name = (
-                    dimension.get("dim")
-                    or dimension.get("name")
-                    or dimension.get("dimension")
+                    dimension.get("dim") or dimension.get("name") or dimension.get("dimension")
                 )
 
                 dim_value = dimension.get("val")
@@ -522,11 +484,7 @@ class InsightMetricCollector:
                     if normalized_value:
                         item_instance_ids.add(normalized_value)
 
-            if (
-                instance_no
-                and item_instance_ids
-                and instance_no not in item_instance_ids
-            ):
+            if instance_no and item_instance_ids and instance_no not in item_instance_ids:
                 continue
 
             mount_points.update(item_mount_points)
@@ -651,11 +609,7 @@ class InsightMetricCollector:
                 continue
 
             prod_name = item.get("prodName") or item.get("productName")
-            cw_key = (
-                item.get("cw_key")
-                or item.get("cwKey")
-                or item.get("prodKey")
-            )
+            cw_key = item.get("cw_key") or item.get("cwKey") or item.get("prodKey")
 
             if prod_name and cw_key:
                 self._cw_key_map[str(prod_name)] = str(cw_key)
@@ -708,8 +662,7 @@ class InsightMetricCollector:
                     api="local",
                     target_id=self._normalize_id(server.get("server_id")),
                     message=(
-                        "서버 생성일을 해석하지 못해 기간 필터 없이 "
-                        f"포함했습니다: {create_value}"
+                        f"서버 생성일을 해석하지 못해 기간 필터 없이 포함했습니다: {create_value}"
                     ),
                     severity="warning",
                 )
@@ -720,8 +673,7 @@ class InsightMetricCollector:
                     api="local",
                     target_id=self._normalize_id(server.get("server_id")),
                     message=(
-                        "조회 종료일 이후 생성된 현재 서버를 "
-                        "과거 메트릭 조회에서 제외했습니다."
+                        "조회 종료일 이후 생성된 현재 서버를 과거 메트릭 조회에서 제외했습니다."
                     ),
                     severity="warning",
                 )
@@ -763,16 +715,12 @@ class InsightMetricCollector:
 
             try:
                 numeric = float(normalized)
-                return int(
-                    numeric if abs(numeric) >= 10**11 else numeric * 1000
-                )
+                return int(numeric if abs(numeric) >= 10**11 else numeric * 1000)
             except ValueError:
                 pass
 
             try:
-                parsed = datetime.fromisoformat(
-                    normalized.replace("Z", "+00:00")
-                )
+                parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
             except ValueError:
                 for date_format in (
                     "%b %d, %Y, %I:%M:%S %p",
@@ -818,14 +766,7 @@ class InsightMetricCollector:
             "target_type": "server",
             "api": api,
             "severity": severity,
-            "message": (
-                message
-                or (
-                    safe_exception_message(exc)
-                    if exc
-                    else "알 수 없는 오류"
-                )
-            ),
+            "message": (message or (safe_exception_message(exc) if exc else "알 수 없는 오류")),
         }
 
         if target_id:

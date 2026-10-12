@@ -19,9 +19,7 @@ class ReportJobRepository:
     def _connect(self):
         import psycopg
 
-        return psycopg.connect(
-            **self.settings.connection_kwargs(), row_factory=dict_row
-        )
+        return psycopg.connect(**self.settings.connection_kwargs(), row_factory=dict_row)
 
     def enqueue(
         self,
@@ -34,22 +32,33 @@ class ReportJobRepository:
         start_datetime: Optional[str] = None,
         end_datetime: Optional[str] = None,
     ) -> str:
-        report_type, target_value, period_key, period_start, period_end = (
-            self._validate_target(
-                report_type, target_value, start_datetime, end_datetime
-            )
+        report_type, target_value, period_key, period_start, period_end = self._validate_target(
+            report_type, target_value, start_datetime, end_datetime
         )
         with self._connect() as connection, connection.cursor() as cursor:
             return self._enqueue_cursor(
-                cursor, account_id, report_type, target_value, period_key,
-                requested_by, trigger_type, schedule_id,
-                period_start, period_end,
+                cursor,
+                account_id,
+                report_type,
+                target_value,
+                period_key,
+                requested_by,
+                trigger_type,
+                schedule_id,
+                period_start,
+                period_end,
             )
 
     def _enqueue_cursor(
-        self, cursor: Any, account_id: str, report_type: str,
-        target_value: str, period_key: str, requested_by: Optional[str],
-        trigger_type: str, schedule_id: Optional[str],
+        self,
+        cursor: Any,
+        account_id: str,
+        report_type: str,
+        target_value: str,
+        period_key: str,
+        requested_by: Optional[str],
+        trigger_type: str,
+        schedule_id: Optional[str],
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
     ) -> str:
@@ -80,9 +89,17 @@ class ReportJobRepository:
             RETURNING id
             """,
             (
-                account["tenant_id"], account_id, account["environment"],
-                report_type, target_value, period_key, trigger_type,
-                requested_by, schedule_id, period_start, period_end,
+                account["tenant_id"],
+                account_id,
+                account["environment"],
+                report_type,
+                target_value,
+                period_key,
+                trigger_type,
+                requested_by,
+                schedule_id,
+                period_start,
+                period_end,
             ),
         )
         row = cursor.fetchone()
@@ -105,7 +122,11 @@ class ReportJobRepository:
             report_type, run_hour, run_minute, monthly_day, weekly_day
         )
         next_run = self.next_run_at(
-            report_type, run_hour, run_minute, monthly_day, timezone_name,
+            report_type,
+            run_hour,
+            run_minute,
+            monthly_day,
+            timezone_name,
             weekly_day=weekly_day,
         )
         with self._connect() as connection, connection.cursor() as cursor:
@@ -133,9 +154,16 @@ class ReportJobRepository:
                 RETURNING id
                 """,
                 (
-                    account["tenant_id"], account_id, report_type,
-                    timezone_name, run_hour, run_minute, monthly_day,
-                    weekly_day, next_run, actor_id,
+                    account["tenant_id"],
+                    account_id,
+                    report_type,
+                    timezone_name,
+                    run_hour,
+                    run_minute,
+                    monthly_day,
+                    weekly_day,
+                    next_run,
+                    actor_id,
                 ),
             )
             return str(cursor.fetchone()["id"])
@@ -159,9 +187,14 @@ class ReportJobRepository:
                 )
                 try:
                     self._enqueue_cursor(
-                        cursor, str(schedule["cloud_account_id"]),
-                        schedule["report_type"], normalized_target, period_key,
-                        None, "SCHEDULED", str(schedule["id"]),
+                        cursor,
+                        str(schedule["cloud_account_id"]),
+                        schedule["report_type"],
+                        normalized_target,
+                        period_key,
+                        None,
+                        "SCHEDULED",
+                        str(schedule["id"]),
                     )
                     count += 1
                 except ValueError:
@@ -169,8 +202,10 @@ class ReportJobRepository:
                     # Advance the schedule to avoid a tight enqueue loop.
                     pass
                 next_run = self.next_run_at(
-                    schedule["report_type"], schedule["run_hour"],
-                    schedule["run_minute"], schedule["monthly_day"],
+                    schedule["report_type"],
+                    schedule["run_hour"],
+                    schedule["run_minute"],
+                    schedule["monthly_day"],
                     schedule["timezone"],
                     now=datetime.now(timezone.utc) + timedelta(seconds=1),
                     weekly_day=schedule.get("weekly_day"),
@@ -281,8 +316,10 @@ class ReportJobRepository:
             next_run = None
             if enabled:
                 next_run = self.next_run_at(
-                    schedule["report_type"], schedule["run_hour"],
-                    schedule["run_minute"], schedule["monthly_day"],
+                    schedule["report_type"],
+                    schedule["run_hour"],
+                    schedule["run_minute"],
+                    schedule["monthly_day"],
                     schedule["timezone"],
                     weekly_day=schedule.get("weekly_day"),
                 )
@@ -314,7 +351,11 @@ class ReportJobRepository:
         )
         normalized_ids = self._normalize_account_ids(account_ids)
         next_run = self.next_run_at(
-            report_type, run_hour, run_minute, monthly_day, timezone_name,
+            report_type,
+            run_hour,
+            run_minute,
+            monthly_day,
+            timezone_name,
             weekly_day=weekly_day,
         )
         with self._connect() as connection, connection.cursor() as cursor:
@@ -335,9 +376,7 @@ class ReportJobRepository:
             )
             accounts = cursor.fetchall()
             if len(accounts) != len(normalized_ids):
-                raise ValueError(
-                    "선택한 고객 계정 중 일정 등록이 불가능한 계정이 있습니다."
-                )
+                raise ValueError("선택한 고객 계정 중 일정 등록이 불가능한 계정이 있습니다.")
             for account in accounts:
                 cursor.execute(
                     """
@@ -357,20 +396,23 @@ class ReportJobRepository:
                         updated_at = clock_timestamp()
                     """,
                     (
-                        account["tenant_id"], account["id"], report_type,
-                        timezone_name, run_hour, run_minute, monthly_day,
-                        weekly_day, next_run, actor_id,
+                        account["tenant_id"],
+                        account["id"],
+                        report_type,
+                        timezone_name,
+                        run_hour,
+                        run_minute,
+                        monthly_day,
+                        weekly_day,
+                        next_run,
+                        actor_id,
                     ),
                 )
             return len(accounts)
 
-    def bulk_delete_schedules(
-        self, account_ids: list[str], report_type: str
-    ) -> int:
+    def bulk_delete_schedules(self, account_ids: list[str], report_type: str) -> int:
         normalized_type = str(report_type).strip().upper()
-        report_type, _, _ = self._validate_schedule_values(
-            normalized_type, 0, 0, None, None
-        )
+        report_type, _, _ = self._validate_schedule_values(normalized_type, 0, 0, None, None)
         normalized_ids = self._normalize_account_ids(account_ids)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -446,9 +488,7 @@ class ReportJobRepository:
             try:
                 _, _, normalized = parse_iso_week(target_value)
             except ValueError as exc:
-                raise ValueError(
-                    "주간 보고서 형식은 YYYY-Www입니다."
-                ) from exc
+                raise ValueError("주간 보고서 형식은 YYYY-Www입니다.") from exc
             return report_type, normalized, normalized, None, None
         if report_type == "MONTHLY" and re.fullmatch(r"\d{4}-\d{2}", target_value):
             try:
@@ -480,16 +520,15 @@ class ReportJobRepository:
         except ValueError as exc:
             raise ValueError("시간 형식이 올바르지 않습니다.") from exc
         zone = ZoneInfo("Asia/Seoul")
-        return (
-            parsed.replace(tzinfo=zone)
-            if parsed.tzinfo is None
-            else parsed.astimezone(zone)
-        )
+        return parsed.replace(tzinfo=zone) if parsed.tzinfo is None else parsed.astimezone(zone)
 
     @staticmethod
     def next_run_at(
-        report_type: str, run_hour: int, run_minute: int,
-        monthly_day: Optional[int], timezone_name: str,
+        report_type: str,
+        run_hour: int,
+        run_minute: int,
+        monthly_day: Optional[int],
+        timezone_name: str,
         now: Optional[datetime] = None,
         weekly_day: Optional[int] = None,
     ) -> datetime:
@@ -497,18 +536,18 @@ class ReportJobRepository:
         local_now = (now or datetime.now(timezone.utc)).astimezone(zone)
         if report_type == "WEEKLY":
             candidate = (
-                local_now
-                + timedelta(
-                    days=(int(weekly_day or 1) - local_now.isoweekday()) % 7
-                )
+                local_now + timedelta(days=(int(weekly_day or 1) - local_now.isoweekday()) % 7)
             ).replace(hour=run_hour, minute=run_minute, second=0, microsecond=0)
             if candidate <= local_now:
                 candidate += timedelta(days=7)
         else:
             day = local_now.day if report_type == "DAILY" else int(monthly_day or 1)
             candidate = local_now.replace(
-                day=day, hour=run_hour, minute=run_minute,
-                second=0, microsecond=0,
+                day=day,
+                hour=run_hour,
+                minute=run_minute,
+                second=0,
+                microsecond=0,
             )
             if candidate <= local_now:
                 if report_type == "DAILY":
@@ -526,9 +565,7 @@ class ReportJobRepository:
         if schedule["report_type"] == "DAILY":
             return (local_date - timedelta(days=1)).isoformat()
         if schedule["report_type"] == "WEEKLY":
-            previous_sunday = local_date - timedelta(
-                days=local_date.isoweekday()
-            )
+            previous_sunday = local_date - timedelta(days=local_date.isoweekday())
             iso_year, iso_week, _ = previous_sunday.isocalendar()
             return f"{iso_year:04d}-W{iso_week:02d}"
         first = local_date.replace(day=1)

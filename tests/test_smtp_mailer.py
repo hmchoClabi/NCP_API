@@ -86,10 +86,7 @@ class SMTPMailerTests(unittest.TestCase):
                     "second@example.com",
                 ],
                 attachments=[attachment],
-                html_body=(
-                    "<html><body><strong>The report is attached."
-                    "</strong></body></html>"
-                ),
+                html_body=("<html><body><strong>The report is attached.</strong></body></html>"),
             )
 
         smtp_class.assert_called_once_with(

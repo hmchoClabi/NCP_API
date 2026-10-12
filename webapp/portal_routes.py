@@ -8,7 +8,18 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any
 
-from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 from webapp.presentation import format_kst
 from app.renderers.html_styles import REPORT_DISPLAY_STYLES
@@ -29,10 +40,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
 
     def accessible_tenant_ids(user: dict[str, Any]) -> list[str] | None:
         if not _is_msp(user):
-            return [
-                str(item["tenant_id"])
-                for item in user.get("memberships", [])
-            ]
+            return [str(item["tenant_id"]) for item in user.get("memberships", [])]
         scopes = _msp_environment_scopes(user)
         if scopes is None:
             return None
@@ -54,9 +62,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         if not account_scope:
             abort(404)
         tenant_id, tenant = account_scope
-        if not _can_access_tenant(
-            g.user, tenant_id, tenant.get("environment")
-        ):
+        if not _can_access_tenant(g.user, tenant_id, tenant.get("environment")):
             abort(404)
         try:
             jobs.enqueue(
@@ -79,9 +85,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         if not account_scope:
             abort(404)
         tenant_id, tenant = account_scope
-        if not _can_manage_tenant(
-            g.user, tenant_id, tenant.get("environment")
-        ):
+        if not _can_manage_tenant(g.user, tenant_id, tenant.get("environment")):
             abort(403)
         try:
             report_type = request.form.get("report_type", "")
@@ -94,9 +98,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 int(request.form.get("run_minute", "0")),
                 int(monthly_day_value) if monthly_day_value else None,
                 str(g.user["id"]),
-                weekly_day=(
-                    int(weekly_day_value) if weekly_day_value else None
-                ),
+                weekly_day=(int(weekly_day_value) if weekly_day_value else None),
             )
             flash("자동 보고서 일정을 저장했습니다.", "success")
         except (TypeError, ValueError) as exc:
@@ -109,9 +111,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
         portal_is_msp = _is_msp(g.user)
         customers = []
         if portal_is_msp:
-            customers = repository.tenants(
-                allowed_environments=_msp_environment_scopes(g.user)
-            )
+            customers = repository.tenants(allowed_environments=_msp_environment_scopes(g.user))
             tenant_ids = [str(item["id"]) for item in customers]
             memberships = [
                 {
@@ -180,15 +180,11 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             deleted = repository.delete_report(report_id, str(g.user["id"]))
             message = f"{deleted['customer_name']} 보고서를 삭제했습니다."
             if deleted["failed_artifact_files"]:
-                message += (
-                    " 일부 산출물 파일은 삭제하지 못해 운영자 확인이 필요합니다."
-                )
+                message += " 일부 산출물 파일은 삭제하지 못해 운영자 확인이 필요합니다."
                 flash(message, "warning")
             else:
                 flash(message, "success")
-            return redirect(
-                url_for("msp_customer", tenant_id=deleted["tenant_id"])
-            )
+            return redirect(url_for("msp_customer", tenant_id=deleted["tenant_id"]))
         except ValueError as exc:
             flash(str(exc), "error")
             return redirect(url_for("customer_portal"))
@@ -197,10 +193,14 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
     @_login_required
     def report_history():
         tenant_ids = accessible_tenant_ids(g.user)
-        customers = (repository.tenants(allowed_environments=_msp_environment_scopes(g.user))
-                     if _is_msp(g.user) else [
-                         {"id": item["tenant_id"], "customer_name": item["customer_name"]}
-                         for item in g.user.get("memberships", [])])
+        customers = (
+            repository.tenants(allowed_environments=_msp_environment_scopes(g.user))
+            if _is_msp(g.user)
+            else [
+                {"id": item["tenant_id"], "customer_name": item["customer_name"]}
+                for item in g.user.get("memberships", [])
+            ]
+        )
         selected_tenant = request.args.get("tenant_id", "").strip()
         if selected_tenant:
             if selected_tenant not in {str(item["id"]) for item in customers}:
@@ -208,8 +208,14 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             tenant_ids = [selected_tenant]
         query = request.args.get("q", "").strip()[:200]
         status = request.args.get("status", "")
-        statuses = {"QUEUED": "대기", "RUNNING": "실행 중", "SUCCESS": "성공",
-                    "PARTIAL_SUCCESS": "부분 수집", "FAILED": "실패", "CANCELLED": "취소"}
+        statuses = {
+            "QUEUED": "대기",
+            "RUNNING": "실행 중",
+            "SUCCESS": "성공",
+            "PARTIAL_SUCCESS": "부분 수집",
+            "FAILED": "실패",
+            "CANCELLED": "취소",
+        }
         if status and status not in statuses:
             abort(400)
         try:
@@ -218,14 +224,21 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 raise ValueError
         except ValueError:
             abort(400)
-        history = repository.report_history(tenant_ids, query=query, status=status,
-                                            limit=51, offset=(page - 1) * 50)
+        history = repository.report_history(
+            tenant_ids, query=query, status=status, limit=51, offset=(page - 1) * 50
+        )
         filters = {"tenant_id": selected_tenant, "q": query, "status": status}
         return render_template(
             "history.html",
-            history=history[:50], customers=customers, filters=filters, statuses=statuses,
-            page=page, previous_url=url_for("report_history", **filters, page=page - 1) if page > 1 else None,
-            next_url=url_for("report_history", **filters, page=page + 1) if len(history) > 50 else None,
+            history=history[:50],
+            customers=customers,
+            filters=filters,
+            statuses=statuses,
+            page=page,
+            previous_url=url_for("report_history", **filters, page=page - 1) if page > 1 else None,
+            next_url=url_for("report_history", **filters, page=page + 1)
+            if len(history) > 50
+            else None,
             is_msp=_is_msp(g.user),
         )
 
@@ -260,10 +273,7 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
             occurred_at = event["occurred_at"].astimezone(timezone.utc)
             payload.append(
                 {
-                    "id": (
-                        f"{event['id']}:{event['status']}:"
-                        f"{occurred_at.isoformat()}"
-                    ),
+                    "id": (f"{event['id']}:{event['status']}:{occurred_at.isoformat()}"),
                     "category": category,
                     "message": (
                         f"{action} {event['customer_name']} · "
@@ -297,21 +307,21 @@ def register_portal_routes(app: Flask, repository: Any, jobs: Any) -> None:
                 abort(404)
             path = next(iter(paths))
             actual_sha256, actual_size = _artifact_fingerprint(path)
-            if (
-                actual_sha256 != str(artifact["checksum_sha256"])
-                or actual_size != int(artifact["byte_size"])
+            if actual_sha256 != str(artifact["checksum_sha256"]) or actual_size != int(
+                artifact["byte_size"]
             ):
                 abort(404)
-            script_sources = " ".join(
-                "'sha256-"
-                + base64.b64encode(sha256(script).digest()).decode("ascii")
-                + "'"
-                for script in re.findall(
-                    rb"<script(?:\s[^>]*)?>(.*?)</script>",
-                    path.read_bytes(),
-                    flags=re.IGNORECASE | re.DOTALL,
+            script_sources = (
+                " ".join(
+                    "'sha256-" + base64.b64encode(sha256(script).digest()).decode("ascii") + "'"
+                    for script in re.findall(
+                        rb"<script(?:\s[^>]*)?>(.*?)</script>",
+                        path.read_bytes(),
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
                 )
-            ) or "'none'"
+                or "'none'"
+            )
         except (KeyError, OSError, TypeError, ValueError):
             abort(404)
         response = send_file(

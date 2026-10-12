@@ -110,8 +110,7 @@ def fetch_customer_logo_from_url(
                 continue
             if response.status != 200:
                 raise ValueError(
-                    "고객사 로고 URL이 정상 이미지를 반환하지 않았습니다 "
-                    f"(HTTP {response.status})."
+                    f"고객사 로고 URL이 정상 이미지를 반환하지 않았습니다 (HTTP {response.status})."
                 )
 
             content_type = _response_content_type(response)
@@ -198,9 +197,7 @@ def _resolve_public_ips(
         daemon=True,
     )
     resolver_thread.start()
-    resolver_thread.join(
-        min(CUSTOMER_LOGO_DNS_TIMEOUT_SECONDS, _remaining(deadline))
-    )
+    resolver_thread.join(min(CUSTOMER_LOGO_DNS_TIMEOUT_SECONDS, _remaining(deadline)))
     if resolver_thread.is_alive():
         raise ValueError("고객사 로고 URL의 DNS 확인 시간이 초과되었습니다.")
     try:
@@ -248,9 +245,7 @@ def _request_from_pinned_ip(
     parsed: SplitResult,
     resolved_ips: tuple[str, ...],
     deadline: float,
-    connection_factory: Callable[
-        [str, str, int, float], _PinnedHTTPSConnection
-    ],
+    connection_factory: Callable[[str, str, int, float], _PinnedHTTPSConnection],
 ) -> tuple[http.client.HTTPResponse, _PinnedHTTPSConnection]:
     hostname = parsed.hostname
     if hostname is None:
@@ -359,15 +354,13 @@ def _validate_png_container(content: bytes) -> bool:
     first_chunk = True
     has_image_data = False
     while offset + 12 <= len(content):
-        chunk_length = int.from_bytes(content[offset:offset + 4], "big")
-        chunk_type = content[offset + 4:offset + 8]
+        chunk_length = int.from_bytes(content[offset : offset + 4], "big")
+        chunk_type = content[offset + 4 : offset + 8]
         chunk_end = offset + 12 + chunk_length
         if chunk_end > len(content):
             return False
-        chunk_data = content[offset + 8:offset + 8 + chunk_length]
-        expected_crc = int.from_bytes(
-            content[offset + 8 + chunk_length:chunk_end], "big"
-        )
+        chunk_data = content[offset + 8 : offset + 8 + chunk_length]
+        expected_crc = int.from_bytes(content[offset + 8 + chunk_length : chunk_end], "big")
         if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
             return False
         if first_chunk and (chunk_type != b"IHDR" or chunk_length != 13):
@@ -397,16 +390,13 @@ def _validate_jpeg_container(content: bytes) -> bool:
         if marker == 0xDA:  # SOS 이후 엔트로피 데이터는 최종 EOI까지 이미지 디코더가 처리한다.
             if position + 2 > len(content) - 2:
                 return False
-            segment_length = int.from_bytes(content[position:position + 2], "big")
-            return (
-                segment_length >= 2
-                and position + segment_length <= len(content) - 2
-            )
+            segment_length = int.from_bytes(content[position : position + 2], "big")
+            return segment_length >= 2 and position + segment_length <= len(content) - 2
         if marker in {0x01, *range(0xD0, 0xD9)}:
             continue
         if marker in {0xD8, 0xD9} or position + 2 > len(content):
             return False
-        segment_length = int.from_bytes(content[position:position + 2], "big")
+        segment_length = int.from_bytes(content[position : position + 2], "big")
         if segment_length < 2 or position + segment_length > len(content) - 2:
             return False
         position += segment_length
@@ -424,8 +414,8 @@ def _validate_webp_container(content: bytes) -> bool:
     offset = 12
     has_image_payload = False
     while offset + 8 <= len(content):
-        chunk_type = content[offset:offset + 4]
-        chunk_length = int.from_bytes(content[offset + 4:offset + 8], "little")
+        chunk_type = content[offset : offset + 4]
+        chunk_length = int.from_bytes(content[offset + 4 : offset + 8], "little")
         chunk_end = offset + 8 + chunk_length
         padded_end = chunk_end + (chunk_length % 2)
         if chunk_end > len(content) or padded_end > len(content):

@@ -65,14 +65,7 @@ class _EventCollectorBase:
             "stage": stage,
             "target_type": "event",
             "api": api,
-            "message": (
-                message
-                or (
-                    safe_exception_message(exc)
-                    if exc
-                    else "알 수 없는 오류"
-                )
-            ),
+            "message": (message or (safe_exception_message(exc) if exc else "알 수 없는 오류")),
         }
         if page_no is not None:
             error["page_no"] = page_no

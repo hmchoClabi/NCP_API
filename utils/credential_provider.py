@@ -18,8 +18,7 @@ class CredentialProvider(Protocol):
     def get_credentials(
         self,
         customer: CustomerProfile,
-    ) -> NCPCredentials:
-        ...
+    ) -> NCPCredentials: ...
 
 
 @dataclass(frozen=True)

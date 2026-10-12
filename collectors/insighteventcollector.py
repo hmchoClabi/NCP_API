@@ -127,10 +127,7 @@ class InsightEventCollector(_EventCollectorBase):
                 )
                 break
             fetched_count += len(events)
-            fingerprint = tuple(
-                self._event_identity(event)
-                for event in events
-            )
+            fingerprint = tuple(self._event_identity(event) for event in events)
 
             if events and fingerprint == previous_fingerprint:
                 self._record_error(
@@ -182,10 +179,7 @@ class InsightEventCollector(_EventCollectorBase):
                 stage="pagination_guard",
                 api="get_search_event",
                 page_no=self.MAX_PAGES,
-                message=(
-                    f"최대 페이지 수({self.MAX_PAGES})에 도달해 "
-                    "수집을 중단했습니다."
-                ),
+                message=(f"최대 페이지 수({self.MAX_PAGES})에 도달해 수집을 중단했습니다."),
             )
 
         return all_events
@@ -268,19 +262,11 @@ class InsightEventCollector(_EventCollectorBase):
         event: Dict[str, Any],
         cw_key: str,
     ) -> bool:
-        event_key = (
-            event.get("prodKey")
-            or event.get("cw_key")
-            or event.get("cwKey")
-        )
+        event_key = event.get("prodKey") or event.get("cw_key") or event.get("cwKey")
         return event_key is not None and str(event_key) == str(cw_key)
 
     def _event_identity(self, event: Dict[str, Any]) -> str:
-        event_id = (
-            event.get("eventId")
-            or event.get("event_id")
-            or event.get("id")
-        )
+        event_id = event.get("eventId") or event.get("event_id") or event.get("id")
 
         if event_id is not None and str(event_id).strip():
             return f"event:{event_id}"

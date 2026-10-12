@@ -111,10 +111,7 @@ class InfrastructurePresenterTests(unittest.TestCase):
         )
         self.assertEqual(
             resource_connection_summary("SERVER", merged["details"]),
-            (
-                "Private: 10.0.0.10 · 연결 스토리지: 2개 / 150 GB · "
-                "VPC: vpc-1 · Subnet: subnet-1"
-            ),
+            ("Private: 10.0.0.10 · 연결 스토리지: 2개 / 150 GB · VPC: vpc-1 · Subnet: subnet-1"),
         )
         self.assertEqual(
             server_spec_summary(merged["details"]),

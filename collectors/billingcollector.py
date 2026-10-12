@@ -8,13 +8,15 @@ from utils.response_validation import validate_collection_response
 
 class BillingCollector:
     MAX_PAGES = 10_000
-    DISCOUNT_SOURCES = frozenset({
-        "product_demand_cost_by_discount",
-        "discount_list",
-        "credit_history",
-        "product_discount_history",
-        "coin_history",
-    })
+    DISCOUNT_SOURCES = frozenset(
+        {
+            "product_demand_cost_by_discount",
+            "discount_list",
+            "credit_history",
+            "product_discount_history",
+            "coin_history",
+        }
+    )
 
     def __init__(self, api_factory: Any):
         self.api_factory = api_factory
@@ -41,9 +43,7 @@ class BillingCollector:
         self.last_warnings = []
         confirmed_demand_month = confirmed_demand_month or demand_month
 
-        organization_context = organization_context or {
-            "scope": "SELF", "members": []
-        }
+        organization_context = organization_context or {"scope": "SELF", "members": []}
         if organization_context.get("scope") == "ORGANIZATION":
             # isOrganization=true already requests the integrated account scope.
             # Avoid an unbounded memberNoList query string for large organizations;
@@ -122,10 +122,12 @@ class BillingCollector:
             **common_params,
         )
 
-        price_no_list = sorted(set(
-            self.extract_price_no_list(raw["daily_usage"])
-            + self.extract_price_no_list(raw["month_to_date_usage"])
-        ))
+        price_no_list = sorted(
+            set(
+                self.extract_price_no_list(raw["daily_usage"])
+                + self.extract_price_no_list(raw["month_to_date_usage"])
+            )
+        )
 
         raw["price_list"] = self._collect_source(
             source="price_list",
@@ -304,9 +306,7 @@ class BillingCollector:
                 self.last_errors.append(issue)
             return []
 
-    def _discount_unavailable_response(
-        self, exc: Exception
-    ) -> Optional[Dict[str, Any]]:
+    def _discount_unavailable_response(self, exc: Exception) -> Optional[Dict[str, Any]]:
         if not isinstance(exc, requests.HTTPError) or exc.response is None:
             return None
         try:
@@ -320,9 +320,7 @@ class BillingCollector:
         return {
             "status_code": exc.response.status_code,
             "error_code": "2300",
-            "return_message": str(
-                self.find_first_value(payload, "returnMessage") or ""
-            )[:500],
+            "return_message": str(self.find_first_value(payload, "returnMessage") or "")[:500],
             "request_id": str(request_id)[:100] if request_id else None,
             "retryable": False,
         }
@@ -366,9 +364,7 @@ class BillingCollector:
             try:
                 total_rows_int = int(total_rows)
             except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"유효하지 않은 totalRows 값입니다: {total_rows!r}"
-                ) from exc
+                raise ValueError(f"유효하지 않은 totalRows 값입니다: {total_rows!r}") from exc
 
             if total_rows_int < 0:
                 raise ValueError(f"totalRows는 음수일 수 없습니다: {total_rows_int}")
@@ -496,10 +492,7 @@ class BillingCollector:
         result = set()
 
         for row in rows:
-            price_no = (
-                row.get("contractProduct", {})
-                .get("priceNo")
-            )
+            price_no = row.get("contractProduct", {}).get("priceNo")
 
             if price_no:
                 result.add(str(price_no))
@@ -593,4 +586,4 @@ class BillingCollector:
         if size <= 0:
             raise ValueError("chunk size는 1 이상이어야 합니다.")
         for idx in range(0, len(values), size):
-            yield values[idx:idx + size]
+            yield values[idx : idx + size]

@@ -28,16 +28,22 @@ class MasterAPI:
         return [
             {"groupYn": "Y", "organizationGroupNo": 1},
             {
-                "memberNo": 100, "memberAlias": "Master",
-                "memberStatusCode": "JOIN", "masterMemberYn": "Y",
+                "memberNo": 100,
+                "memberAlias": "Master",
+                "memberStatusCode": "JOIN",
+                "masterMemberYn": "Y",
             },
             {
-                "memberNo": 200, "memberAlias": "Child",
-                "memberStatusCode": "JOIN", "masterMemberYn": "N",
+                "memberNo": 200,
+                "memberAlias": "Child",
+                "memberStatusCode": "JOIN",
+                "masterMemberYn": "N",
             },
             {
-                "memberNo": 300, "memberAlias": "Pending",
-                "memberStatusCode": "INVT", "masterMemberYn": "N",
+                "memberNo": 300,
+                "memberAlias": "Pending",
+                "memberStatusCode": "INVT",
+                "masterMemberYn": "N",
             },
         ]
 

@@ -67,8 +67,7 @@ def snapshot_window_metadata(
         }
 
     metadata: Dict[str, Any] = {
-        key: window[key].isoformat()
-        for key in ("reference_at", "eligible_start", "eligible_end")
+        key: window[key].isoformat() for key in ("reference_at", "eligible_start", "eligible_end")
     }
     metadata["snapshot_age_seconds"] = None
     if isinstance(observed_at, datetime):

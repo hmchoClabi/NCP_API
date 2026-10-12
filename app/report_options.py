@@ -102,31 +102,17 @@ REPORT_SECTION_LABELS = {
 
 REPORT_SECTION_DESCRIPTIONS = {
     "executive_summary": (
-        "상태 카드·즉시 확인·데이터 수집 상태·WMS/보안·비용 전기 "
-        "비교를 표시합니다."
+        "상태 카드·즉시 확인·데이터 수집 상태·WMS/보안·비용 전기 비교를 표시합니다."
     ),
-    "billing": (
-        "과금 기준·서비스별 예상 비용·네트워크/서비스 사용량을 "
-        "표시합니다."
-    ),
-    "organization_billing": (
-        "Organization 멤버 계정별 비용 내역을 표시합니다."
-    ),
+    "billing": ("과금 기준·서비스별 예상 비용·네트워크/서비스 사용량을 표시합니다."),
+    "organization_billing": ("Organization 멤버 계정별 비용 내역을 표시합니다."),
     "infrastructure_inventory": (
-        "선택한 서버·스토리지·DB·네트워크 자원과 네트워크 규칙을 "
-        "표시합니다."
+        "선택한 서버·스토리지·DB·네트워크 자원과 네트워크 규칙을 표시합니다."
     ),
-    "monitoring": (
-        "선택한 자원의 CPU·메모리·디스크 사용량과 서비스 지표를 "
-        "표시합니다."
-    ),
+    "monitoring": ("선택한 자원의 CPU·메모리·디스크 사용량과 서비스 지표를 표시합니다."),
     "insight_events": "Cloud Insight 이벤트와 상태를 표시합니다.",
-    "activity_history": (
-        "Cloud Activity Tracer의 API 호출과 자원 변경 이력을 표시합니다."
-    ),
-    "collection_diagnostics": (
-        "수집 중 발생한 경고·오류와 필요한 권한 진단을 표시합니다."
-    ),
+    "activity_history": ("Cloud Activity Tracer의 API 호출과 자원 변경 이력을 표시합니다."),
+    "collection_diagnostics": ("수집 중 발생한 경고·오류와 필요한 권한 진단을 표시합니다."),
 }
 
 NETWORK_CONFIGURATION_CATEGORY_OPTIONS = (
@@ -267,11 +253,7 @@ class ReportOptions:
     @property
     def ordered_sections(self) -> tuple[str, ...]:
         selected = set(self._value["sections"])
-        return tuple(
-            section
-            for section in self._value["section_order"]
-            if section in selected
-        )
+        return tuple(section for section in self._value["section_order"] if section in selected)
 
     def resource_enabled(self, category: str) -> bool:
         return str(category).upper() in self._value["resource_categories"]
@@ -280,9 +262,8 @@ class ReportOptions:
         return str(category).upper() in self._value["monitoring_categories"]
 
     def analysis_enabled(self) -> bool:
-        return (
-            self.section_enabled("executive_summary")
-            and bool(self._value["operational_analysis"]["enabled"])
+        return self.section_enabled("executive_summary") and bool(
+            self._value["operational_analysis"]["enabled"]
         )
 
     def analysis_collector_enabled(self, name: str) -> bool:
@@ -290,9 +271,7 @@ class ReportOptions:
             "wms": "collect_wms",
             "security_monitoring": "collect_security_monitoring",
         }.get(str(name).strip().casefold())
-        return bool(
-            key and self._value["operational_analysis"].get(key, False)
-        )
+        return bool(key and self._value["operational_analysis"].get(key, False))
 
     @property
     def operational_analysis(self) -> dict[str, Any]:
@@ -315,12 +294,8 @@ def legacy_report_options() -> dict[str, Any]:
     """
     options = default_report_options()
     options["sections"] = list(REPORT_SECTION_OPTIONS)
-    options["resource_categories"] = list(
-        LEGACY_RESOURCE_CATEGORY_OPTIONS
-    )
-    options["monitoring_categories"] = list(
-        LEGACY_MONITORING_CATEGORY_OPTIONS
-    )
+    options["resource_categories"] = list(LEGACY_RESOURCE_CATEGORY_OPTIONS)
+    options["monitoring_categories"] = list(LEGACY_MONITORING_CATEGORY_OPTIONS)
     return options
 
 
@@ -337,10 +312,7 @@ def normalize_report_options(value: Any) -> dict[str, Any]:
 
     sections_value = value
     raw_sections = value.get("sections")
-    if (
-        isinstance(raw_sections, (list, tuple, set))
-        and "infrastructure_diagram" in raw_sections
-    ):
+    if isinstance(raw_sections, (list, tuple, set)) and "infrastructure_diagram" in raw_sections:
         # 기존 구성도 전용 설정은 자원 현황으로 안전하게 승계한다.
         sections_value = dict(value)
         sections_value["sections"] = [
@@ -369,9 +341,7 @@ def normalize_report_options(value: Any) -> dict[str, Any]:
             MONITORING_CATEGORY_OPTIONS,
             defaults["monitoring_categories"],
         ),
-        "operational_analysis": _normalize_operational_analysis(
-            value.get("operational_analysis")
-        ),
+        "operational_analysis": _normalize_operational_analysis(value.get("operational_analysis")),
     }
     return normalized
 
@@ -383,9 +353,7 @@ def validate_report_options(value: Any) -> dict[str, Any]:
     for key in ("sections", "resource_categories", "monitoring_categories"):
         if key not in value or not isinstance(value[key], (list, tuple, set)):
             raise ValueError(f"{key} 선택값이 올바르지 않습니다.")
-    if "section_order" in value and not isinstance(
-        value["section_order"], (list, tuple)
-    ):
+    if "section_order" in value and not isinstance(value["section_order"], (list, tuple)):
         raise ValueError("section_order 선택값이 올바르지 않습니다.")
 
     normalized = normalize_report_options(value)
@@ -393,31 +361,16 @@ def validate_report_options(value: Any) -> dict[str, Any]:
         raise ValueError("보고서 섹션을 하나 이상 선택하세요.")
 
     selected_sections = set(normalized["sections"])
-    if (
-        "infrastructure_inventory" in selected_sections
-        and not normalized["resource_categories"]
-    ):
+    if "infrastructure_inventory" in selected_sections and not normalized["resource_categories"]:
         raise ValueError("인프라 자원 범주를 하나 이상 선택하세요.")
-    if (
-        "monitoring" in selected_sections
-        and not normalized["monitoring_categories"]
-    ):
+    if "monitoring" in selected_sections and not normalized["monitoring_categories"]:
         raise ValueError("모니터링 그래프 대상을 하나 이상 선택하세요.")
     thresholds = normalized["operational_analysis"]["thresholds"]
     for prefix in ("cpu", "memory", "disk"):
-        if thresholds[f"{prefix}_critical_percent"] < thresholds[
-            f"{prefix}_warning_percent"
-        ]:
-            raise ValueError(
-                f"{prefix.upper()} 위험 임계치는 주의 임계치 이상이어야 합니다."
-            )
-    if (
-        thresholds["availability_critical_percent"]
-        > thresholds["availability_warning_percent"]
-    ):
-        raise ValueError(
-            "가용성 위험 임계치는 주의 임계치 이하여야 합니다."
-        )
+        if thresholds[f"{prefix}_critical_percent"] < thresholds[f"{prefix}_warning_percent"]:
+            raise ValueError(f"{prefix.upper()} 위험 임계치는 주의 임계치 이상이어야 합니다.")
+    if thresholds["availability_critical_percent"] > thresholds["availability_warning_percent"]:
+        raise ValueError("가용성 위험 임계치는 주의 임계치 이하여야 합니다.")
     return normalized
 
 
@@ -428,9 +381,7 @@ def _normalize_operational_analysis(value: Any) -> dict[str, Any]:
 
     normalized = {
         "enabled": _as_bool(value.get("enabled"), defaults["enabled"]),
-        "collect_wms": _as_bool(
-            value.get("collect_wms"), defaults["collect_wms"]
-        ),
+        "collect_wms": _as_bool(value.get("collect_wms"), defaults["collect_wms"]),
         "collect_security_monitoring": _as_bool(
             value.get("collect_security_monitoring"),
             defaults["collect_security_monitoring"],
@@ -504,13 +455,6 @@ def _normalize_section_order(value: Mapping[str, Any]) -> list[str]:
         return list(DEFAULT_REPORT_SECTION_ORDER)
 
     allowed = set(REPORT_SECTION_OPTIONS)
-    ordered = list(dict.fromkeys(
-        str(item).strip() for item in raw
-        if str(item).strip() in allowed
-    ))
-    ordered.extend(
-        section
-        for section in DEFAULT_REPORT_SECTION_ORDER
-        if section not in ordered
-    )
+    ordered = list(dict.fromkeys(str(item).strip() for item in raw if str(item).strip() in allowed))
+    ordered.extend(section for section in DEFAULT_REPORT_SECTION_ORDER if section not in ordered)
     return ordered

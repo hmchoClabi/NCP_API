@@ -8,9 +8,7 @@ from webapp.repository import PortalRepository
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Retry durable local report artifact cleanup jobs"
-    )
+    parser = argparse.ArgumentParser(description="Retry durable local report artifact cleanup jobs")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--interval-seconds", type=int, default=0)
     args = parser.parse_args()
@@ -21,9 +19,7 @@ def main() -> None:
 
     repository = PortalRepository(DatabaseSettings.from_env())
     while True:
-        retention_queued = repository.enqueue_expired_report_cleanup(
-            limit=args.limit
-        )
+        retention_queued = repository.enqueue_expired_report_cleanup(limit=args.limit)
         reports = repository.process_requested_report_cleanup(limit=args.limit)
         removed, pending = repository.retry_artifact_cleanup(limit=args.limit)
         print(

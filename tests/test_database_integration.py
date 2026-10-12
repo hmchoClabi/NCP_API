@@ -58,61 +58,65 @@ class DatabaseIntegrationTests(unittest.TestCase):
                 "region": "KR",
             },
             servers=[{"server_id": "server-1", "server_name": "web-1"}],
-            server_metrics=[{
-                "server_id": "server-1",
-                "server_name": "web-1",
-                "cpu_min": 1.0,
-                "cpu_avg": 2.0,
-                "cpu_max": 3.0,
-                "raw_metrics": {
-                    "used_rto": {"avg": [{"values": [1.0, 2.0, 3.0]}]}
-                },
-            }],
-            insight_events=[{
-                "event_id": "insight-1",
-                "start_time": 1785250800000,
-                "level": "WARNING",
-                "resource_id": "server-1",
-                "resource_name": "web-1",
-                "rule_name": "CPU rule",
-            }],
-            activity_events={"events": [{
-                "event_id": "activity-1",
-                "event_time": 1785250800000,
-                "action_name": "Login",
-                "result": "SUCCESS",
-                "source_ip": "218.38.161.126",
-                "user_name": "viewer@example.com",
-            }]},
+            server_metrics=[
+                {
+                    "server_id": "server-1",
+                    "server_name": "web-1",
+                    "cpu_min": 1.0,
+                    "cpu_avg": 2.0,
+                    "cpu_max": 3.0,
+                    "raw_metrics": {"used_rto": {"avg": [{"values": [1.0, 2.0, 3.0]}]}},
+                }
+            ],
+            insight_events=[
+                {
+                    "event_id": "insight-1",
+                    "start_time": 1785250800000,
+                    "level": "WARNING",
+                    "resource_id": "server-1",
+                    "resource_name": "web-1",
+                    "rule_name": "CPU rule",
+                }
+            ],
+            activity_events={
+                "events": [
+                    {
+                        "event_id": "activity-1",
+                        "event_time": 1785250800000,
+                        "action_name": "Login",
+                        "result": "SUCCESS",
+                        "source_ip": "218.38.161.126",
+                        "user_name": "viewer@example.com",
+                    }
+                ]
+            },
             billing={
                 "summary": {
                     "expected_total_amount": 1000,
                     "confirmed_total_amount": 900,
                     "comparison_status": "OK",
                 },
-                "expected_cost_summary": [{
-                    "service_name": "Server",
-                    "item_name": "vCPU",
-                    "item_code": "CPU",
-                    "usage_quantity": 10,
-                    "unit_code": "HOUR",
-                    "raw_price": 100,
-                    "expected_amount": 1000,
-                    "calculation_method": "HOURLY",
-                    "calculation_status": "OK",
-                }],
+                "expected_cost_summary": [
+                    {
+                        "service_name": "Server",
+                        "item_name": "vCPU",
+                        "item_code": "CPU",
+                        "usage_quantity": 10,
+                        "unit_code": "HOUR",
+                        "raw_price": 100,
+                        "expected_amount": 1000,
+                        "calculation_method": "HOURLY",
+                        "calculation_status": "OK",
+                    }
+                ],
             },
         )
 
         with tempfile.TemporaryDirectory() as directory:
             html_path = Path(directory) / "report.html"
             html_path.write_text("<html></html>", encoding="utf-8")
-            first_run_id = self.repository.save_report(
-                report, artifacts={"HTML": html_path}
-            )
-            second_run_id = self.repository.save_report(
-                report, artifacts={"HTML": html_path}
-            )
+            first_run_id = self.repository.save_report(report, artifacts={"HTML": html_path})
+            second_run_id = self.repository.save_report(report, artifacts={"HTML": html_path})
 
             versioned_repository = PostgresReportRepository(
                 self.settings,

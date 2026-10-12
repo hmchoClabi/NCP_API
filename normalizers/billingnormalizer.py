@@ -145,8 +145,7 @@ class BillingNormalizer:
         collection_errors = self._dict_list(raw_meta.get("collection_errors"))
         collection_warnings = self._dict_list(raw_meta.get("collection_warnings"))
         comparison_input_errors = [
-            error for error in collection_errors
-            if error.get("comparison_required")
+            error for error in collection_errors if error.get("comparison_required")
         ]
 
         demand_rows = self.extract_rows(
@@ -155,10 +154,13 @@ class BillingNormalizer:
         confirmed_demand_rows = self.extract_rows(
             raw_data.get("confirmed_demand_cost", []), "demandCostList"
         )
-        confirmed_product_rows = self.extract_rows(
-            raw_data.get("confirmed_product_demand_cost", []),
-            "productDemandCostList",
-        ) or demand_rows
+        confirmed_product_rows = (
+            self.extract_rows(
+                raw_data.get("confirmed_product_demand_cost", []),
+                "productDemandCostList",
+            )
+            or demand_rows
+        )
         contract_demand_rows = self.extract_rows(
             raw_data.get("contract_demand_cost", []),
             "contractDemandCostList",
@@ -175,14 +177,10 @@ class BillingNormalizer:
             "contractUsageListByDaily",
         )
         price_rows = self.merge_price_rows(
-            self.extract_rows(
-                raw_data.get("product_price_list", []), "priceList"
-            ),
+            self.extract_rows(raw_data.get("product_price_list", []), "priceList"),
             self.extract_rows(raw_data.get("price_list", []), "priceList"),
         )
-        discount_rows = self.extract_rows(
-            raw_data.get("discount_list", []), "discountList"
-        )
+        discount_rows = self.extract_rows(raw_data.get("discount_list", []), "discountList")
         return _BillingInputs(
             raw_meta=raw_meta,
             collection_errors=collection_errors,
@@ -207,33 +205,21 @@ class BillingNormalizer:
         """확정 금액과 사용량 기반 금액을 기존 계산 기준으로 각각 요약한다."""
 
         # 확정 비용은 할인 전 useAmount를 비교 기준으로 사용한다.
-        service_summary = self.summarize_confirmed_by_service(
-            inputs.confirmed_product_rows
-        )
-        target_service_summary = self.summarize_confirmed_by_service(
-            inputs.demand_rows
-        )
+        service_summary = self.summarize_confirmed_by_service(inputs.confirmed_product_rows)
+        target_service_summary = self.summarize_confirmed_by_service(inputs.demand_rows)
         contract_cost_summary = self.summarize_contract_demand_by_service(
             inputs.contract_demand_rows
         )
         closed_cost_reference = target_service_summary or contract_cost_summary
         closed_cost_source = (
-            "getProductDemandCostList"
-            if target_service_summary
-            else "getContractDemandCostList"
+            "getProductDemandCostList" if target_service_summary else "getContractDemandCostList"
         )
-        discount_summary = self.summarize_discount_by_service(
-            inputs.demand_discount_rows
-        )
+        discount_summary = self.summarize_discount_by_service(inputs.demand_discount_rows)
         usage_summary = self.summarize_usage(inputs.daily_usage_rows)
-        network_usage_summary = self.summarize_network_usage(
-            inputs.daily_usage_rows
-        )
+        network_usage_summary = self.summarize_network_usage(inputs.daily_usage_rows)
         # NCP 일별 과금 데이터는 자정 직후 아직 반영되지 않을 수 있다.
         # 월 누적 값은 보고 기간 결과와 섞지 않고 대체 표시에만 사용한다.
-        month_to_date_usage_summary = self.summarize_usage(
-            inputs.month_to_date_usage_rows
-        )
+        month_to_date_usage_summary = self.summarize_usage(inputs.month_to_date_usage_rows)
         month_to_date_network_usage_summary = self.summarize_network_usage(
             inputs.month_to_date_usage_rows
         )
@@ -249,21 +235,13 @@ class BillingNormalizer:
         )
 
         verified_expected_rows = self._included_cost_rows(expected_cost_summary)
-        expected_by_service = self.summarize_expected_by_service(
-            verified_expected_rows
-        )
+        expected_by_service = self.summarize_expected_by_service(verified_expected_rows)
         month_to_date_by_service = self.summarize_expected_by_service(
             self._included_cost_rows(month_to_date_cost_summary)
         )
-        confirmed_use_total = sum(
-            row["use_amount"] for row in target_service_summary
-        )
-        expected_total = sum(
-            row["expected_amount"] for row in verified_expected_rows
-        )
-        expected_total_all = sum(
-            row["expected_amount"] for row in expected_cost_summary
-        )
+        confirmed_use_total = sum(row["use_amount"] for row in target_service_summary)
+        expected_total = sum(row["expected_amount"] for row in verified_expected_rows)
+        expected_total_all = sum(row["expected_amount"] for row in expected_cost_summary)
         return _BillingSummaries(
             service_summary=service_summary,
             target_service_summary=target_service_summary,
@@ -274,9 +252,7 @@ class BillingNormalizer:
             usage_summary=usage_summary,
             network_usage_summary=network_usage_summary,
             month_to_date_usage_summary=month_to_date_usage_summary,
-            month_to_date_network_usage_summary=(
-                month_to_date_network_usage_summary
-            ),
+            month_to_date_network_usage_summary=(month_to_date_network_usage_summary),
             expected_cost_summary=expected_cost_summary,
             month_to_date_cost_summary=month_to_date_cost_summary,
             expected_by_service=expected_by_service,
@@ -296,13 +272,13 @@ class BillingNormalizer:
     ) -> _BillingComparison:
         """검증된 예상 금액만 확정 금액과 비교해 신뢰도 상태를 보존한다."""
 
-        calculation_status_counts = dict(Counter(
-            row.get("calculation_status") or "UNKNOWN"
-            for row in summaries.expected_cost_summary
-        ))
-        has_unverified_expected = any(
-            status != "OK" for status in calculation_status_counts
+        calculation_status_counts = dict(
+            Counter(
+                row.get("calculation_status") or "UNKNOWN"
+                for row in summaries.expected_cost_summary
+            )
         )
+        has_unverified_expected = any(status != "OK" for status in calculation_status_counts)
         if (
             comparison_enabled
             and not summaries.expected_cost_summary
@@ -324,7 +300,8 @@ class BillingNormalizer:
                 confirmed_summary=summaries.target_service_summary,
                 expected_summary=summaries.expected_by_service,
             )
-            if comparison_status == "OK" else []
+            if comparison_status == "OK"
+            else []
         )
         diff_amount: Optional[float] = None
         diff_rate: Optional[float] = None
@@ -367,51 +344,40 @@ class BillingNormalizer:
             confirmed_month,
             calculated_at,
         )
-        requested_start, requested_end = self.report_period_dates(
-            report_period, billing_month
-        )
+        requested_start, requested_end = self.report_period_dates(report_period, billing_month)
         local_period_estimate = self.build_estimate_fact(
-            "PERIOD_ESTIMATE", requested_start, requested_end,
+            "PERIOD_ESTIMATE",
+            requested_start,
+            requested_end,
             self.usage_coverage(inputs.daily_usage_rows),
             summaries.expected_cost_summary,
             calculated_at,
         )
-        month_to_date_start = (
-            self._parse_api_date(report_period.get("month_to_date_start"))
-            or self.month_start_date(billing_month)
-        )
-        month_to_date_coverage = self.usage_coverage(
-            inputs.month_to_date_usage_rows
-        )
-        requested_month_to_date_end = self._parse_api_date(
-            report_period.get("month_to_date_end")
-        )
+        month_to_date_start = self._parse_api_date(
+            report_period.get("month_to_date_start")
+        ) or self.month_start_date(billing_month)
+        month_to_date_coverage = self.usage_coverage(inputs.month_to_date_usage_rows)
+        requested_month_to_date_end = self._parse_api_date(report_period.get("month_to_date_end"))
         month_to_date_end = (
-            month_to_date_coverage[1]
-            or requested_month_to_date_end
-            or requested_end
+            month_to_date_coverage[1] or requested_month_to_date_end or requested_end
         )
         local_month_to_date_estimate = self.build_estimate_fact(
-            "MONTH_TO_DATE_ESTIMATE", month_to_date_start, month_to_date_end,
+            "MONTH_TO_DATE_ESTIMATE",
+            month_to_date_start,
+            month_to_date_end,
             month_to_date_coverage,
             summaries.month_to_date_cost_summary,
             calculated_at,
         )
         target_month_start, target_month_end = self.month_bounds(billing_month)
-        target_month_closed = bool(
-            report_period.get("target_month_closed", False)
-        )
+        target_month_closed = bool(report_period.get("target_month_closed", False))
         calculated_date = self._parse_api_date(calculated_at)
         ncp_write_date = self.latest_write_date(inputs.demand_rows)
         all_ncp_rows_fresh = self.all_rows_written_on_or_after(
             inputs.demand_rows,
             month_to_date_end,
         )
-        cutoff_age_days = (
-            (calculated_date - month_to_date_end).days
-            if calculated_date
-            else None
-        )
+        cutoff_age_days = (calculated_date - month_to_date_end).days if calculated_date else None
         ncp_current_eligible = bool(
             summaries.target_service_summary
             and not target_month_closed
@@ -453,12 +419,9 @@ class BillingNormalizer:
             and requested_start == month_to_date_start
             and requested_end == month_to_date_end
         ):
-            month_to_date_estimate = self.not_applicable_fact(
-                local_month_to_date_estimate
-            )
+            month_to_date_estimate = self.not_applicable_fact(local_month_to_date_estimate)
         elif (
-            ncp_current_eligible
-            and local_month_to_date_estimate.get("excluded_item_count", 0) > 0
+            ncp_current_eligible and local_month_to_date_estimate.get("excluded_item_count", 0) > 0
         ):
             month_to_date_estimate = self.apply_ncp_current_fallback(
                 local_month_to_date_estimate,
@@ -497,9 +460,7 @@ class BillingNormalizer:
                 else []
             ),
             ncp_reference_source=(
-                "getProductDemandCostList"
-                if ncp_current_eligible
-                else summaries.closed_cost_source
+                "getProductDemandCostList" if ncp_current_eligible else summaries.closed_cost_source
             ),
         )
         confirmed_total = self.first_present(
@@ -542,11 +503,15 @@ class BillingNormalizer:
         organization = self.as_dict(raw_meta.get("organization"))
         account_costs = (
             self.build_account_costs(
-                raw_data, organization, billing_month, use_end_date,
-                comparison_enabled, report_period, calculated_at,
+                raw_data,
+                organization,
+                billing_month,
+                use_end_date,
+                comparison_enabled,
+                report_period,
+                calculated_at,
             )
-            if include_account_breakdown
-            and organization.get("scope") == "ORGANIZATION"
+            if include_account_breakdown and organization.get("scope") == "ORGANIZATION"
             else []
         )
         return organization, account_costs
@@ -570,41 +535,25 @@ class BillingNormalizer:
                 "billing_month": billing_month,
                 "confirmed_billing_month": estimates.confirmed_month,
                 "days_in_month": days_in_month,
-                "confirmed_total_amount": round(
-                    self.to_float(estimates.confirmed_total), 2
-                ),
-                "confirmed_use_total_amount": round(
-                    summaries.confirmed_use_total, 2
-                ),
-                "comparison_base_total_amount": round(
-                    summaries.confirmed_use_total, 2
-                ),
+                "confirmed_total_amount": round(self.to_float(estimates.confirmed_total), 2),
+                "confirmed_use_total_amount": round(summaries.confirmed_use_total, 2),
+                "comparison_base_total_amount": round(summaries.confirmed_use_total, 2),
                 "comparison_basis": "PRE_DISCOUNT_USE_AMOUNT",
                 "expected_total_amount": round(summaries.expected_total, 2),
-                "expected_total_amount_all": round(
-                    summaries.expected_total_all, 2
-                ),
+                "expected_total_amount_all": round(summaries.expected_total_all, 2),
                 "month_to_date_expected_amount": (
                     estimates.month_to_date_estimate.get("total_amount")
                 ),
-                "month_end_projection_amount": (
-                    estimates.month_end_projection.get("total_amount")
-                ),
-                "unverified_expected_amount": round(
-                    summaries.unverified_expected_amount, 2
-                ),
+                "month_end_projection_amount": (estimates.month_end_projection.get("total_amount")),
+                "unverified_expected_amount": round(summaries.unverified_expected_amount, 2),
                 "diff_amount": comparison.diff_amount,
                 "diff_rate": comparison.diff_rate,
                 "comparison_status": comparison.comparison_status,
-                "calculation_status_counts": (
-                    comparison.calculation_status_counts
-                ),
+                "calculation_status_counts": (comparison.calculation_status_counts),
                 "service_count": len(summaries.service_summary),
                 "usage_summary_count": len(summaries.usage_summary),
                 "network_usage_count": len(summaries.network_usage_summary),
-                "month_to_date_usage_summary_count": len(
-                    summaries.month_to_date_usage_summary
-                ),
+                "month_to_date_usage_summary_count": len(summaries.month_to_date_usage_summary),
                 "month_to_date_network_usage_count": len(
                     summaries.month_to_date_network_usage_summary
                 ),
@@ -612,21 +561,15 @@ class BillingNormalizer:
                 "discount_count": len(inputs.discount_rows),
                 "collection_error_count": len(inputs.collection_errors),
                 "collection_warning_count": len(inputs.collection_warnings),
-                "comparison_input_error_count": len(
-                    inputs.comparison_input_errors
-                ),
+                "comparison_input_error_count": len(inputs.comparison_input_errors),
             },
             "service_summary": summaries.service_summary,
             "target_service_summary": summaries.target_service_summary,
             "discount_summary": summaries.discount_summary,
             "usage_summary": summaries.usage_summary,
             "network_usage_summary": summaries.network_usage_summary,
-            "month_to_date_usage_summary": (
-                summaries.month_to_date_usage_summary
-            ),
-            "month_to_date_network_usage_summary": (
-                summaries.month_to_date_network_usage_summary
-            ),
+            "month_to_date_usage_summary": (summaries.month_to_date_usage_summary),
+            "month_to_date_network_usage_summary": (summaries.month_to_date_network_usage_summary),
             "expected_cost_summary": summaries.expected_cost_summary,
             "month_to_date_cost_summary": summaries.month_to_date_cost_summary,
             "projected_cost_summary": estimates.projected_cost_summary,
@@ -664,7 +607,8 @@ class BillingNormalizer:
         calculated_at: Optional[str],
     ) -> List[Dict[str, Any]]:
         members = [
-            item for item in organization.get("members", [])
+            item
+            for item in organization.get("members", [])
             if isinstance(item, dict) and item.get("member_no")
         ]
         result: List[Dict[str, Any]] = []
@@ -681,16 +625,12 @@ class BillingNormalizer:
                 include_account_breakdown=False,
             )
             current_services = normalized["target_service_summary"]
-            current_amount = sum(
-                self.to_float(row.get("amount")) for row in current_services
-            )
+            current_amount = sum(self.to_float(row.get("amount")) for row in current_services)
             current_use_amount = sum(
                 self.to_float(row.get("use_amount")) for row in current_services
             )
             current_start, current_end = self.month_bounds(billing_month)
-            provisional_coverage_end = self._parse_api_date(
-                report_period.get("month_to_date_end")
-            )
+            provisional_coverage_end = self._parse_api_date(report_period.get("month_to_date_end"))
             current_fact = {
                 "cost_type": "CURRENT_PROVISIONAL",
                 "status": "AVAILABLE" if current_services else "UNAVAILABLE",
@@ -698,8 +638,7 @@ class BillingNormalizer:
                 "period_end": current_end.isoformat(),
                 "coverage_start": current_start.isoformat() if current_services else None,
                 "coverage_end": (
-                    provisional_coverage_end.isoformat()
-                    if provisional_coverage_end else None
+                    provisional_coverage_end.isoformat() if provisional_coverage_end else None
                 ),
                 "calculated_at": calculated_at,
                 "subtotal_amount": round(current_amount, 2) if current_services else None,
@@ -719,19 +658,19 @@ class BillingNormalizer:
                 account_facts.append(current_fact)
             else:
                 current_services = []
-            result.append({
-                **member,
-                "summary": normalized["summary"],
-                "cost_facts": account_facts,
-                "service_summary": normalized["service_summary"],
-                "current_service_summary": current_services,
-                "expected_by_service": normalized["expected_by_service"],
-            })
+            result.append(
+                {
+                    **member,
+                    "summary": normalized["summary"],
+                    "cost_facts": account_facts,
+                    "service_summary": normalized["service_summary"],
+                    "current_service_summary": current_services,
+                    "expected_by_service": normalized["expected_by_service"],
+                }
+            )
         return result
 
-    def _raw_for_member(
-        self, raw_data: Dict[str, Any], member_no: str
-    ) -> Dict[str, Any]:
+    def _raw_for_member(self, raw_data: Dict[str, Any], member_no: str) -> Dict[str, Any]:
         list_keys = {
             "demand_cost": "demandCostList",
             "product_demand_cost": "productDemandCostList",
@@ -747,25 +686,28 @@ class BillingNormalizer:
             "price_list": raw_data.get("price_list", []),
             "product_price_list": raw_data.get("product_price_list", []),
             "_meta": {
-                key: value for key, value in self.as_dict(raw_data.get("_meta")).items()
+                key: value
+                for key, value in self.as_dict(raw_data.get("_meta")).items()
                 if key != "organization"
             },
         }
         for source, list_key in list_keys.items():
             rows = self.extract_rows(raw_data.get(source, []), list_key)
-            filtered[source] = [{list_key: [
-                row for row in rows if self._row_member_no(row) == member_no
-            ]}]
+            filtered[source] = [
+                {list_key: [row for row in rows if self._row_member_no(row) == member_no]}
+            ]
         return filtered
 
     @classmethod
     def _row_member_no(cls, row: Dict[str, Any]) -> str:
-        return str(cls.first_present(
-            row.get("memberNo"),
-            cls.as_dict(row.get("account")).get("memberNo"),
-            cls.as_dict(row.get("contract")).get("memberNo"),
-            default="",
-        ))
+        return str(
+            cls.first_present(
+                row.get("memberNo"),
+                cls.as_dict(row.get("account")).get("memberNo"),
+                cls.as_dict(row.get("contract")).get("memberNo"),
+                default="",
+            )
+        )
 
     @staticmethod
     def _dict_list(value: Any) -> List[Dict[str, Any]]:
@@ -779,7 +721,8 @@ class BillingNormalizer:
         rows: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         return [
-            row for row in rows
+            row
+            for row in rows
             if row.get("calculation_status") in cls.INCLUDED_CALCULATION_STATUSES
         ]
 
@@ -790,15 +733,11 @@ class BillingNormalizer:
     @classmethod
     def month_bounds(cls, billing_month: str) -> Tuple[date, date]:
         start = cls.month_start_date(billing_month)
-        end = start.replace(
-            day=calendar.monthrange(start.year, start.month)[1]
-        )
+        end = start.replace(day=calendar.monthrange(start.year, start.month)[1])
         return start, end
 
     @classmethod
-    def report_period_dates(
-        cls, period: Dict[str, Any], billing_month: str
-    ) -> Tuple[date, date]:
+    def report_period_dates(cls, period: Dict[str, Any], billing_month: str) -> Tuple[date, date]:
         if not period.get("start_dt") or not period.get("end_dt"):
             return cls.month_bounds(billing_month)
         start = datetime.fromisoformat(str(period["start_dt"]).replace("Z", "+00:00"))
@@ -808,9 +747,7 @@ class BillingNormalizer:
         return start.date(), end.date()
 
     @classmethod
-    def usage_coverage(
-        cls, rows: List[Dict[str, Any]]
-    ) -> Tuple[Optional[date], Optional[date]]:
+    def usage_coverage(cls, rows: List[Dict[str, Any]]) -> Tuple[Optional[date], Optional[date]]:
         starts: List[date] = []
         ends: List[date] = []
         for row in rows:
@@ -868,29 +805,20 @@ class BillingNormalizer:
             }
 
         vat = sum(self.to_float(row.get("thisMonthVatAmount")) for row in rows)
-        total_demand = sum(
-            self.to_float(row.get("totalDemandAmount")) for row in rows
-        )
+        total_demand = sum(self.to_float(row.get("totalDemandAmount")) for row in rows)
         current_including_vat = sum(
             self.to_float(row.get("thisMonthAmountIncludingVat")) for row in rows
         )
         has_current_invoice_total = any(
-            row.get("thisMonthAmountIncludingVat") not in (None, "")
-            for row in rows
+            row.get("thisMonthAmountIncludingVat") not in (None, "") for row in rows
         )
         has_current_components = any(
             row.get("thisMonthDemandAmount") not in (None, "")
             or row.get("thisMonthVatAmount") not in (None, "")
             for row in rows
         )
-        stated_subtotal = sum(
-            self.to_float(row.get("thisMonthDemandAmount")) for row in rows
-        )
-        subtotal = (
-            current_including_vat - vat
-            if has_current_invoice_total
-            else stated_subtotal
-        )
+        stated_subtotal = sum(self.to_float(row.get("thisMonthDemandAmount")) for row in rows)
+        subtotal = current_including_vat - vat if has_current_invoice_total else stated_subtotal
         total = (
             current_including_vat
             if has_current_invoice_total
@@ -900,19 +828,20 @@ class BillingNormalizer:
         )
         use_amount = sum(self.to_float(row.get("useAmount")) for row in rows)
         discount_keys = (
-            "promiseDiscountAmount", "promotionDiscountAmount",
-            "etcDiscountAmount", "customerDiscountAmount",
-            "productDiscountAmount", "creditDiscountAmount",
-            "rounddownDiscountAmount", "currencyDiscountAmount",
-            "coinUseAmount", "memberPriceDiscountAmount",
+            "promiseDiscountAmount",
+            "promotionDiscountAmount",
+            "etcDiscountAmount",
+            "customerDiscountAmount",
+            "productDiscountAmount",
+            "creditDiscountAmount",
+            "rounddownDiscountAmount",
+            "currencyDiscountAmount",
+            "coinUseAmount",
+            "memberPriceDiscountAmount",
             "memberPromiseDiscountAddAmount",
         )
-        discount = sum(
-            self.to_float(row.get(key)) for row in rows for key in discount_keys
-        )
-        write_dates = sorted(
-            str(row.get("writeDate")) for row in rows if row.get("writeDate")
-        )
+        discount = sum(self.to_float(row.get(key)) for row in rows for key in discount_keys)
+        write_dates = sorted(str(row.get("writeDate")) for row in rows if row.get("writeDate"))
         currencies = [
             str(self.as_dict(row.get("payCurrency")).get("code"))
             for row in rows
@@ -981,9 +910,9 @@ class BillingNormalizer:
             ),
             "includes_discount": False,
             "includes_vat": False,
-            "confidence": (
-                "VERIFIED_ESTIMATE" if closed_month else "PARTIAL"
-            ) if service_rows else "UNAVAILABLE",
+            "confidence": ("VERIFIED_ESTIMATE" if closed_month else "PARTIAL")
+            if service_rows
+            else "UNAVAILABLE",
             "excluded_item_count": 0,
             "source_api": source_api,
             "calculation_version": "2.0",
@@ -1000,10 +929,7 @@ class BillingNormalizer:
     ) -> Optional[date]:
         values = [
             parsed
-            for parsed in (
-                cls._parse_api_date(row.get("writeDate"))
-                for row in rows
-            )
+            for parsed in (cls._parse_api_date(row.get("writeDate")) for row in rows)
             if parsed is not None
         ]
         return max(values) if values else None
@@ -1016,9 +942,7 @@ class BillingNormalizer:
     ) -> bool:
         if not rows:
             return False
-        values = [
-            cls._parse_api_date(row.get("writeDate")) for row in rows
-        ]
+        values = [cls._parse_api_date(row.get("writeDate")) for row in rows]
         return bool(
             all(value is not None for value in values)
             and min(value for value in values if value is not None) >= cutoff
@@ -1030,9 +954,7 @@ class BillingNormalizer:
         service_rows: List[Dict[str, Any]],
         ncp_write_date: date,
     ) -> Dict[str, Any]:
-        ncp_total = sum(
-            self.to_float(row.get("use_amount")) for row in service_rows
-        )
+        ncp_total = sum(self.to_float(row.get("use_amount")) for row in service_rows)
         details = self.as_dict(local_fact.get("details"))
         return {
             **local_fact,
@@ -1090,11 +1012,7 @@ class BillingNormalizer:
             key = (
                 self._row_member_no(row),
                 str(contract.get("contractNo") or ""),
-                str(
-                    product.get("contractProductSequence")
-                    or product.get("instanceNo")
-                    or ""
-                ),
+                str(product.get("contractProductSequence") or product.get("instanceNo") or ""),
                 price_no,
                 "STATEFUL" if stateful else self.get_metering_type_code(row),
                 self.get_usage_unit_code(row),
@@ -1102,36 +1020,32 @@ class BillingNormalizer:
             groups[key].append(row)
 
         for grouped_rows in groups.values():
-            total_user_quantity = sum(
-                self.get_usage_quantity(row) for row in grouped_rows
-            )
+            total_user_quantity = sum(self.get_usage_quantity(row) for row in grouped_rows)
             if total_user_quantity <= 0:
                 continue
             price_row = price_map.get(self.get_price_no(grouped_rows[0]), {})
             stateful = self.is_stateful_projection_price(price_row)
             observed_dates = [
-                self._parse_api_date(
-                    self.as_dict(row.get("useDate")).get("useStartDate")
-                )
+                self._parse_api_date(self.as_dict(row.get("useDate")).get("useStartDate"))
                 for row in grouped_rows
             ]
             observed_dates = [value for value in observed_dates if value]
             observed_start = min(observed_dates) if observed_dates else month_start
-            source_row = max(
-                grouped_rows,
-                key=lambda row: (
-                    self._parse_api_date(
-                        self.as_dict(row.get("useDate")).get("useEndDate")
-                    )
-                    or date.min,
-                    self._parse_api_date(
-                        self.as_dict(row.get("useDate")).get("useStartDate")
-                    )
-                    or date.min,
-                    -self.get_effective_price(row, price_row)[0],
-                    self.get_product_count(row) or 0.0,
-                ),
-            ) if stateful else grouped_rows[0]
+            source_row = (
+                max(
+                    grouped_rows,
+                    key=lambda row: (
+                        self._parse_api_date(self.as_dict(row.get("useDate")).get("useEndDate"))
+                        or date.min,
+                        self._parse_api_date(self.as_dict(row.get("useDate")).get("useStartDate"))
+                        or date.min,
+                        -self.get_effective_price(row, price_row)[0],
+                        self.get_product_count(row) or 0.0,
+                    ),
+                )
+                if stateful
+                else grouped_rows[0]
+            )
             product = self.as_dict(source_row.get("contractProduct"))
             service_start = self._parse_api_date(product.get("serviceStartDate"))
             if service_start:
@@ -1155,9 +1069,7 @@ class BillingNormalizer:
             usage = self.as_dict(synthetic.get("usage"))
             if stateful:
                 source_date = self.as_dict(source_row.get("useDate"))
-                source_start = self._parse_api_date(
-                    source_date.get("useStartDate")
-                )
+                source_start = self._parse_api_date(source_date.get("useStartDate"))
                 source_end = self._parse_api_date(source_date.get("useEndDate"))
                 source_days = (
                     (source_end - source_start).days + 1
@@ -1171,18 +1083,14 @@ class BillingNormalizer:
                 elif source_unit_code in {"SEC_DAY", "DAY", "USAGE_DAY"}:
                     future_user_quantity = future_days
                 else:
-                    future_user_quantity = (
-                        source_user_quantity / source_days * future_days
-                    )
+                    future_user_quantity = source_user_quantity / source_days * future_days
                 usage["userUsageQuantity"] = future_user_quantity
                 source_raw_quantity = self.to_float(
                     self.as_dict(source_row.get("usage")).get("usageQuantity")
                 )
                 if source_raw_quantity:
                     usage["usageQuantity"] = (
-                        source_raw_quantity
-                        / source_user_quantity
-                        * future_user_quantity
+                        source_raw_quantity / source_user_quantity * future_user_quantity
                         if source_user_quantity > 0
                         else source_raw_quantity / source_days * future_days
                     )
@@ -1190,9 +1098,7 @@ class BillingNormalizer:
             else:
                 usage["userUsageQuantity"] = total_user_quantity * factor
                 raw_quantities = [
-                    self.to_float(
-                        self.as_dict(row.get("usage")).get("usageQuantity")
-                    )
+                    self.to_float(self.as_dict(row.get("usage")).get("usageQuantity"))
                     for row in grouped_rows
                 ]
                 if any(raw_quantities):
@@ -1222,12 +1128,9 @@ class BillingNormalizer:
         total = sum(self.to_float(row.get("expected_amount")) for row in included)
         total_all = sum(self.to_float(row.get("expected_amount")) for row in rows)
         excluded = sum(
-            row.get("calculation_status") not in self.INCLUDED_CALCULATION_STATUSES
-            for row in rows
+            row.get("calculation_status") not in self.INCLUDED_CALCULATION_STATUSES for row in rows
         )
-        inferred = sum(
-            row.get("calculation_status") == "INFERRED" for row in rows
-        )
+        inferred = sum(row.get("calculation_status") == "INFERRED" for row in rows)
         has_data = bool(rows)
         incomplete_coverage = bool(
             has_data
@@ -1239,8 +1142,10 @@ class BillingNormalizer:
             )
         )
         confidence = (
-            "UNAVAILABLE" if not has_data
-            else "PARTIAL" if excluded or inferred or incomplete_coverage
+            "UNAVAILABLE"
+            if not has_data
+            else "PARTIAL"
+            if excluded or inferred or incomplete_coverage
             else "VERIFIED_ESTIMATE"
         )
         return {
@@ -1261,9 +1166,7 @@ class BillingNormalizer:
             "includes_vat": False,
             "confidence": confidence,
             "excluded_item_count": int(excluded),
-            "source_api": (
-                "getContractUsageListByDaily,getPriceList,getProductPriceList"
-            ),
+            "source_api": ("getContractUsageListByDaily,getPriceList,getProductPriceList"),
             "calculation_version": "2.0",
             "details": {
                 "all_calculated_amount": round(total_all, 2),
@@ -1299,18 +1202,13 @@ class BillingNormalizer:
             "includes_discount": False,
             "includes_vat": False,
             "excluded_item_count": month_to_date_estimate.get("excluded_item_count", 0),
-            "source_api": (
-                "getContractUsageListByDaily,getPriceList,getProductPriceList"
-            ),
+            "source_api": ("getContractUsageListByDaily,getPriceList,getProductPriceList"),
             "calculation_version": "2.0",
         }
         ncp_service_summary = ncp_service_summary or []
         if target_month_closed:
             if ncp_service_summary:
-                total = sum(
-                    self.to_float(row.get("use_amount"))
-                    for row in ncp_service_summary
-                )
+                total = sum(self.to_float(row.get("use_amount")) for row in ncp_service_summary)
                 return {
                     **base,
                     "status": "AVAILABLE",
@@ -1331,29 +1229,42 @@ class BillingNormalizer:
                         "inferred_item_count": 0,
                     },
                 }
-            return {**base, "status": "NOT_APPLICABLE", "subtotal_amount": None,
-                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
-        coverage_start = self._parse_api_date(
-            month_to_date_estimate.get("coverage_start")
-        )
-        coverage_end = self._parse_api_date(
-            month_to_date_estimate.get("coverage_end")
-        )
+            return {
+                **base,
+                "status": "NOT_APPLICABLE",
+                "subtotal_amount": None,
+                "total_amount": None,
+                "confidence": "UNAVAILABLE",
+                "details": {},
+            }
+        coverage_start = self._parse_api_date(month_to_date_estimate.get("coverage_start"))
+        coverage_end = self._parse_api_date(month_to_date_estimate.get("coverage_end"))
         if (
             not coverage_start
             or not coverage_end
             or month_to_date_estimate.get("status") != "AVAILABLE"
         ):
-            return {**base, "status": "UNAVAILABLE", "subtotal_amount": None,
-                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
+            return {
+                **base,
+                "status": "UNAVAILABLE",
+                "subtotal_amount": None,
+                "total_amount": None,
+                "confidence": "UNAVAILABLE",
+                "details": {},
+            }
         observation_start = (
-            self._parse_api_date(month_to_date_estimate.get("period_start"))
-            or coverage_start
+            self._parse_api_date(month_to_date_estimate.get("period_start")) or coverage_start
         )
         observed_days = (coverage_end - observation_start).days + 1
         if observed_days <= 0:
-            return {**base, "status": "UNAVAILABLE", "subtotal_amount": None,
-                    "total_amount": None, "confidence": "UNAVAILABLE", "details": {}}
+            return {
+                **base,
+                "status": "UNAVAILABLE",
+                "subtotal_amount": None,
+                "total_amount": None,
+                "confidence": "UNAVAILABLE",
+                "details": {},
+            }
         current_cost_rows = current_cost_rows or []
         projected_cost_rows = projected_cost_rows or []
         included_projected = self._included_cost_rows(projected_cost_rows)
@@ -1361,10 +1272,7 @@ class BillingNormalizer:
             row.get("calculation_status") not in self.INCLUDED_CALCULATION_STATUSES
             for row in projected_cost_rows
         )
-        inferred = sum(
-            row.get("calculation_status") == "INFERRED"
-            for row in projected_cost_rows
-        )
+        inferred = sum(row.get("calculation_status") == "INFERRED" for row in projected_cost_rows)
 
         if projected_cost_rows:
             current_by_service = self._cost_rows_by_service(
@@ -1390,15 +1298,11 @@ class BillingNormalizer:
                 )
             else:
                 projected = sum(
-                    self.to_float(row.get("expected_amount"))
-                    for row in included_projected
+                    self.to_float(row.get("expected_amount")) for row in included_projected
                 )
                 fallback_services = 0
                 amount_basis = "PROJECTED_USAGE_RERATED"
-                source_api = (
-                    "getContractUsageListByDaily,getPriceList,"
-                    "getProductPriceList"
-                )
+                source_api = "getContractUsageListByDaily,getPriceList,getProductPriceList"
         else:
             projected = (
                 self.to_float(month_to_date_estimate.get("total_amount"))
@@ -1456,10 +1360,7 @@ class BillingNormalizer:
         observed_days: int,
         month_days: int,
     ) -> Tuple[float, int]:
-        accrued_total = sum(
-            self.to_float(row.get("use_amount"))
-            for row in ncp_service_summary
-        )
+        accrued_total = sum(self.to_float(row.get("use_amount")) for row in ncp_service_summary)
         current_total = sum(current_by_service.values())
         projected_total = sum(projected_by_service.values())
         if current_total > 0:
@@ -1476,16 +1377,16 @@ class BillingNormalizer:
     @staticmethod
     def normalize_service_key(value: Any) -> str:
         return "".join(
-            character.casefold()
-            for character in str(value or "")
-            if character.isalnum()
+            character.casefold() for character in str(value or "") if character.isalnum()
         )
 
     def summarize_confirmed_by_service(
         self,
         rows: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        summary = defaultdict(lambda: {"amount": 0.0, "use_amount": 0.0, "discount_amount": 0.0, "row_count": 0})
+        summary = defaultdict(
+            lambda: {"amount": 0.0, "use_amount": 0.0, "discount_amount": 0.0, "row_count": 0}
+        )
 
         for row in rows:
             service_name = self.get_product_demand_service_name(row)
@@ -1575,18 +1476,10 @@ class BillingNormalizer:
             product = self.to_float(row.get("productDiscountAmount"))
             credit = self.to_float(row.get("creditDiscountAmount"))
             member_price = self.to_float(row.get("memberPriceDiscountAmount"))
-            member_promise = self.to_float(
-                row.get("memberPromiseDiscountAddAmount")
-            )
+            member_promise = self.to_float(row.get("memberPromiseDiscountAddAmount"))
 
             total_discount = (
-                promise
-                + promotion
-                + etc
-                + product
-                + credit
-                + member_price
-                + member_promise
+                promise + promotion + etc + product + credit + member_price + member_promise
             )
 
             summary[service_name]["use_amount"] += self.to_float(row.get("useAmount"))
@@ -1598,9 +1491,7 @@ class BillingNormalizer:
             summary[service_name]["product_discount_amount"] += product
             summary[service_name]["credit_discount_amount"] += credit
             summary[service_name]["member_price_discount_amount"] += member_price
-            summary[service_name][
-                "member_promise_discount_add_amount"
-            ] += member_promise
+            summary[service_name]["member_promise_discount_add_amount"] += member_promise
             summary[service_name]["row_count"] += 1
 
         return self.as_sorted_rows(summary, "service_name", "demand_amount")
@@ -1646,7 +1537,7 @@ class BillingNormalizer:
             )
 
         return sorted(result, key=lambda x: (x["service_name"], x["item_name"]))
-    
+
     def summarize_network_usage(
         self,
         rows: List[Dict[str, Any]],
@@ -1777,12 +1668,8 @@ class BillingNormalizer:
             summary[key]["unit_price"] = calculated["unit_price"]
             summary[key]["raw_price"] = self.get_price(price_row or {})
             summary[key]["storage_size_gb"] = self.get_storage_size_gb(row)
-            summary[key]["price_unit_type"] = self.get_price_unit_type_code(
-                price_row or {}
-            )
-            summary[key]["charging_unit_type"] = self.get_charging_unit_type_code(
-                price_row or {}
-            )
+            summary[key]["price_unit_type"] = self.get_price_unit_type_code(price_row or {})
+            summary[key]["charging_unit_type"] = self.get_charging_unit_type_code(price_row or {})
             summary[key]["calculation_method"] = calculated["calculation_method"]
             summary[key]["calculation_status"] = calculated["calculation_status"]
             summary[key]["multiplier"] = calculated["multiplier"]
@@ -1819,15 +1706,9 @@ class BillingNormalizer:
         for key, rows in aggregate_groups.items():
             _, price_no, _, unit_code = key
             price_row = price_map[price_no]
-            service_names = sorted({
-                self.get_usage_service_name(row) for row in rows
-            })
-            item_names = sorted({
-                self.get_usage_item_name(row) for row in rows
-            })
-            item_codes = sorted({
-                self.get_usage_item_code(row) for row in rows
-            })
+            service_names = sorted({self.get_usage_service_name(row) for row in rows})
+            item_names = sorted({self.get_usage_item_name(row) for row in rows})
+            item_codes = sorted({self.get_usage_item_code(row) for row in rows})
             service_name = " + ".join(service_names)
             item_name = " + ".join(item_names)
             item_code = " + ".join(item_codes)
@@ -1880,10 +1761,9 @@ class BillingNormalizer:
             return True
         if self.uses_hour_ceiling_rating(price_row):
             return True
-        return (
-            self.to_float(price_row.get("freeValue")) > 0
-            and not self.has_resource_count_allowance(price_row)
-        )
+        return self.to_float(
+            price_row.get("freeValue")
+        ) > 0 and not self.has_resource_count_allowance(price_row)
 
     def uses_block_unit_rating(self, price_row: Dict[str, Any]) -> bool:
         return (
@@ -1897,8 +1777,13 @@ class BillingNormalizer:
         return (
             self.get_metering_unit_type_code(price_row) == "USAGE_SEC"
             and "USAGE TIME (HOUR)" in description
-            and price_unit not in {
-                "USAGE_HH", "USAGE_TIME", "HOUR", "HOURLY", "HH",
+            and price_unit
+            not in {
+                "USAGE_HH",
+                "USAGE_TIME",
+                "HOUR",
+                "HOURLY",
+                "HH",
             }
         )
 
@@ -1954,11 +1839,7 @@ class BillingNormalizer:
         return (
             self._row_member_no(row),
             str(contract.get("contractNo") or ""),
-            str(
-                product.get("contractProductSequence")
-                or product.get("instanceNo")
-                or ""
-            ),
+            str(product.get("contractProductSequence") or product.get("instanceNo") or ""),
             price_no,
             str(use_date.get("useStartDate") or ""),
             str(use_date.get("useEndDate") or ""),
@@ -1990,21 +1871,16 @@ class BillingNormalizer:
         if self.uses_block_unit_rating(price_row) and rating_code != "SECT":
             quantity = sum(self.get_usage_quantity(row) for row in rows)
             billable_quantity = max(quantity - free_value, 0.0)
-            charging_basic_value = self.to_float(
-                price_row.get("chargingUnitBasicValue")
-            )
+            charging_basic_value = self.to_float(price_row.get("chargingUnitBasicValue"))
             charging_blocks = (
-                math.ceil(billable_quantity / charging_basic_value)
-                if billable_quantity > 0
-                else 0
+                math.ceil(billable_quantity / charging_basic_value) if billable_quantity > 0 else 0
             )
             price = self.get_price(price_row)
             return {
                 "expected_amount": charging_blocks * price,
                 "unit_price": price / charging_basic_value,
                 "calculation_method": (
-                    "CEIL(MONTHLY_AGGREGATE / "
-                    "CHARGING_UNIT_BASIC_VALUE) * BLOCK_PRICE"
+                    "CEIL(MONTHLY_AGGREGATE / CHARGING_UNIT_BASIC_VALUE) * BLOCK_PRICE"
                 ),
                 "calculation_status": "OK",
                 "multiplier": 1.0,
@@ -2029,8 +1905,7 @@ class BillingNormalizer:
                 days_in_month=days_in_month,
             )
             calculated["calculation_method"] = (
-                "CEIL(MONTHLY_AGGREGATE_HOUR); "
-                f"{calculated['calculation_method']}"
+                f"CEIL(MONTHLY_AGGREGATE_HOUR); {calculated['calculation_method']}"
             )
             calculated["rating_details"] = {
                 "rated_quantity": round(quantity, 10),
@@ -2088,31 +1963,21 @@ class BillingNormalizer:
                 (
                     section["end"]
                     for section in normalized_sections
-                    if section["price"] == 0
-                    and section["start"] == 0
-                    and section["end"] >= 0
+                    if section["price"] == 0 and section["start"] == 0 and section["end"] >= 0
                 ),
                 default=0.0,
             )
-            duplicate_free_allowance = bool(
-                free_value > 0 and zero_price_coverage >= free_value
-            )
+            duplicate_free_allowance = bool(free_value > 0 and zero_price_coverage >= free_value)
             effective_free_value = 0.0 if duplicate_free_allowance else free_value
             billable_quantity = max(quantity - effective_free_value, 0.0)
-            charging_basic_value = self.to_float(
-                price_row.get("chargingUnitBasicValue")
-            )
+            charging_basic_value = self.to_float(price_row.get("chargingUnitBasicValue"))
             amount, tier_details = self.apply_tiered_prices(
                 billable_quantity,
                 normalized_sections,
                 charging_basic_value,
             )
             unit_price = amount / billable_quantity if billable_quantity else 0.0
-            block_method = (
-                " WITH CEILING BLOCKS"
-                if charging_basic_value > 1
-                else ""
-            )
+            block_method = " WITH CEILING BLOCKS" if charging_basic_value > 1 else ""
             return {
                 "expected_amount": amount,
                 "unit_price": unit_price,
@@ -2120,17 +1985,14 @@ class BillingNormalizer:
                     "MONTHLY_RESOURCE_FRACTION * TIER_PRICE"
                     if price_type == "FXSUM"
                     else "MONTHLY_AGGREGATE * TIER_PRICE"
-                ) + block_method,
-                "calculation_status": (
-                    "INFERRED" if price_type == "FXSUM" else "OK"
-                ),
+                )
+                + block_method,
+                "calculation_status": ("INFERRED" if price_type == "FXSUM" else "OK"),
                 "multiplier": 1.0,
                 "rating_details": {
                     "rated_quantity": round(quantity, 10),
                     "free_quantity": round(free_value, 10),
-                    "effective_free_quantity": round(
-                        effective_free_value, 10
-                    ),
+                    "effective_free_quantity": round(effective_free_value, 10),
                     "free_quantity_already_in_tiers": duplicate_free_allowance,
                     "billable_quantity": round(billable_quantity, 10),
                     "charging_unit_basic_value": charging_basic_value,
@@ -2156,8 +2018,7 @@ class BillingNormalizer:
             days_in_month=days_in_month,
         )
         calculated["calculation_method"] = (
-            f"MONTHLY_AGGREGATE - FREE({free_value:g}); "
-            f"{calculated['calculation_method']}"
+            f"MONTHLY_AGGREGATE - FREE({free_value:g}); {calculated['calculation_method']}"
         )
         calculated["rating_details"] = {
             "rated_quantity": round(usage_quantity, 10),
@@ -2183,14 +2044,14 @@ class BillingNormalizer:
         if value in (-1, -1.0):
             return -1.0
         price_unit = self.get_price_unit_type_code(price_row)
-        if (
-            usage_unit_code in {"GBYTE", "GBYTE_PER_MONTH_DAY"}
-            or price_unit in {
-                "USAGE_1GB", "AVG_SAVE_CAP_1G", "MMLY_AVG_SAVE_CAP_1G",
-                "STRG_1G_MM", "STRG_1G_HH",
-            }
-        ):
-            return value / (1024 ** 3)
+        if usage_unit_code in {"GBYTE", "GBYTE_PER_MONTH_DAY"} or price_unit in {
+            "USAGE_1GB",
+            "AVG_SAVE_CAP_1G",
+            "MMLY_AVG_SAVE_CAP_1G",
+            "STRG_1G_MM",
+            "STRG_1G_HH",
+        }:
+            return value / (1024**3)
         return value
 
     def normalize_free_value(
@@ -2205,9 +2066,9 @@ class BillingNormalizer:
         if any(token in free_unit for token in ("1G", "GB", "GBYTE")):
             return value
         if "BYTE" in free_unit:
-            return value / (1024 ** 3)
+            return value / (1024**3)
         if usage_unit_code in {"GBYTE", "GBYTE_PER_MONTH_DAY"}:
-            return value / (1024 ** 3) if value >= 1024 ** 3 else value
+            return value / (1024**3) if value >= 1024**3 else value
         return value
 
     @staticmethod
@@ -2233,14 +2094,16 @@ class BillingNormalizer:
             )
             tier_amount = charging_units * price
             amount += tier_amount
-            details.append({
-                "start": start,
-                "end": end,
-                "quantity": round(used, 10),
-                "charging_units": charging_units,
-                "unit_price": price,
-                "amount": round(tier_amount, 10),
-            })
+            details.append(
+                {
+                    "start": start,
+                    "end": end,
+                    "quantity": round(used, 10),
+                    "charging_units": charging_units,
+                    "unit_price": price,
+                    "amount": round(tier_amount, 10),
+                }
+            )
         return amount, details
 
     @staticmethod
@@ -2265,9 +2128,7 @@ class BillingNormalizer:
         days_in_month: int,
     ) -> Dict[str, Any]:
         price, condition_applied = self.get_effective_price(row, price_row)
-        unsupported_rating_status = self.get_unsupported_rating_status(
-            price_row
-        )
+        unsupported_rating_status = self.get_unsupported_rating_status(price_row)
         if unsupported_rating_status is not None:
             return {
                 "expected_amount": 0.0,
@@ -2301,9 +2162,7 @@ class BillingNormalizer:
                     "expected_amount": 0.0,
                     "unit_price": 0.0,
                     "calculation_method": "FREE_RESOURCE_COUNT",
-                    "calculation_status": (
-                        "UNSUPPORTED_FREE_RESOURCE_COUNT_MISSING"
-                    ),
+                    "calculation_status": ("UNSUPPORTED_FREE_RESOURCE_COUNT_MISSING"),
                     "multiplier": 1.0,
                 }
             free_count = self.to_float(price_row.get("freeValue"))
@@ -2336,29 +2195,23 @@ class BillingNormalizer:
                     method = f"GB * {method}"
                 else:
                     status = "WARN_STORAGE_SIZE_MISSING"
-        elif (
-            price_unit_type in ("STRG_1G_HH", "STRG_1G_MM")
-            and usage_unit_code == "HOUR"
-        ):
+        elif price_unit_type in ("STRG_1G_HH", "STRG_1G_MM") and usage_unit_code == "HOUR":
             if storage_size_gb > 0:
                 amount = storage_size_gb * usage_quantity * unit_price
                 method = f"GB * {method}"
                 status = "OK"
             else:
                 status = "WARN_STORAGE_SIZE_MISSING"
-        elif (
-            price_unit_type in ("STRG_1G_HH", "STRG_1G_MM")
-            and usage_unit_code not in ("GBYTE", "GBYTE_PER_MONTH_DAY")
+        elif price_unit_type in ("STRG_1G_HH", "STRG_1G_MM") and usage_unit_code not in (
+            "GBYTE",
+            "GBYTE_PER_MONTH_DAY",
         ):
             status = "FALLBACK_STORAGE_UNIT"
 
         amount *= multiplier
 
         if resource_allowance:
-            method = (
-                f"{method} * BILLABLE_RESOURCE_COUNT"
-                f"({billable_product_count:g})"
-            )
+            method = f"{method} * BILLABLE_RESOURCE_COUNT({billable_product_count:g})"
         elif multiplier != 1:
             method = f"{method} * MULTIPLIER({multiplier})"
 
@@ -2389,13 +2242,17 @@ class BillingNormalizer:
 
     def get_free_unit_code(self, price_row: Dict[str, Any]) -> str:
         free_unit = self.as_dict(price_row.get("freeUnit"))
-        return str(
-            self.first_present(
-                free_unit.get("code"),
-                price_row.get("freeUnitCode"),
-                default="",
+        return (
+            str(
+                self.first_present(
+                    free_unit.get("code"),
+                    price_row.get("freeUnitCode"),
+                    default="",
+                )
             )
-        ).strip().upper()
+            .strip()
+            .upper()
+        )
 
     def has_resource_count_allowance(
         self,
@@ -2450,13 +2307,17 @@ class BillingNormalizer:
 
     def get_rating_unit_type_code(self, price_row: Dict[str, Any]) -> str:
         rating_unit_type = self.as_dict(price_row.get("ratingUnitType"))
-        return str(
-            self.first_present(
-                rating_unit_type.get("code"),
-                price_row.get("ratingUnitTypeCode"),
-                default="POINT",
+        return (
+            str(
+                self.first_present(
+                    rating_unit_type.get("code"),
+                    price_row.get("ratingUnitTypeCode"),
+                    default="POINT",
+                )
             )
-        ).strip().upper()
+            .strip()
+            .upper()
+        )
 
     def get_effective_price(
         self,
@@ -2478,13 +2339,17 @@ class BillingNormalizer:
 
     def get_condition_type_code(self, price_row: Dict[str, Any]) -> str:
         condition_type = self.as_dict(price_row.get("conditionType"))
-        return str(
-            self.first_present(
-                condition_type.get("code"),
-                price_row.get("conditionTypeCode"),
-                default="",
+        return (
+            str(
+                self.first_present(
+                    condition_type.get("code"),
+                    price_row.get("conditionTypeCode"),
+                    default="",
+                )
             )
-        ).strip().upper()
+            .strip()
+            .upper()
+        )
 
     def get_price_type_code(
         self,
@@ -2492,18 +2357,18 @@ class BillingNormalizer:
     ) -> str:
         price_type = price_row.get("priceType")
         price_type_mapping = self.as_dict(price_type)
-        return str(
-            self.first_present(
-                price_type_mapping.get("code"),
-                (
-                    price_type
-                    if isinstance(price_type, str)
-                    else None
-                ),
-                price_row.get("priceTypeCode"),
-                default="",
+        return (
+            str(
+                self.first_present(
+                    price_type_mapping.get("code"),
+                    (price_type if isinstance(price_type, str) else None),
+                    price_row.get("priceTypeCode"),
+                    default="",
+                )
             )
-        ).strip().upper()
+            .strip()
+            .upper()
+        )
 
     def resolve_unit_price(
         self,
@@ -2519,7 +2384,13 @@ class BillingNormalizer:
         if price == 0:
             return 0.0, "ZERO_PRICE", "OK"
 
-        if usage_unit_code == "HOUR" and price_unit_type in ("USAGE_MM", "MONTH", "MONTHLY", "MONT", "MM"):
+        if usage_unit_code == "HOUR" and price_unit_type in (
+            "USAGE_MM",
+            "MONTH",
+            "MONTHLY",
+            "MONT",
+            "MM",
+        ):
             return price / hours_in_month, "HOUR * (MONTH_PRICE / MONTH_HOURS)", "OK"
 
         if usage_unit_code == "HOUR" and price_unit_type in ("USAGE_HH", "HOUR", "HOURLY", "HH"):
@@ -2529,7 +2400,10 @@ class BillingNormalizer:
             return price, "HOUR * HOUR_PRICE", "OK"
 
         if usage_unit_code == "HOUR" and price_unit_type in (
-            "USAGE_MIN", "MINUTE", "MINUTELY", "MI",
+            "USAGE_MIN",
+            "MINUTE",
+            "MINUTELY",
+            "MI",
         ):
             return price * 60, "HOUR * 60 * MINUTE_PRICE", "OK"
 
@@ -2543,12 +2417,19 @@ class BillingNormalizer:
             return price / hours_in_month, "HOUR * (GB_MONTH_PRICE / MONTH_HOURS)", "OK"
 
         if usage_unit_code in ("SEC_DAY", "DAY", "USAGE_DAY") and price_unit_type in (
-            "USAGE_MM", "MONTH", "MONTHLY", "MONT", "MM",
+            "USAGE_MM",
+            "MONTH",
+            "MONTHLY",
+            "MONT",
+            "MM",
         ):
             return price / days_in_month, "DAY * (MONTH_PRICE / MONTH_DAYS)", "OK"
 
         if usage_unit_code in ("SEC_DAY", "DAY", "USAGE_DAY") and price_unit_type in (
-            "USAGE_HH", "HOUR", "HOURLY", "HH",
+            "USAGE_HH",
+            "HOUR",
+            "HOURLY",
+            "HH",
         ):
             return price * 24, "DAY * 24 * HOUR_PRICE", "OK"
 
@@ -2562,27 +2443,39 @@ class BillingNormalizer:
         if usage_unit_code == "GBYTE" and price_unit_type in ("USAGE_1GB", "GB", "GBYTE"):
             return price, "GB * GB_PRICE", "OK"
 
-        if usage_unit_code in ("COUNT_CASE", "REQ_CNT") and price_unit_type in ("REQ_CNT", "COUNT_CASE"):
+        if usage_unit_code in ("COUNT_CASE", "REQ_CNT") and price_unit_type in (
+            "REQ_CNT",
+            "COUNT_CASE",
+        ):
             return price, "COUNT * COUNT_PRICE", "OK"
 
         if usage_unit_code in ("MEMBER", "USER", "USR_CNT") and price_unit_type in (
-            "MEMBER", "USER", "USR_CNT",
+            "MEMBER",
+            "USER",
+            "USR_CNT",
         ):
             return price, "USER * USER_PRICE", "OK"
 
         if usage_unit_code == "TOKEN" and price_unit_type in ("REQ_CNT", "TOKEN"):
             return price, "TOKEN * TOKEN_PRICE", "OK"
 
-        if usage_unit_code == "TOKEN" and price_unit_type in ("K_TOKEN", "TOKEN_1000", "1000_TOKEN"):
+        if usage_unit_code == "TOKEN" and price_unit_type in (
+            "K_TOKEN",
+            "TOKEN_1000",
+            "1000_TOKEN",
+        ):
             return price / 1000, "TOKEN * (PRICE / 1000)", "OK"
 
-        if usage_unit_code == "TOKEN" and price_unit_type in ("M_TOKEN", "TOKEN_1000000", "1000000_TOKEN"):
+        if usage_unit_code == "TOKEN" and price_unit_type in (
+            "M_TOKEN",
+            "TOKEN_1000000",
+            "1000000_TOKEN",
+        ):
             return price / 1_000_000, "TOKEN * (PRICE / 1000000)", "OK"
 
         description = price_description.upper()
         if usage_unit_code == "HOUR" and (
-            "USAGE TIME (HOUR)" in description
-            or metering_unit == "USAGE_SEC"
+            "USAGE TIME (HOUR)" in description or metering_unit == "USAGE_SEC"
         ):
             return price, "HOUR * DESCRIPTION_HOUR_PRICE", "INFERRED"
 
@@ -2614,15 +2507,9 @@ class BillingNormalizer:
         confirmed_summary: List[Dict[str, Any]],
         expected_summary: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        confirmed_map = {
-            row["service_name"]: row
-            for row in confirmed_summary
-        }
+        confirmed_map = {row["service_name"]: row for row in confirmed_summary}
 
-        expected_map = {
-            row["service_name"]: row
-            for row in expected_summary
-        }
+        expected_map = {row["service_name"]: row for row in expected_summary}
 
         service_names = sorted(set(confirmed_map) | set(expected_map))
         result = []
@@ -2687,11 +2574,7 @@ class BillingNormalizer:
         self,
         price_rows: List[Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
-        return {
-            str(row.get("priceNo")): row
-            for row in price_rows
-            if row.get("priceNo")
-        }
+        return {str(row.get("priceNo")): row for row in price_rows if row.get("priceNo")}
 
     @staticmethod
     def merge_price_rows(
@@ -2718,11 +2601,7 @@ class BillingNormalizer:
     def get_usage_service_name(self, row: Dict[str, Any]) -> str:
         contract = self.as_dict(row.get("contract"))
         contract_type = self.as_dict(contract.get("contractType"))
-        return (
-            contract_type.get("codeName")
-            or contract_type.get("code")
-            or "UNKNOWN"
-        )
+        return contract_type.get("codeName") or contract_type.get("code") or "UNKNOWN"
 
     def get_usage_item_name(self, row: Dict[str, Any]) -> str:
         contract_product = self.as_dict(row.get("contractProduct"))
@@ -2744,11 +2623,7 @@ class BillingNormalizer:
         rating_type = self.as_dict(contract_product.get("productRatingType"))
         metering_type = self.as_dict(usage.get("meteringType"))
 
-        return (
-            rating_type.get("code")
-            or metering_type.get("code")
-            or "UNKNOWN"
-        )
+        return rating_type.get("code") or metering_type.get("code") or "UNKNOWN"
 
     def get_usage_quantity(self, row: Dict[str, Any]) -> float:
         usage = self.as_dict(row.get("usage"))
@@ -2764,21 +2639,13 @@ class BillingNormalizer:
         usage = self.as_dict(row.get("usage"))
         user_unit = self.as_dict(usage.get("userUnit"))
         unit = self.as_dict(usage.get("unit"))
-        return (
-            user_unit.get("code")
-            or unit.get("code")
-            or "UNKNOWN"
-        )
+        return user_unit.get("code") or unit.get("code") or "UNKNOWN"
 
     def get_usage_unit_name(self, row: Dict[str, Any]) -> str:
         usage = self.as_dict(row.get("usage"))
         user_unit = self.as_dict(usage.get("userUnit"))
         unit = self.as_dict(usage.get("unit"))
-        return (
-            user_unit.get("codeName")
-            or unit.get("codeName")
-            or self.get_usage_unit_code(row)
-        )
+        return user_unit.get("codeName") or unit.get("codeName") or self.get_usage_unit_code(row)
 
     def get_metering_type_code(self, row: Dict[str, Any]) -> str:
         usage = self.as_dict(row.get("usage"))
@@ -2811,20 +2678,12 @@ class BillingNormalizer:
     def get_price_unit_type_code(self, price_row: Dict[str, Any]) -> str:
         price_unit_type = self.as_dict(price_row.get("priceUnitType"))
         unit = self.as_dict(price_row.get("unit"))
-        return (
-            price_unit_type.get("code")
-            or unit.get("code")
-            or ""
-        )
+        return price_unit_type.get("code") or unit.get("code") or ""
 
     def get_charging_unit_type_code(self, price_row: Dict[str, Any]) -> str:
         charging_unit_type = self.as_dict(price_row.get("chargingUnitType"))
         metering_unit = self.as_dict(price_row.get("meteringUnit"))
-        return (
-            charging_unit_type.get("code")
-            or metering_unit.get("code")
-            or ""
-        )
+        return charging_unit_type.get("code") or metering_unit.get("code") or ""
 
     def get_metering_unit_type_code(self, price_row: Dict[str, Any]) -> str:
         metering_unit = self.as_dict(price_row.get("meteringUnit"))
@@ -2846,7 +2705,7 @@ class BillingNormalizer:
         for value in byte_candidates:
             size = self.to_float(value)
             if size > 0:
-                return size / (1024 ** 3)
+                return size / (1024**3)
 
         gb_candidates = [
             contract_product.get("storageSizeGb"),
@@ -2876,8 +2735,8 @@ class BillingNormalizer:
             if size <= 0:
                 continue
 
-            if size >= 1024 ** 3:
-                return size / (1024 ** 3)
+            if size >= 1024**3:
+                return size / (1024**3)
 
             return size
 

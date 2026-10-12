@@ -27,9 +27,7 @@ class CustomerProfile:
     credential_ref: str | None = None
     cloud_account_id: str | None = None
     cloud_account_code: str | None = None
-    report_options: ReportOptions | Dict[str, Any] = field(
-        default_factory=ReportOptions
-    )
+    report_options: ReportOptions | Dict[str, Any] = field(default_factory=ReportOptions)
     logo_data_uri: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:

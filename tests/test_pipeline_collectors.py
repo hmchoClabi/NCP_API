@@ -82,8 +82,7 @@ class ErrorEnvelopeVServerAPI(EmptyVServerAPI):
 class SensitiveFailingVServerAPI(EmptyVServerAPI):
     def get_server_instance_list(self, page_no, page_size):
         raise RuntimeError(
-            "request failed for "
-            "https://example.com/path?token=do-not-store&privateKey=hidden"
+            "request failed for https://example.com/path?token=do-not-store&privateKey=hidden"
         )
 
 
@@ -244,15 +243,11 @@ class ErrorEnvelopeMetricAPI(MetricAPI):
 
 class PipelineCollectorTests(unittest.TestCase):
     def test_server_collector_distinguishes_empty_from_failure(self):
-        empty_collector = ServerCollector(
-            FakeFactory(vserver=EmptyVServerAPI())
-        )
+        empty_collector = ServerCollector(FakeFactory(vserver=EmptyVServerAPI()))
         self.assertEqual(empty_collector.collect(), [])
         self.assertEqual(empty_collector.last_errors, [])
 
-        failed_collector = ServerCollector(
-            FakeFactory(vserver=FailingVServerAPI())
-        )
+        failed_collector = ServerCollector(FakeFactory(vserver=FailingVServerAPI()))
         self.assertEqual(failed_collector.collect(), [])
         self.assertTrue(failed_collector.last_errors)
         self.assertEqual(
@@ -287,9 +282,7 @@ class PipelineCollectorTests(unittest.TestCase):
             "getNetworkInterfaceListResponse": {"networkInterfaceList": []}
         }
         api.get_block_storage_instance_list.return_value = {
-            "getBlockStorageInstanceListResponse": {
-                "blockStorageInstanceList": []
-            }
+            "getBlockStorageInstanceListResponse": {"blockStorageInstanceList": []}
         }
         factory = FakeFactory(vserver=api)
         factory.credentials = Mock(region="SGN")
@@ -313,22 +306,13 @@ class PipelineCollectorTests(unittest.TestCase):
         )
 
     def test_server_collector_records_http_200_error_envelope(self):
-        collector = ServerCollector(
-            FakeFactory(vserver=ErrorEnvelopeVServerAPI())
-        )
+        collector = ServerCollector(FakeFactory(vserver=ErrorEnvelopeVServerAPI()))
 
         self.assertEqual(collector.collect(), [])
-        self.assertTrue(
-            any(
-                error["stage"] == "response"
-                for error in collector.last_errors
-            )
-        )
+        self.assertTrue(any(error["stage"] == "response" for error in collector.last_errors))
 
     def test_collector_error_message_redacts_exception_url_query(self):
-        collector = ServerCollector(
-            FakeFactory(vserver=SensitiveFailingVServerAPI())
-        )
+        collector = ServerCollector(FakeFactory(vserver=SensitiveFailingVServerAPI()))
 
         collector.collect()
 
@@ -338,19 +322,14 @@ class PipelineCollectorTests(unittest.TestCase):
         self.assertNotIn("token=", rendered_errors)
 
     def test_server_pagination_guard_deduplicates_repeated_page(self):
-        collector = ServerCollector(
-            FakeFactory(vserver=RepeatingVServerAPI())
-        )
+        collector = ServerCollector(FakeFactory(vserver=RepeatingVServerAPI()))
         collector.PAGE_SIZE = 2
 
         servers = collector.collect()
 
         self.assertEqual([item["server_id"] for item in servers], [1, 2])
         self.assertTrue(
-            any(
-                error["stage"] == "pagination_guard"
-                for error in collector.last_errors
-            )
+            any(error["stage"] == "pagination_guard" for error in collector.last_errors)
         )
 
     def test_server_normalizer_joins_numeric_and_string_ids(self):
@@ -387,9 +366,7 @@ class PipelineCollectorTests(unittest.TestCase):
 
     def test_insight_event_filters_cw_key_without_forwarding_keyword(self):
         api = EventAPIWithoutCwKey()
-        collector = InsightEventCollector(
-            FakeFactory(cloud_insight=api)
-        )
+        collector = InsightEventCollector(FakeFactory(cloud_insight=api))
 
         grouped = collector.collect(
             start_time=1,
@@ -407,39 +384,25 @@ class PipelineCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_errors, [])
 
     def test_insight_event_repeated_page_is_bounded_and_deduplicated(self):
-        collector = InsightEventCollector(
-            FakeFactory(cloud_insight=RepeatingEventAPI())
-        )
+        collector = InsightEventCollector(FakeFactory(cloud_insight=RepeatingEventAPI()))
         collector.EVENT_PAGE_SIZE = 1
 
         collector.collect(start_time=1, end_time=2)
 
         self.assertEqual(len(collector.last_events), 1)
         self.assertTrue(
-            any(
-                error["stage"] == "pagination_guard"
-                for error in collector.last_errors
-            )
+            any(error["stage"] == "pagination_guard" for error in collector.last_errors)
         )
 
     def test_insight_event_records_http_200_error_envelope(self):
-        collector = InsightEventCollector(
-            FakeFactory(cloud_insight=ErrorEnvelopeEventAPI())
-        )
+        collector = InsightEventCollector(FakeFactory(cloud_insight=ErrorEnvelopeEventAPI()))
 
         self.assertEqual(collector.collect(start_time=1, end_time=2), {})
-        self.assertTrue(
-            any(
-                error["stage"] == "response"
-                for error in collector.last_errors
-            )
-        )
+        self.assertTrue(any(error["stage"] == "response" for error in collector.last_errors))
 
     def test_activity_repeated_page_is_bounded_and_malformed_row_is_safe(self):
         collector = ActivityTracerEventCollector(
-            FakeFactory(
-                cloud_activity_tracer=RepeatingActivityAPI()
-            )
+            FakeFactory(cloud_activity_tracer=RepeatingActivityAPI())
         )
         collector.PAGE_SIZE = 1
 
@@ -451,10 +414,7 @@ class PipelineCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_events[0]["product_data"], {})
         self.assertEqual(set(grouped), {20})
         self.assertTrue(
-            any(
-                error["stage"] == "pagination_guard"
-                for error in collector.last_errors
-            )
+            any(error["stage"] == "pagination_guard" for error in collector.last_errors)
         )
 
     def test_activity_records_malformed_success_envelope(self):
@@ -463,21 +423,12 @@ class PipelineCollectorTests(unittest.TestCase):
         )
 
         self.assertEqual(collector.collect(start_time=1, end_time=2), {})
-        self.assertTrue(
-            any(
-                error["stage"] == "response"
-                for error in collector.last_errors
-            )
-        )
+        self.assertTrue(any(error["stage"] == "response" for error in collector.last_errors))
 
     def test_metric_mount_candidates_are_scoped_per_server(self):
         api = MetricAPI()
-        collector = InsightMetricCollector(
-            FakeFactory(cloud_insight=api)
-        )
-        collector._select_metric_interval = (
-            lambda start_time, end_time: "Hour2"
-        )
+        collector = InsightMetricCollector(FakeFactory(cloud_insight=api))
+        collector._select_metric_interval = lambda start_time, end_time: "Hour2"
         end_time = int(
             datetime(
                 2026,
@@ -547,10 +498,7 @@ class PipelineCollectorTests(unittest.TestCase):
         now_time = int(now_dt.timestamp() * 1000)
 
         def timestamp(days_ago):
-            return int(
-                (now_dt - timedelta(days=days_ago)).timestamp()
-                * 1000
-            )
+            return int((now_dt - timedelta(days=days_ago)).timestamp() * 1000)
 
         self.assertEqual(
             collector._select_metric_interval(
@@ -595,9 +543,7 @@ class PipelineCollectorTests(unittest.TestCase):
 
     def test_metric_interval_override_is_used_for_all_queries(self):
         api = MetricAPI()
-        collector = InsightMetricCollector(
-            FakeFactory(cloud_insight=api)
-        )
+        collector = InsightMetricCollector(FakeFactory(cloud_insight=api))
         collector._select_metric_interval = Mock(
             side_effect=AssertionError("interval selector should not run")
         )
@@ -636,9 +582,7 @@ class PipelineCollectorTests(unittest.TestCase):
 
     def test_metric_execution_queries_and_merges_each_time_window(self):
         api = MetricAPI()
-        collector = InsightMetricCollector(
-            FakeFactory(cloud_insight=api)
-        )
+        collector = InsightMetricCollector(FakeFactory(cloud_insight=api))
         day = 24 * 60 * 60 * 1000
         queries = [
             {
@@ -670,9 +614,7 @@ class PipelineCollectorTests(unittest.TestCase):
 
     def test_metric_records_http_200_error_envelope(self):
         api = ErrorEnvelopeMetricAPI()
-        collector = InsightMetricCollector(
-            FakeFactory(cloud_insight=api)
-        )
+        collector = InsightMetricCollector(FakeFactory(cloud_insight=api))
         start_time = int(
             datetime(
                 2026,
@@ -708,18 +650,11 @@ class PipelineCollectorTests(unittest.TestCase):
         )
 
         self.assertEqual(len(reports), 1)
-        self.assertTrue(
-            any(
-                error["stage"] == "response"
-                for error in collector.last_errors
-            )
-        )
+        self.assertTrue(any(error["stage"] == "response" for error in collector.last_errors))
 
     def test_metric_excludes_server_created_after_report_period(self):
         api = MetricAPI()
-        collector = InsightMetricCollector(
-            FakeFactory(cloud_insight=api)
-        )
+        collector = InsightMetricCollector(FakeFactory(cloud_insight=api))
         end_time = int(
             datetime(
                 2026,
@@ -758,8 +693,7 @@ class PipelineCollectorTests(unittest.TestCase):
         self.assertEqual(api.search_calls, [])
         self.assertTrue(
             any(
-                error.get("severity") == "warning"
-                and error["stage"] == "period_filter"
+                error.get("severity") == "warning" and error["stage"] == "period_filter"
                 for error in collector.last_errors
             )
         )
@@ -775,9 +709,7 @@ class PipelineCollectorTests(unittest.TestCase):
             ],
             filesystem_metric={"metric": "fs_usert"},
         )
-        raw_metrics = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(list))
-        )
+        raw_metrics = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         normalizer.merge_metric_response(
             raw_metrics=raw_metrics,
             response=[

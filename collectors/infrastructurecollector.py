@@ -24,33 +24,37 @@ class InfrastructureCollector:
     MAX_PAGES = 10_000
     WARNING_HTTP_STATUSES = frozenset({401, 403, 404, 405, 501})
     _SUB_ACCOUNT_PERMISSION_CODE = "X00004"
-    LEGACY_DEFAULT_CATEGORIES = frozenset({
-        "SERVER",
-        "LOAD_BALANCER",
-        "BLOCK_STORAGE",
-        "OBJECT_STORAGE",
-        "NAS",
-        "CLOUD_DB",
-        "KUBERNETES",
-    })
-    RESOURCE_MANAGER_ONLY_CATEGORIES = frozenset({
-        "OBJECT_STORAGE",
-        "VIRTUAL_PRIVATE_GATEWAY",
-        "AUTO_SCALING",
-        "GLOBAL_EDGE",
-        "GLOBAL_TRAFFIC_MANAGER",
-        "API_GATEWAY",
-        "BACKUP",
-        "ARCHIVE_STORAGE",
-        "SEARCH_ENGINE",
-        "DATA_STREAMING",
-        "CLOUD_HADOOP",
-        "DATA_STREAM",
-        "CLOUD_FUNCTIONS",
-        "SECURITY_SERVICE",
-        "IPSEC_VPN",
-        "CLOUD_CONNECT",
-    })
+    LEGACY_DEFAULT_CATEGORIES = frozenset(
+        {
+            "SERVER",
+            "LOAD_BALANCER",
+            "BLOCK_STORAGE",
+            "OBJECT_STORAGE",
+            "NAS",
+            "CLOUD_DB",
+            "KUBERNETES",
+        }
+    )
+    RESOURCE_MANAGER_ONLY_CATEGORIES = frozenset(
+        {
+            "OBJECT_STORAGE",
+            "VIRTUAL_PRIVATE_GATEWAY",
+            "AUTO_SCALING",
+            "GLOBAL_EDGE",
+            "GLOBAL_TRAFFIC_MANAGER",
+            "API_GATEWAY",
+            "BACKUP",
+            "ARCHIVE_STORAGE",
+            "SEARCH_ENGINE",
+            "DATA_STREAMING",
+            "CLOUD_HADOOP",
+            "DATA_STREAM",
+            "CLOUD_FUNCTIONS",
+            "SECURITY_SERVICE",
+            "IPSEC_VPN",
+            "CLOUD_CONNECT",
+        }
+    )
 
     def __init__(self, api_factory: Any):
         self.api_factory = api_factory
@@ -60,9 +64,7 @@ class InfrastructureCollector:
         credentials = getattr(api_factory, "credentials", None)
         region = getattr(credentials, "region", None)
         self.region_code = (
-            region.strip().upper()
-            if isinstance(region, str) and region.strip()
-            else None
+            region.strip().upper() if isinstance(region, str) and region.strip() else None
         )
 
     def collect(
@@ -114,8 +116,7 @@ class InfrastructureCollector:
                 )
             ]
         logger.info(
-            "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 "
-            "(오류 %s, 경고 %s)",
+            "대표 인프라 인벤토리 수집이 완료되었습니다: %s개 (오류 %s, 경고 %s)",
             len(result),
             len(self.last_errors),
             len(self.last_warnings),
@@ -178,9 +179,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="block_storage",
                 api="get_block_storage_instance_list",
-                normalize=lambda: self.normalizer.normalize_block_storages(
-                    storages or []
-                ),
+                normalize=lambda: self.normalizer.normalize_block_storages(storages or []),
             )
 
     def _collect_network_resources(
@@ -255,9 +254,7 @@ class InfrastructureCollector:
                 response_key="getRouteListResponse",
                 list_key="routeList",
                 target_type="route_table_route",
-                parent_request_kwargs=lambda item: {
-                    "vpc_no": item.get("vpcNo")
-                },
+                parent_request_kwargs=lambda item: {"vpc_no": item.get("vpcNo")},
                 required_parent_fields=("vpcNo",),
             )
             self._extend_normalized(
@@ -348,9 +345,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="nat_gateway",
                 api="get_nat_gateway_instance_list",
-                normalize=lambda: self.normalizer.normalize_nat_gateways(
-                    nat_gateways
-                ),
+                normalize=lambda: self.normalizer.normalize_nat_gateways(nat_gateways),
             )
 
         if self._category_enabled(selected_categories, "VPC_PEERING"):
@@ -367,9 +362,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="vpc_peering",
                 api="get_vpc_peering_instance_list",
-                normalize=lambda: self.normalizer.normalize_vpc_peerings(
-                    peerings
-                ),
+                normalize=lambda: self.normalizer.normalize_vpc_peerings(peerings),
             )
 
         if self._category_enabled(selected_categories, "PUBLIC_IP"):
@@ -387,9 +380,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="public_ip",
                 api="get_public_ip_instance_list",
-                normalize=lambda: self.normalizer.normalize_public_ips(
-                    public_ips
-                ),
+                normalize=lambda: self.normalizer.normalize_public_ips(public_ips),
             )
 
     def _collect_platform_resources(
@@ -418,9 +409,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="block_storage_snapshot",
                 api="get_block_storage_snapshot_instance_list",
-                normalize=lambda: self.normalizer.normalize_snapshots(
-                    snapshots
-                ),
+                normalize=lambda: self.normalizer.normalize_snapshots(snapshots),
             )
 
         if self._category_enabled(selected_categories, "SERVER_IMAGE"):
@@ -438,9 +427,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="server_image",
                 api="get_member_server_instance_list",
-                normalize=lambda: self.normalizer.normalize_server_images(
-                    server_images
-                ),
+                normalize=lambda: self.normalizer.normalize_server_images(server_images),
             )
 
         if self._category_enabled(selected_categories, "GLOBAL_DNS"):
@@ -460,9 +447,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="global_dns",
                 api="get_domain",
-                normalize=lambda: self.normalizer.normalize_global_dns(
-                    domains
-                ),
+                normalize=lambda: self.normalizer.normalize_global_dns(domains),
             )
 
         if self._category_enabled(selected_categories, "CERTIFICATE"):
@@ -476,9 +461,7 @@ class InfrastructureCollector:
                 resources,
                 target_type="certificate",
                 api="get_certificate_list",
-                normalize=lambda: self.normalizer.normalize_certificates(
-                    certificates
-                ),
+                normalize=lambda: self.normalizer.normalize_certificates(certificates),
             )
 
     def _collect_data_resources(
@@ -638,9 +621,7 @@ class InfrastructureCollector:
             resource_manager_items,
         )
 
-        resource_manager_categories = (
-            selected_categories & self.RESOURCE_MANAGER_ONLY_CATEGORIES
-        )
+        resource_manager_categories = selected_categories & self.RESOURCE_MANAGER_ONLY_CATEGORIES
         if resource_manager_categories:
             self._extend_normalized(
                 resources,
@@ -649,17 +630,13 @@ class InfrastructureCollector:
                 normalize=lambda: [
                     resource
                     for resource in (
-                        self.normalizer.normalize_resource_manager(
-                            resource_manager_items
-                        )
+                        self.normalizer.normalize_resource_manager(resource_manager_items)
                     )
-                    if resource.get("category")
-                    in resource_manager_categories
+                    if resource.get("category") in resource_manager_categories
                 ],
             )
 
         return resources
-
 
     def _server_storages(
         self,
@@ -876,10 +853,12 @@ class InfrastructureCollector:
         for page_no in range(page_start, page_start + self.MAX_PAGES):
             try:
                 call_kwargs = dict(request_kwargs or {})
-                call_kwargs.update({
-                    page_parameter: page_no,
-                    size_parameter: self.PAGE_SIZE,
-                })
+                call_kwargs.update(
+                    {
+                        page_parameter: page_no,
+                        size_parameter: self.PAGE_SIZE,
+                    }
+                )
                 response = method(**call_kwargs)
                 items, total_rows = self._extract_wrapped_items(
                     response,
@@ -898,10 +877,7 @@ class InfrastructureCollector:
                 )
                 break
 
-            fingerprint = tuple(
-                item_identity(item, identity_fields)
-                for item in items
-            )
+            fingerprint = tuple(item_identity(item, identity_fields) for item in items)
             if items and fingerprint == previous_fingerprint:
                 self._record_warning(
                     stage="pagination_guard",
@@ -1035,9 +1011,7 @@ class InfrastructureCollector:
         response_key: str,
         list_key: str,
         target_type: str,
-        parent_request_kwargs: Optional[
-            Callable[[Mapping[str, Any]], Mapping[str, Any]]
-        ] = None,
+        parent_request_kwargs: Optional[Callable[[Mapping[str, Any]], Mapping[str, Any]]] = None,
         required_parent_fields: Sequence[str] = (),
     ) -> Dict[str, List[Dict[str, Any]]]:
         """각 상위 자원에 연결된 규칙·연관 목록을 안전하게 수집한다."""
@@ -1063,18 +1037,14 @@ class InfrastructureCollector:
             if parent_id is None or not str(parent_id).strip():
                 continue
             if any(
-                parent.get(field) is None
-                or not str(parent.get(field)).strip()
+                parent.get(field) is None or not str(parent.get(field)).strip()
                 for field in required_parent_fields
             ):
                 self._record_warning(
                     stage="collection",
                     api=method_name,
                     target_type=target_type,
-                    message=(
-                        "상위 자원의 필수 식별 정보가 없어 상세 조회를 "
-                        "생략했습니다."
-                    ),
+                    message=("상위 자원의 필수 식별 정보가 없어 상세 조회를 생략했습니다."),
                 )
                 continue
 
@@ -1082,9 +1052,7 @@ class InfrastructureCollector:
                 request_kwargs: Dict[str, Any] = dict(self._region_kwargs())
                 request_kwargs[parent_parameter] = str(parent_id)
                 if parent_request_kwargs is not None:
-                    request_kwargs.update(
-                        dict(parent_request_kwargs(parent))
-                    )
+                    request_kwargs.update(dict(parent_request_kwargs(parent)))
                 response = method(**request_kwargs)
                 items, _ = self._extract_wrapped_items(
                     response,
@@ -1146,10 +1114,7 @@ class InfrastructureCollector:
                 )
                 break
 
-            fingerprint = tuple(
-                item_identity(item, ("nrn", "resourceId"))
-                for item in items
-            )
+            fingerprint = tuple(item_identity(item, ("nrn", "resourceId")) for item in items)
             if items and fingerprint == previous_fingerprint:
                 self._record_warning(
                     stage="pagination_guard",

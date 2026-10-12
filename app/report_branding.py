@@ -14,9 +14,7 @@ MAX_CUSTOMER_LOGO_BYTES = 512 * 1024
 MAX_CUSTOMER_LOGO_DIMENSION = 4096
 MAX_CUSTOMER_LOGO_PIXELS = 8_000_000
 
-_DATA_URI_PATTERN = re.compile(
-    r"\Adata:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]*={0,2})\Z"
-)
+_DATA_URI_PATTERN = re.compile(r"\Adata:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]*={0,2})\Z")
 _MAX_ENCODED_LOGO_LENGTH = 4 * ((MAX_CUSTOMER_LOGO_BYTES + 2) // 3)
 _CONTENT_TYPE_ALIASES = {
     "image/jpg": "image/jpeg",
@@ -69,9 +67,7 @@ def validate_customer_logo(
         or height > MAX_CUSTOMER_LOGO_DIMENSION
         or width * height > MAX_CUSTOMER_LOGO_PIXELS
     ):
-        raise ValueError(
-            "고객사 로고는 가로·세로 4,096px 이하, 총 800만 픽셀 이하여야 합니다."
-        )
+        raise ValueError("고객사 로고는 가로·세로 4,096px 이하, 총 800만 픽셀 이하여야 합니다.")
 
     return CustomerLogo(
         content=content,
@@ -108,9 +104,7 @@ def _normalize_declared_content_type(value: str | None) -> str | None:
 
 
 def _detect_image(content: bytes) -> tuple[str, int, int] | None:
-    detectors: tuple[
-        tuple[str, Callable[[bytes], tuple[int, int] | None]], ...
-    ] = (
+    detectors: tuple[tuple[str, Callable[[bytes], tuple[int, int] | None]], ...] = (
         ("image/png", _png_dimensions),
         ("image/jpeg", _jpeg_dimensions),
         ("image/webp", _webp_dimensions),
@@ -140,8 +134,19 @@ def _jpeg_dimensions(content: bytes) -> tuple[int, int] | None:
         return None
     position = 2
     start_of_frame_markers = {
-        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
-        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
     }
     while position < len(content):
         if content[position] != 0xFF:
@@ -156,14 +161,14 @@ def _jpeg_dimensions(content: bytes) -> tuple[int, int] | None:
             continue
         if marker in {0xD9, 0xDA} or position + 2 > len(content):
             return None
-        segment_length = int.from_bytes(content[position:position + 2], "big")
+        segment_length = int.from_bytes(content[position : position + 2], "big")
         if segment_length < 2 or position + segment_length > len(content):
             return None
         if marker in start_of_frame_markers:
             if segment_length < 7:
                 return None
-            height = int.from_bytes(content[position + 3:position + 5], "big")
-            width = int.from_bytes(content[position + 5:position + 7], "big")
+            height = int.from_bytes(content[position + 3 : position + 5], "big")
+            width = int.from_bytes(content[position + 5 : position + 7], "big")
             return (width, height) if width and height else None
         position += segment_length
     return None

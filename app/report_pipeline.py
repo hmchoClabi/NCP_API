@@ -70,9 +70,7 @@ class ObservabilityResult:
     server_metrics: List[Dict[str, Any]] = field(default_factory=list)
     infrastructure_metrics: List[Dict[str, Any]] = field(default_factory=list)
     insight_events: List[Dict[str, Any]] = field(default_factory=list)
-    grouped_insight_events: Dict[str, List[Dict[str, Any]]] = field(
-        default_factory=dict
-    )
+    grouped_insight_events: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     activity_events: Dict[str, Any] = field(default_factory=dict)
     service_availability: Dict[str, Any] = field(default_factory=dict)
     security_monitoring: Dict[str, Any] = field(default_factory=dict)
@@ -94,13 +92,9 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
     snapshot = report_options.to_dict()
     selected_resources = frozenset(snapshot["resource_categories"])
     selected_monitoring = frozenset(snapshot["monitoring_categories"])
-    inventory_enabled = report_options.section_enabled(
-        "infrastructure_inventory"
-    )
+    inventory_enabled = report_options.section_enabled("infrastructure_inventory")
     monitoring_enabled = report_options.section_enabled("monitoring")
-    active_monitoring = (
-        selected_monitoring if monitoring_enabled else frozenset()
-    )
+    active_monitoring = selected_monitoring if monitoring_enabled else frozenset()
     monitored_infrastructure = active_monitoring - {"SERVER"}
     collection_resources = set(active_monitoring)
     if inventory_enabled:
@@ -109,18 +103,14 @@ def build_collection_plan(report_options: ReportOptions) -> ReportCollectionPlan
     collection_resource_categories = frozenset(collection_resources)
     needs_infrastructure = bool(collection_resource_categories)
     needs_snapshot = bool(
-        collection_resource_categories.difference(
-            NETWORK_CONFIGURATION_CATEGORY_OPTIONS
-        )
+        collection_resource_categories.difference(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
     )
     return ReportCollectionPlan(
         report_options=report_options,
         selected_resource_categories=selected_resources,
         selected_monitoring_categories=selected_monitoring,
         monitoring_enabled=monitoring_enabled,
-        monitored_infrastructure_categories=frozenset(
-            monitored_infrastructure
-        ),
+        monitored_infrastructure_categories=frozenset(monitored_infrastructure),
         collection_resource_categories=collection_resource_categories,
         needs_infrastructure_collection=needs_infrastructure,
         needs_resource_snapshot=needs_snapshot,

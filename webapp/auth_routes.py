@@ -58,9 +58,7 @@ def register_auth_routes(
             if g.get("user"):
                 return redirect(url_for("index"))
             login_csrf = request.cookies.get(csrf_cookie) or secrets.token_urlsafe(32)
-            response = app.make_response(
-                render_template("login.html", csrf_token=login_csrf)
-            )
+            response = app.make_response(render_template("login.html", csrf_token=login_csrf))
             response.set_cookie(
                 csrf_cookie,
                 login_csrf,
@@ -80,8 +78,10 @@ def register_auth_routes(
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
         user = repository.authenticate(email)
-        if not user or user["status"] != "ACTIVE" or not verify_password(
-            user.get("password_hash") or "", password
+        if (
+            not user
+            or user["status"] != "ACTIVE"
+            or not verify_password(user.get("password_hash") or "", password)
         ):
             repository.log_authentication(
                 email,
@@ -125,6 +125,4 @@ def register_auth_routes(
     @app.get("/")
     @_login_required
     def index():
-        return redirect(
-            url_for("msp_dashboard" if _is_msp(g.user) else "customer_portal")
-        )
+        return redirect(url_for("msp_dashboard" if _is_msp(g.user) else "customer_portal"))

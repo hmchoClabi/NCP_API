@@ -52,9 +52,7 @@ def flatten_records(value: Any) -> list[dict[str, Any]]:
     for item_value in value.values():
         for item in records(item_value):
             identity = str(
-                item.get("event_id")
-                or item.get("history_id")
-                or stable_fingerprint("event", item)
+                item.get("event_id") or item.get("history_id") or stable_fingerprint("event", item)
             )
             if identity in seen:
                 continue
@@ -154,10 +152,7 @@ def _json_safe(value: Any) -> Any:
             for key, item in sorted(value.items(), key=lambda row: str(row[0]))
         }
     if isinstance(value, (set, frozenset)):
-        return [
-            _json_safe(item)
-            for item in sorted(value, key=lambda item: str(item))
-        ]
+        return [_json_safe(item) for item in sorted(value, key=lambda item: str(item))]
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     return str(value)

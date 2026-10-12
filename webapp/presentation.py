@@ -57,10 +57,17 @@ def format_duration(value: Any) -> str:
 
 def format_status(value: Any) -> str:
     return {
-        "SUCCESS": "성공", "PARTIAL_SUCCESS": "부분 수집", "FAILED": "실패",
-        "QUEUED": "대기", "RUNNING": "실행 중", "CANCELLED": "취소",
-        "ACTIVE": "활성", "DISABLED": "비활성", "OFFBOARDED": "종료",
-        "VALID": "정상", "INVALID": "확인 필요",
+        "SUCCESS": "성공",
+        "PARTIAL_SUCCESS": "부분 수집",
+        "FAILED": "실패",
+        "QUEUED": "대기",
+        "RUNNING": "실행 중",
+        "CANCELLED": "취소",
+        "ACTIVE": "활성",
+        "DISABLED": "비활성",
+        "OFFBOARDED": "종료",
+        "VALID": "정상",
+        "INVALID": "확인 필요",
     }.get(str(value), str(value) if value is not None else "-")
 
 

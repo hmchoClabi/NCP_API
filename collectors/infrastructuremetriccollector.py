@@ -153,21 +153,13 @@ class InfrastructureMetricCollector:
                     stage="schema_lookup",
                     api="get_system_schema_key_list",
                     category=category,
-                    message=(
-                        "해당 인프라의 Cloud Insight 시스템 상품을 "
-                        "찾지 못했습니다."
-                    ),
+                    message=("해당 인프라의 Cloud Insight 시스템 상품을 찾지 못했습니다."),
                 )
-            elif (
-                category not in mapped_categories
-                and mapping_attempted_products[category]
-            ):
+            elif category not in mapped_categories and mapping_attempted_products[category]:
                 # 한 서비스에 현행/레거시 System Schema가 함께 반환될 수 있다.
                 # 동일 카테고리의 다른 상품에서 정상 매핑된 경우 개별 0건
                 # 상품은 장애가 아니므로 경고하지 않는다.
-                attempted_products = list(
-                    dict.fromkeys(mapping_attempted_products[category])
-                )
+                attempted_products = list(dict.fromkeys(mapping_attempted_products[category]))
                 self._record_issue(
                     severity="warning",
                     stage="metric_mapping",
@@ -222,10 +214,7 @@ class InfrastructureMetricCollector:
         infrastructure: Any,
         selected_categories: Optional[Sequence[str]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
-        result = {
-            category: []
-            for category in self.MONITORED_CATEGORIES
-        }
+        result = {category: [] for category in self.MONITORED_CATEGORIES}
         if not isinstance(infrastructure, list):
             return result
 
@@ -309,11 +298,7 @@ class InfrastructureMetricCollector:
         seen = set()
         for item in items:
             product_name = item.get("prodName") or item.get("productName")
-            product_key = (
-                item.get("cw_key")
-                or item.get("cwKey")
-                or item.get("prodKey")
-            )
+            product_key = item.get("cw_key") or item.get("cwKey") or item.get("prodKey")
             if not product_name or not product_key:
                 continue
             pair = (str(product_name), str(product_key))
@@ -344,9 +329,7 @@ class InfrastructureMetricCollector:
             return "OBJECT_STORAGE"
         if "autoscaling" in normalized:
             return "AUTO_SCALING"
-        if "searchengineservice" in normalized or normalized.startswith(
-            "searchengine"
-        ):
+        if "searchengineservice" in normalized or normalized.startswith("searchengine"):
             return "SEARCH_ENGINE"
         if "clouddatastreamingservice" in normalized:
             return "DATA_STREAMING"
@@ -359,7 +342,7 @@ class InfrastructureMetricCollector:
     def _normalize_product_name(self, value: Any) -> str:
         normalized = str(value or "").strip().casefold()
         if normalized.startswith("system/"):
-            normalized = normalized[len("system/"):]
+            normalized = normalized[len("system/") :]
         normalized = normalized.replace(" monitor", "")
         return re.sub(r"[^a-z0-9]+", "", normalized)
 
@@ -377,7 +360,7 @@ class InfrastructureMetricCollector:
         )
         if len(search_targets) > self.MAX_DISCOVERY_TARGETS:
             omitted_count = len(search_targets) - self.MAX_DISCOVERY_TARGETS
-            search_targets = search_targets[:self.MAX_DISCOVERY_TARGETS]
+            search_targets = search_targets[: self.MAX_DISCOVERY_TARGETS]
             self._record_issue(
                 severity="warning",
                 stage="discovery_target_limit",
@@ -385,8 +368,7 @@ class InfrastructureMetricCollector:
                 category=self.OUTPUT_CATEGORIES[category],
                 product_name=product_name,
                 message=(
-                    "모니터링 발견 대상이 제한을 초과해 "
-                    f"{omitted_count}개 대상을 제외했습니다."
+                    f"모니터링 발견 대상이 제한을 초과해 {omitted_count}개 대상을 제외했습니다."
                 ),
                 extra={
                     "limit": self.MAX_DISCOVERY_TARGETS,
@@ -400,9 +382,7 @@ class InfrastructureMetricCollector:
             elif hasattr(insight_api, "search_metric_list"):
                 search_method = insight_api.search_metric_list
             else:
-                raise AttributeError(
-                    "CloudInsightAPI에 metric 검색 메서드가 없습니다."
-                )
+                raise AttributeError("CloudInsightAPI에 metric 검색 메서드가 없습니다.")
         except Exception as exc:
             severity, metadata = self._classify_exception(exc)
             self._record_issue(
@@ -420,14 +400,10 @@ class InfrastructureMetricCollector:
         for id_dimension, target_id in search_targets:
             try:
                 search_filter: Dict[str, Any] = {
-                    "dimensions_selected_list": [
-                        {"name": id_dimension, "values": [target_id]}
-                    ]
+                    "dimensions_selected_list": [{"name": id_dimension, "values": [target_id]}]
                 }
                 if category == "NKS":
-                    search_filter["dim_values"] = [
-                        {"name": "type", "value": "NodeAvailability"}
-                    ]
+                    search_filter["dim_values"] = [{"name": "type", "value": "NodeAvailability"}]
                 response = search_method(
                     prod_key=product_key,
                     **search_filter,
@@ -530,10 +506,7 @@ class InfrastructureMetricCollector:
                     category=category,
                 )
             )
-        return [
-            (dimension_name, identifier)
-            for identifier in sorted(identifiers)
-        ]
+        return [(dimension_name, identifier) for identifier in sorted(identifiers)]
 
     def _attach_search_target(
         self,
@@ -544,9 +517,7 @@ class InfrastructureMetricCollector:
         result = []
         for item in items:
             declared_id_dimension = str(
-                item.get("idDimension")
-                or item.get("id_dimension")
-                or ""
+                item.get("idDimension") or item.get("id_dimension") or ""
             ).strip()
             if declared_id_dimension and (
                 self._normalize_dimension_name(declared_id_dimension)
@@ -673,11 +644,7 @@ class InfrastructureMetricCollector:
 
             runtime_unit = item.get("unit")
             force_unit = bool(descriptor.get("force_unit"))
-            unit = (
-                descriptor.get("unit")
-                if force_unit
-                else runtime_unit or descriptor.get("unit")
-            )
+            unit = descriptor.get("unit") if force_unit else runtime_unit or descriptor.get("unit")
             value_scale = float(descriptor.get("value_scale") or 1.0)
             if self._is_percent_unit(runtime_unit):
                 value_scale = 1.0
@@ -718,11 +685,7 @@ class InfrastructureMetricCollector:
         product_name: str,
         metric_items: List[Dict[str, Any]],
     ) -> set[str]:
-        names = {
-            name
-            for item in metric_items
-            if (name := self._metric_name(item))
-        }
+        names = {name for item in metric_items if (name := self._metric_name(item))}
         if category == "LOAD_BALANCER":
             selected = set()
             normalized_names = defaultdict(list)
@@ -740,8 +703,7 @@ class InfrastructureMetricCollector:
             return {
                 name
                 for name in names
-                if self._normalize_metric_name(name)
-                in self.TARGET_GROUP_METRICS
+                if self._normalize_metric_name(name) in self.TARGET_GROUP_METRICS
             }
 
         if category == "CDB":
@@ -767,18 +729,10 @@ class InfrastructureMetricCollector:
             return selected
 
         if category == "NKS":
-            return {
-                name
-                for name in names
-                if self._normalize_metric_name(name) in self.NKS_METRICS
-            }
+            return {name for name in names if self._normalize_metric_name(name) in self.NKS_METRICS}
         metric_catalog = self.RESOURCE_METRICS.get(category)
         if metric_catalog is not None:
-            return {
-                name
-                for name in names
-                if self._normalize_metric_name(name) in metric_catalog
-            }
+            return {name for name in names if self._normalize_metric_name(name) in metric_catalog}
         return set()
 
     def _first_matching_metric(
@@ -804,31 +758,24 @@ class InfrastructureMetricCollector:
         for name in names:
             token = self._normalize_metric_name(name)
             score: Optional[int] = None
-            if semantic == "cpu" and (
-                token == "cpu" or token.startswith("cpu_")
-            ):
+            if semantic == "cpu" and (token == "cpu" or token.startswith("cpu_")):
                 score = 10 if "total" in token else 20
-            elif semantic == "memory" and (
-                token.startswith("mem_")
-                or token.startswith("memory_")
-            ) and any(
-                word in token
-                for word in ("used", "usage", "pct", "percent", "available")
+            elif (
+                semantic == "memory"
+                and (token.startswith("mem_") or token.startswith("memory_"))
+                and any(word in token for word in ("used", "usage", "pct", "percent", "available"))
             ):
                 score = 10
-            elif semantic == "storage" and (
-                token.startswith("disk_")
-                or token.startswith("storage_")
-            ) and any(
-                word in token
-                for word in ("used", "usage", "pct", "percent", "free")
+            elif (
+                semantic == "storage"
+                and (token.startswith("disk_") or token.startswith("storage_"))
+                and any(word in token for word in ("used", "usage", "pct", "percent", "free"))
             ):
                 score = 10
-            elif semantic == "connection" and any(
-                word in token for word in ("connection", "session", "conn")
-            ) and any(
-                word in token
-                for word in ("count", "current", "total", "active", "client")
+            elif (
+                semantic == "connection"
+                and any(word in token for word in ("connection", "session", "conn"))
+                and any(word in token for word in ("count", "current", "total", "active", "client"))
             ):
                 score = 10
             if score is not None:
@@ -875,9 +822,7 @@ class InfrastructureMetricCollector:
                 label = "가용 메모리"
             elif semantic == "storage" and "free" in token:
                 label = "스토리지 여유 공간"
-            elif semantic == "cpu" and any(
-                word in token for word in ("pct", "ratio", "percent")
-            ):
+            elif semantic == "cpu" and any(word in token for word in ("pct", "ratio", "percent")):
                 label = "CPU 사용률"
             elif semantic == "memory" and any(
                 word in token for word in ("pct", "ratio", "percent")
@@ -904,18 +849,13 @@ class InfrastructureMetricCollector:
             }
             if normalized_dimensions.get("type") != "nodeavailability":
                 return None
-            if not any(
-                key in normalized_dimensions
-                for key in ("clusteruuid", "clusterid")
-            ):
+            if not any(key in normalized_dimensions for key in ("clusteruuid", "clusterid")):
                 return None
             return {
                 "label": metric_config[0],
                 "unit": metric_config[1],
                 "force_unit": True,
-                "value_scale": (
-                    100.0 if token == "node_available_ratio" else 1.0
-                ),
+                "value_scale": (100.0 if token == "node_available_ratio" else 1.0),
                 "aggregations": ("AVG", "MAX", "SUM", "MIN"),
             }
         metric_catalog = self.RESOURCE_METRICS.get(category)
@@ -936,10 +876,7 @@ class InfrastructureMetricCollector:
             return "mongodb"
         if "mssql" in normalized or "sqlserver" in normalized:
             return "mssql"
-        if any(
-            product in normalized
-            for product in ("cache", "redis", "valkey")
-        ):
+        if any(product in normalized for product in ("cache", "redis", "valkey")):
             return "cache"
         if "mysql" in normalized or "mariadb" in normalized:
             return "mysql"
@@ -989,11 +926,7 @@ class InfrastructureMetricCollector:
             for dimension in dimensions:
                 if not isinstance(dimension, dict):
                     continue
-                name = (
-                    dimension.get("dim")
-                    or dimension.get("name")
-                    or dimension.get("dimension")
-                )
+                name = dimension.get("dim") or dimension.get("name") or dimension.get("dimension")
                 value = dimension.get("val")
                 if value is None:
                     value = dimension.get("value")
@@ -1022,8 +955,7 @@ class InfrastructureMetricCollector:
         category: str,
     ) -> bool:
         return any(
-            self._resource_identifiers(resource, category=category)
-            for resource in resources
+            self._resource_identifiers(resource, category=category) for resource in resources
         )
 
     def _match_resource(
@@ -1037,8 +969,7 @@ class InfrastructureMetricCollector:
         identifier_values = {
             str(value).strip().casefold()
             for name, value in dimensions.items()
-            if self._normalize_dimension_name(name) in allowed_dimensions
-            and str(value).strip()
+            if self._normalize_dimension_name(name) in allowed_dimensions and str(value).strip()
         }
         selected_id = metric_item.get("_selected_id")
         if selected_id is not None and str(selected_id).strip():
@@ -1136,11 +1067,7 @@ class InfrastructureMetricCollector:
 
         def dimension_value(*names: str) -> Optional[str]:
             return next(
-                (
-                    normalized_dimensions[name]
-                    for name in names
-                    if normalized_dimensions.get(name)
-                ),
+                (normalized_dimensions[name] for name in names if normalized_dimensions.get(name)),
                 None,
             )
 
@@ -1165,9 +1092,7 @@ class InfrastructureMetricCollector:
 
         details = resource.get("details") if resource is not None else None
         if isinstance(details, dict) and node_id:
-            instance_nos = self._string_list(
-                details.get("server_instance_nos")
-            )
+            instance_nos = self._string_list(details.get("server_instance_nos"))
             try:
                 node_index = instance_nos.index(node_id)
             except ValueError:
@@ -1199,11 +1124,7 @@ class InfrastructureMetricCollector:
     def _string_list(value: Any) -> List[str]:
         if not isinstance(value, (list, tuple)):
             return []
-        return [
-            str(item).strip()
-            for item in value
-            if item is not None and str(item).strip()
-        ]
+        return [str(item).strip() for item in value if item is not None and str(item).strip()]
 
     def _dimension_identity(self, dimensions: Dict[str, str]) -> str:
         for name, value in dimensions.items():
@@ -1233,9 +1154,7 @@ class InfrastructureMetricCollector:
             key=lambda name: self.INTERVAL_MINUTES.get(name, 10**9),
         )
         eligible = [
-            name
-            for name in intervals
-            if self.INTERVAL_MINUTES.get(name, -1) >= preferred_minutes
+            name for name in intervals if self.INTERVAL_MINUTES.get(name, -1) >= preferred_minutes
         ]
         interval = eligible[0] if eligible else intervals[-1]
         allowed = parsed[interval]
@@ -1267,10 +1186,7 @@ class InfrastructureMetricCollector:
         else:
             return result
 
-        canonical_intervals = {
-            name.casefold(): name
-            for name in self.INTERVAL_MINUTES
-        }
+        canonical_intervals = {name.casefold(): name for name in self.INTERVAL_MINUTES}
         for raw_interval, raw_aggregations in option_items:
             interval = canonical_intervals.get(str(raw_interval).casefold())
             if interval is None:
@@ -1321,8 +1237,7 @@ class InfrastructureMetricCollector:
 
     def _record_sort_key(self, record: Dict[str, Any]) -> Tuple[Any, ...]:
         category_order = {
-            category: index
-            for index, category in enumerate(self.MONITORED_CATEGORIES)
+            category: index for index, category in enumerate(self.MONITORED_CATEGORIES)
         }
         return (
             category_order.get(record["category"], 999),
@@ -1389,10 +1304,7 @@ class InfrastructureMetricCollector:
             )
         except Exception as exc:
             severity, metadata = self._classify_exception(exc)
-            if (
-                len(records) > 1
-                and metadata.get("status_code") in {400, 404}
-            ):
+            if len(records) > 1 and metadata.get("status_code") in {400, 404}:
                 midpoint = len(records) // 2
                 self._execute_query_chunk(
                     insight_api,
@@ -1412,9 +1324,7 @@ class InfrastructureMetricCollector:
                 stage="query",
                 api="get_query_data_multiple",
                 product_name=records[0]["product_name"],
-                metric=",".join(
-                    sorted({record["metric"] for record in records})
-                )[:300],
+                metric=",".join(sorted({record["metric"] for record in records}))[:300],
                 exc=exc,
                 extra=metadata,
             )
@@ -1495,10 +1405,7 @@ class InfrastructureMetricCollector:
             for record in candidates:
                 value_scale = float(record.get("value_scale") or 1.0)
                 record["points"].update(
-                    {
-                        timestamp: value * value_scale
-                        for timestamp, value in points.items()
-                    }
+                    {timestamp: value * value_scale for timestamp, value in points.items()}
                 )
 
     def _normalize_points(self, raw_points: Any) -> Dict[int, float]:
@@ -1532,11 +1439,7 @@ class InfrastructureMetricCollector:
         groups: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
         for record in records:
             output_category = self.OUTPUT_CATEGORIES[record["category"]]
-            metric_scope = (
-                "TARGET_GROUP"
-                if record["category"] == "TARGET_GROUP"
-                else "RESOURCE"
-            )
+            metric_scope = "TARGET_GROUP" if record["category"] == "TARGET_GROUP" else "RESOURCE"
             key = (
                 output_category,
                 metric_scope,
@@ -1574,8 +1477,7 @@ class InfrastructureMetricCollector:
                     "resource_name": record["resource_name"],
                     "dimensions": dict(record["dimensions"]),
                     "points": [
-                        [timestamp, value]
-                        for timestamp, value in sorted(record["points"].items())
+                        [timestamp, value] for timestamp, value in sorted(record["points"].items())
                     ],
                 }
             )
@@ -1628,16 +1530,12 @@ class InfrastructureMetricCollector:
             ].append(record)
 
         selected: List[Dict[str, Any]] = []
-        groups_by_category: Dict[str, List[List[Dict[str, Any]]]] = (
-            defaultdict(list)
-        )
+        groups_by_category: Dict[str, List[List[Dict[str, Any]]]] = defaultdict(list)
         for items in grouped.values():
             groups_by_category[items[0]["category"]].append(items)
 
         group_records: List[List[Dict[str, Any]]] = []
-        max_metric_groups = max(
-            len(items) for items in groups_by_category.values()
-        )
+        max_metric_groups = max(len(items) for items in groups_by_category.values())
         for group_index in range(max_metric_groups):
             for category in self.MONITORED_CATEGORIES:
                 category_groups = groups_by_category.get(category, [])
@@ -1740,11 +1638,7 @@ class InfrastructureMetricCollector:
             if provider_code:
                 metadata["error_code"] = provider_code
 
-        severity = (
-            "warning"
-            if status_code in {401, 403, 404}
-            else "error"
-        )
+        severity = "warning" if status_code in {401, 403, 404} else "error"
         return severity, metadata
 
     def _record_issue(
@@ -1760,12 +1654,7 @@ class InfrastructureMetricCollector:
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         safe_message = (
-            message
-            or (
-                safe_exception_message(exc)
-                if exc is not None
-                else "알 수 없는 오류"
-            )
+            message or (safe_exception_message(exc) if exc is not None else "알 수 없는 오류")
         )[:500]
         issue_key = (
             severity,

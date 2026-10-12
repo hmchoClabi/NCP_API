@@ -22,15 +22,11 @@ class ReportResult:
         RESOURCE_CATEGORY_OPTIONS
     )
     PERSISTED_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = (
-        (
-            DISPLAY_INFRASTRUCTURE_CATEGORIES
-            - frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
-        )
-        | {"TARGET_GROUP"}
-    )
-    MONITORED_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = (
-        frozenset(MONITORING_CATEGORY_OPTIONS) - {"SERVER"}
-    )
+        DISPLAY_INFRASTRUCTURE_CATEGORIES - frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
+    ) | {"TARGET_GROUP"}
+    MONITORED_INFRASTRUCTURE_CATEGORIES: ClassVar[frozenset[str]] = frozenset(
+        MONITORING_CATEGORY_OPTIONS
+    ) - {"SERVER"}
     period: Dict[str, Any]
     customer: Dict[str, Any] = field(default_factory=dict)
     servers: List[Dict[str, Any]] = field(default_factory=list)
@@ -38,9 +34,7 @@ class ReportResult:
     infrastructure: List[Dict[str, Any]] = field(default_factory=list)
     infrastructure_metrics: List[Dict[str, Any]] = field(default_factory=list)
     insight_events: List[Dict[str, Any]] = field(default_factory=list)
-    grouped_insight_events: Dict[str, List[Dict[str, Any]]] = field(
-        default_factory=dict
-    )
+    grouped_insight_events: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     activity_events: Any = field(default_factory=dict)
     billing: Dict[str, Any] = field(default_factory=dict)
     service_availability: Dict[str, Any] = field(default_factory=dict)
@@ -62,9 +56,7 @@ class ReportResult:
         repr=False,
     )
     generated_at: str = field(
-        default_factory=lambda: datetime.now(
-            ZoneInfo("Asia/Seoul")
-        ).isoformat(timespec="seconds")
+        default_factory=lambda: datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")
     )
 
     @property
@@ -81,17 +73,10 @@ class ReportResult:
     @property
     def display_server_metrics(self) -> List[Dict[str, Any]]:
         options = self.selected_report_options
-        if (
-            not options.section_enabled("monitoring")
-            or not options.monitoring_enabled("SERVER")
-        ):
+        if not options.section_enabled("monitoring") or not options.monitoring_enabled("SERVER"):
             return []
         return [
-            {
-                key: value
-                for key, value in metric.items()
-                if key != "raw_metrics"
-            }
+            {key: value for key, value in metric.items() if key != "raw_metrics"}
             for metric in self.server_metrics
             if isinstance(metric, dict)
         ]
@@ -103,14 +88,13 @@ class ReportResult:
         if not options.section_enabled("infrastructure_inventory"):
             return []
         filtered = [
-            item for item in self.infrastructure
+            item
+            for item in self.infrastructure
             if (
                 isinstance(item, dict)
                 and str(item.get("category") or "").upper()
                 in self.DISPLAY_INFRASTRUCTURE_CATEGORIES
-                and options.resource_enabled(
-                    str(item.get("category") or "")
-                )
+                and options.resource_enabled(str(item.get("category") or ""))
             )
         ]
         if filtered:
@@ -132,12 +116,8 @@ class ReportResult:
                 "details": {
                     key: value
                     for key, value in {
-                        "server_product_code": server.get(
-                            "server_product_code"
-                        ),
-                        "server_product_name": server.get(
-                            "server_product_name"
-                        ),
+                        "server_product_code": server.get("server_product_code"),
+                        "server_product_name": server.get("server_product_name"),
                         "cpu_count": server.get("cpu_count"),
                         "memory_gb": server.get("memory_gb"),
                         "storage_count": len(server.get("storages") or []),
@@ -158,14 +138,13 @@ class ReportResult:
         if not options.section_enabled("monitoring"):
             return []
         return [
-            item for item in self.infrastructure_metrics
+            item
+            for item in self.infrastructure_metrics
             if (
                 isinstance(item, dict)
                 and str(item.get("category") or "").upper()
                 in self.MONITORED_INFRASTRUCTURE_CATEGORIES
-                and options.monitoring_enabled(
-                    str(item.get("category") or "")
-                )
+                and options.monitoring_enabled(str(item.get("category") or ""))
             )
         ]
 
@@ -202,11 +181,7 @@ class ReportResult:
             "historical_presence_confidence",
         ]
         return [
-            {
-                key: server.get(key)
-                for key in allowed_fields
-                if key in server
-            }
+            {key: server.get(key) for key in allowed_fields if key in server}
             for server in self.servers
             if isinstance(server, dict)
         ]
@@ -223,16 +198,10 @@ class ReportResult:
             "cloud_account_code",
             "logo_data_uri",
         )
-        customer = {
-            key: self.customer.get(key)
-            for key in allowed_fields
-            if key in self.customer
-        }
+        customer = {key: self.customer.get(key) for key in allowed_fields if key in self.customer}
         if "logo_data_uri" in customer:
             try:
-                logo_data_uri = normalize_customer_logo_data_uri(
-                    customer["logo_data_uri"]
-                )
+                logo_data_uri = normalize_customer_logo_data_uri(customer["logo_data_uri"])
             except ValueError:
                 customer.pop("logo_data_uri", None)
             else:
@@ -332,17 +301,11 @@ class ReportResult:
         )
         result = []
         for resource in self.display_infrastructure:
-            item = {
-                key: resource.get(key)
-                for key in allowed_fields
-                if key in resource
-            }
+            item = {key: resource.get(key) for key in allowed_fields if key in resource}
             details = resource.get("details")
             if isinstance(details, dict):
                 safe_details = {
-                    key: details.get(key)
-                    for key in safe_detail_fields
-                    if key in details
+                    key: details.get(key) for key in safe_detail_fields if key in details
                 }
                 if safe_details:
                     item["details"] = safe_details
@@ -387,9 +350,7 @@ class ReportResult:
         snapshot["servers"] = self.servers
         snapshot["infrastructure"] = self.persisted_infrastructure
         if self.infrastructure_snapshot:
-            snapshot["infrastructure_snapshot"] = (
-                self.infrastructure_snapshot
-            )
+            snapshot["infrastructure_snapshot"] = self.infrastructure_snapshot
         return snapshot
 
     @classmethod
@@ -404,8 +365,7 @@ class ReportResult:
         if not isinstance(report_options, dict) or not report_options:
             report_options = (
                 legacy_report_options()
-                if str(payload.get("schema_version") or "")
-                not in {"1.3", "1.4", "1.5"}
+                if str(payload.get("schema_version") or "") not in {"1.3", "1.4", "1.5"}
                 else {}
             )
         return cls(
@@ -414,18 +374,12 @@ class ReportResult:
             servers=payload.get("servers") or [],
             server_metrics=payload.get("server_metrics") or [],
             infrastructure=payload.get("infrastructure") or [],
-            infrastructure_metrics=(
-                payload.get("infrastructure_metrics") or []
-            ),
+            infrastructure_metrics=(payload.get("infrastructure_metrics") or []),
             insight_events=payload.get("insight_events") or [],
-            grouped_insight_events=(
-                payload.get("grouped_insight_events") or {}
-            ),
+            grouped_insight_events=(payload.get("grouped_insight_events") or {}),
             activity_events=payload.get("activity_events") or {},
             billing=payload.get("billing") or {},
-            service_availability=(
-                payload.get("service_availability") or {}
-            ),
+            service_availability=(payload.get("service_availability") or {}),
             security_monitoring=payload.get("security_monitoring") or {},
             dataset_statuses=payload.get("dataset_statuses") or [],
             analysis=payload.get("analysis") or {},
@@ -433,8 +387,6 @@ class ReportResult:
             collection_metadata=payload.get("collection_metadata") or {},
             collection_errors=payload.get("collection_errors") or [],
             collection_warnings=payload.get("collection_warnings") or [],
-            infrastructure_snapshot=(
-                payload.get("infrastructure_snapshot") or {}
-            ),
+            infrastructure_snapshot=(payload.get("infrastructure_snapshot") or {}),
             generated_at=str(payload.get("generated_at") or "-"),
         )

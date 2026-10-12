@@ -24,9 +24,7 @@ class BillingPlatformStub:
         "get_contract_usage_list_by_daily": "contractUsageListByDaily",
         "get_contract_usage_list": "contractList",
         "get_product_price_list": "productPriceList",
-        "get_product_demand_cost_by_discount_list": (
-            "productDemandCostByDiscountList"
-        ),
+        "get_product_demand_cost_by_discount_list": ("productDemandCostByDiscountList"),
         "get_discount_list": "discountList",
         "get_credit_history_list": "creditHistoryList",
         "get_product_discount_history_list": "productDiscountHistoryList",
@@ -37,8 +35,7 @@ class BillingPlatformStub:
         method_name: (
             "get"
             + "".join(
-                part[:1].upper() + part[1:]
-                for part in method_name.removeprefix("get_").split("_")
+                part[:1].upper() + part[1:] for part in method_name.removeprefix("get_").split("_")
             )
             + "Response"
         )
@@ -57,23 +54,12 @@ class BillingPlatformStub:
         def request(*args, **kwargs):
             self.calls.append((name, kwargs))
             if name == self.failing_method:
-                raise RuntimeError(
-                    "request failed with url: "
-                    "/billing?privateKey=do-not-store"
-                )
+                raise RuntimeError("request failed with url: /billing?privateKey=do-not-store")
 
-            rows = (
-                [{"discountNo": "discount-1"}]
-                if name == "get_discount_list"
-                else []
-            )
+            rows = [{"discountNo": "discount-1"}] if name == "get_discount_list" else []
             return {
                 self.WRAPPER_KEYS[name]: {
-                    "returnCode": (
-                        "999"
-                        if name == self.error_method
-                        else "0"
-                    ),
+                    "returnCode": ("999" if name == self.error_method else "0"),
                     "totalRows": len(rows),
                     self.LIST_KEYS[name]: rows,
                 }
@@ -134,16 +120,24 @@ class BillingNormalizerTests(unittest.TestCase):
         result = self.normalizer.normalize(
             {
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "product_price_list": [{"productPriceList": [{
-                    "productCode": "server-product",
-                    "priceList": [{
-                        "priceNo": "fallback-price",
-                        "price": 100,
-                        "priceType": {"code": "MTRAT"},
-                        "ratingUnitType": {"code": "POINT"},
-                        "unit": {"code": "USAGE_HH"},
-                    }],
-                }]}],
+                "product_price_list": [
+                    {
+                        "productPriceList": [
+                            {
+                                "productCode": "server-product",
+                                "priceList": [
+                                    {
+                                        "priceNo": "fallback-price",
+                                        "price": 100,
+                                        "priceType": {"code": "MTRAT"},
+                                        "ratingUnitType": {"code": "POINT"},
+                                        "unit": {"code": "USAGE_HH"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202608",
         )
@@ -240,9 +234,7 @@ class BillingNormalizerTests(unittest.TestCase):
                     }
                 ],
                 "product_demand_cost_by_discount": [],
-                "daily_usage": [
-                    {"contractUsageListByDaily": [usage_row]}
-                ],
+                "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
                 "price_list": [
                     {
                         "priceList": [
@@ -318,13 +310,15 @@ class BillingNormalizerTests(unittest.TestCase):
 
     def test_confirmed_invoice_subtotal_excludes_vat(self):
         invoice = self.normalizer.summarize_confirmed_invoice(
-            [{
-                "useAmount": 750060,
-                "rounddownDiscountAmount": 60,
-                "thisMonthDemandAmount": 825000,
-                "thisMonthVatAmount": 75000,
-                "thisMonthAmountIncludingVat": 825000,
-            }],
+            [
+                {
+                    "useAmount": 750060,
+                    "rounddownDiscountAmount": 60,
+                    "thisMonthDemandAmount": 825000,
+                    "thisMonthVatAmount": 75000,
+                    "thisMonthAmountIncludingVat": 825000,
+                }
+            ],
             "202607",
             "2026-08-07T13:00:00+09:00",
         )
@@ -343,9 +337,9 @@ class BillingNormalizerTests(unittest.TestCase):
 
         result = self.normalizer.normalize(
             {
-                "confirmed_demand_cost": [{
-                    "demandCostList": [demand("100", 100), demand("200", 200)]
-                }],
+                "confirmed_demand_cost": [
+                    {"demandCostList": [demand("100", 100), demand("200", 200)]}
+                ],
                 "_meta": {
                     "organization": {
                         "scope": "ORGANIZATION",
@@ -396,9 +390,7 @@ class BillingNormalizerTests(unittest.TestCase):
                                 ]
                             }
                         ],
-                        "daily_usage": [
-                            {"contractUsageListByDaily": [usage_row]}
-                        ],
+                        "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
                         "price_list": [
                             {
                                 "priceList": [
@@ -425,9 +417,7 @@ class BillingNormalizerTests(unittest.TestCase):
                     else "UNSUPPORTED_RATING_PKG_DIMENSION"
                 )
                 self.assertEqual(
-                    result["expected_cost_summary"][0][
-                        "calculation_status"
-                    ],
+                    result["expected_cost_summary"][0]["calculation_status"],
                     expected_status,
                 )
                 self.assertEqual(
@@ -443,10 +433,12 @@ class BillingNormalizerTests(unittest.TestCase):
                 "price": 100,
                 "priceType": {"code": "MTRAT"},
                 "unit": {"code": "USAGE_HH"},
-                "packageUnitList": [{
-                    "productRatingType": {"code": "NETOT"},
-                    "usage": 20,
-                }],
+                "packageUnitList": [
+                    {
+                        "productRatingType": {"code": "NETOT"},
+                        "usage": 20,
+                    }
+                ],
             },
             usage_quantity=10,
             usage_unit_code="HOUR",
@@ -570,9 +562,7 @@ class BillingNormalizerTests(unittest.TestCase):
         result = self.normalizer.normalize(
             {
                 "daily_usage": [],
-                "month_to_date_usage": [{
-                    "contractUsageListByDaily": [month_to_date_row]
-                }],
+                "month_to_date_usage": [{"contractUsageListByDaily": [month_to_date_row]}],
             },
             billing_month="202608",
             comparison_enabled=False,
@@ -611,27 +601,33 @@ class BillingNormalizerTests(unittest.TestCase):
         }
         result = self.normalizer.normalize(
             {
-                "confirmed_demand_cost": [{
-                    "demandCostList": [{
-                        "thisMonthDemandAmount": 100,
-                        "thisMonthVatAmount": 10,
-                        "thisMonthAmountIncludingVat": 110,
-                        "totalDemandAmount": 310,
-                        "payCurrency": {"code": "KRW"},
-                    }]
-                }],
+                "confirmed_demand_cost": [
+                    {
+                        "demandCostList": [
+                            {
+                                "thisMonthDemandAmount": 100,
+                                "thisMonthVatAmount": 10,
+                                "thisMonthAmountIncludingVat": 110,
+                                "totalDemandAmount": 310,
+                                "payCurrency": {"code": "KRW"},
+                            }
+                        ]
+                    }
+                ],
                 "product_demand_cost": [],
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "month_to_date_usage": [
-                    {"contractUsageListByDaily": [usage_row]}
+                "month_to_date_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "price_list": [
+                    {
+                        "priceList": [
+                            {
+                                "priceNo": "price-1",
+                                "price": 10,
+                                "priceUnitType": {"code": "USAGE_HH"},
+                            }
+                        ]
+                    }
                 ],
-                "price_list": [{
-                    "priceList": [{
-                        "priceNo": "price-1",
-                        "price": 10,
-                        "priceUnitType": {"code": "USAGE_HH"},
-                    }]
-                }],
             },
             billing_month="202607",
             report_period={
@@ -689,18 +685,28 @@ class BillingNormalizerTests(unittest.TestCase):
             "conditionPrice": 0,
         }
         stop = self.normalizer.calculate_expected_amount(
-            row={"usage": {"meteringType": {
-                "code": "VSVRT", "codeName": "Server Stop Usage",
-            }}},
+            row={
+                "usage": {
+                    "meteringType": {
+                        "code": "VSVRT",
+                        "codeName": "Server Stop Usage",
+                    }
+                }
+            },
             price_row=price,
             usage_quantity=24,
             usage_unit_code="HOUR",
             days_in_month=30,
         )
         running = self.normalizer.calculate_expected_amount(
-            row={"usage": {"meteringType": {
-                "code": "VSVR", "codeName": "Server Usage",
-            }}},
+            row={
+                "usage": {
+                    "meteringType": {
+                        "code": "VSVR",
+                        "codeName": "Server Usage",
+                    }
+                }
+            },
             price_row=price,
             usage_quantity=1,
             usage_unit_code="HOUR",
@@ -718,9 +724,12 @@ class BillingNormalizerTests(unittest.TestCase):
                     "useStartDate": f"2026-08-{day:02d}T00:00:00+0900",
                     "useEndDate": f"2026-08-{day:02d}T23:59:59+0900",
                 },
-                "contract": {"contractNo": "contract-1", "contractType": {
-                    "codeName": "Server",
-                }},
+                "contract": {
+                    "contractNo": "contract-1",
+                    "contractType": {
+                        "codeName": "Server",
+                    },
+                },
                 "contractProduct": {
                     "contractProductSequence": "1",
                     "priceNo": "fixed",
@@ -736,16 +745,16 @@ class BillingNormalizerTests(unittest.TestCase):
         rows.append(dict(rows[0]))
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "fixed",
-                "price": 100500,
-                "priceType": {"code": "FXSUM"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "USAGE_MM"},
-                "priceDescription": (
-                    "Usage time (day) * ( Price (month) / full days )"
-                ),
-            }],
+            [
+                {
+                    "priceNo": "fixed",
+                    "price": 100500,
+                    "priceType": {"code": "FXSUM"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "USAGE_MM"},
+                    "priceDescription": ("Usage time (day) * ( Price (month) / full days )"),
+                }
+            ],
             31,
         )
         self.assertAlmostEqual(summary[0]["expected_amount"], 51870.97, places=2)
@@ -754,35 +763,42 @@ class BillingNormalizerTests(unittest.TestCase):
     def test_fixed_storage_price_uses_capacity_and_active_days(self):
         rows = []
         for day in range(1, 17):
-            rows.append({
-                "useDate": {
-                    "useStartDate": f"2026-08-{day:02d}",
-                    "useEndDate": f"2026-08-{day:02d}",
-                },
-                "contract": {"contractNo": "storage-1", "contractType": {
-                    "codeName": "Server",
-                }},
-                "contractProduct": {
-                    "contractProductSequence": "1",
-                    "priceNo": "storage",
-                    "productSize": 10 * 1024 ** 3,
-                    "productRatingType": {"codeName": "Storage"},
-                },
-                "usage": {
-                    "userUsageQuantity": 24,
-                    "userUnit": {"code": "HOUR"},
-                },
-            })
+            rows.append(
+                {
+                    "useDate": {
+                        "useStartDate": f"2026-08-{day:02d}",
+                        "useEndDate": f"2026-08-{day:02d}",
+                    },
+                    "contract": {
+                        "contractNo": "storage-1",
+                        "contractType": {
+                            "codeName": "Server",
+                        },
+                    },
+                    "contractProduct": {
+                        "contractProductSequence": "1",
+                        "priceNo": "storage",
+                        "productSize": 10 * 1024**3,
+                        "productRatingType": {"codeName": "Storage"},
+                    },
+                    "usage": {
+                        "userUsageQuantity": 24,
+                        "userUnit": {"code": "HOUR"},
+                    },
+                }
+            )
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "storage",
-                "price": 115.2,
-                "priceType": {"code": "FXSUM"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "STRG_1G_MM"},
-                "priceDescription": "Usage time (day) * Price (day)",
-            }],
+            [
+                {
+                    "priceNo": "storage",
+                    "price": 115.2,
+                    "priceType": {"code": "FXSUM"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "STRG_1G_MM"},
+                    "priceDescription": "Usage time (day) * Price (day)",
+                }
+            ],
             31,
         )
         self.assertAlmostEqual(summary[0]["expected_amount"], 594.58, places=2)
@@ -790,70 +806,80 @@ class BillingNormalizerTests(unittest.TestCase):
     def test_tiered_usage_is_aggregated_before_free_tier(self):
         rows = []
         for day in (1, 2):
-            rows.append({
-                "account": {"memberNo": "member-1"},
-                "useDate": {
-                    "useStartDate": f"2026-08-{day:02d}",
-                    "useEndDate": f"2026-08-{day:02d}",
-                },
-                "contract": {"contractNo": f"network-{day}", "contractType": {
-                    "codeName": (
-                        "Server" if day == 1 else "Cloud DB for Cache"
-                    ),
-                }},
-                "contractProduct": {
-                    "priceNo": "network",
-                    "productRatingType": {"code": "NETOT", "codeName": "Network OUT"},
-                },
-                "usage": {
-                    "userUsageQuantity": 768,
-                    "userUnit": {"code": "GBYTE"},
-                    "meteringType": {"code": "NETOT"},
-                },
-            })
+            rows.append(
+                {
+                    "account": {"memberNo": "member-1"},
+                    "useDate": {
+                        "useStartDate": f"2026-08-{day:02d}",
+                        "useEndDate": f"2026-08-{day:02d}",
+                    },
+                    "contract": {
+                        "contractNo": f"network-{day}",
+                        "contractType": {
+                            "codeName": ("Server" if day == 1 else "Cloud DB for Cache"),
+                        },
+                    },
+                    "contractProduct": {
+                        "priceNo": "network",
+                        "productRatingType": {"code": "NETOT", "codeName": "Network OUT"},
+                    },
+                    "usage": {
+                        "userUsageQuantity": 768,
+                        "userUnit": {"code": "GBYTE"},
+                        "meteringType": {"code": "NETOT"},
+                    },
+                }
+            )
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "network",
-                "price": 0,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "SECT"},
-                "unit": {"code": "USAGE_1GB"},
-                "periodUnitList": [
-                    {"startValue": 0, "endValue": 1024 ** 4, "price": 0},
-                    {"startValue": 1024 ** 4, "endValue": 5 * 1024 ** 4, "price": 100},
-                    {"startValue": 5 * 1024 ** 4, "endValue": -1, "price": 90},
-                ],
-            }],
+            [
+                {
+                    "priceNo": "network",
+                    "price": 0,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "SECT"},
+                    "unit": {"code": "USAGE_1GB"},
+                    "periodUnitList": [
+                        {"startValue": 0, "endValue": 1024**4, "price": 0},
+                        {"startValue": 1024**4, "endValue": 5 * 1024**4, "price": 100},
+                        {"startValue": 5 * 1024**4, "endValue": -1, "price": 90},
+                    ],
+                }
+            ],
             31,
         )
         self.assertEqual(summary[0]["calculation_status"], "OK")
         self.assertEqual(summary[0]["expected_amount"], 51200.0)
 
     def test_monthly_free_value_is_applied_once_after_aggregation(self):
-        rows = [{
-            "account": {"memberNo": "member-1"},
-            "contract": {"contractType": {"codeName": "SourceCommit"}},
-            "contractProduct": {
-                "priceNo": "source-storage",
-                "productRatingType": {"codeName": "Storage"},
-            },
-            "usage": {
-                "userUsageQuantity": 31,
-                "userUnit": {"code": "GBYTE"},
-            },
-        } for _ in range(2)]
+        rows = [
+            {
+                "account": {"memberNo": "member-1"},
+                "contract": {"contractType": {"codeName": "SourceCommit"}},
+                "contractProduct": {
+                    "priceNo": "source-storage",
+                    "productRatingType": {"codeName": "Storage"},
+                },
+                "usage": {
+                    "userUsageQuantity": 31,
+                    "userUnit": {"code": "GBYTE"},
+                },
+            }
+            for _ in range(2)
+        ]
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "source-storage",
-                "price": 60,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "USAGE_1GB"},
-                "freeUnit": {"code": "SAVE_CAPA_1G"},
-                "freeValue": 50,
-            }],
+            [
+                {
+                    "priceNo": "source-storage",
+                    "price": 60,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "USAGE_1GB"},
+                    "freeUnit": {"code": "SAVE_CAPA_1G"},
+                    "freeValue": 50,
+                }
+            ],
             31,
         )
         self.assertEqual(summary[0]["expected_amount"], 720.0)
@@ -895,16 +921,18 @@ class BillingNormalizerTests(unittest.TestCase):
         ]
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "fixed-server",
-                "price": 31000,
-                "priceType": {"code": "FXSUM"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "USAGE_MM"},
-                "conditionType": {"code": "SVR_ST_PRC"},
-                "conditionPrice": 0,
-                "priceDescription": "Usage time (day) * Price (day)",
-            }],
+            [
+                {
+                    "priceNo": "fixed-server",
+                    "price": 31000,
+                    "priceType": {"code": "FXSUM"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "USAGE_MM"},
+                    "conditionType": {"code": "SVR_ST_PRC"},
+                    "conditionPrice": 0,
+                    "priceDescription": "Usage time (day) * Price (day)",
+                }
+            ],
             31,
         )
 
@@ -965,19 +993,21 @@ class BillingNormalizerTests(unittest.TestCase):
         }
         for quantity, expected in expected_amounts.items():
             with self.subTest(quantity=quantity):
-                rows = [{
-                    "account": {"memberNo": "member-1"},
-                    "contract": {"contractType": {"codeName": "Image Optimizer"}},
-                    "contractProduct": {
-                        "priceNo": "image-optimizer",
-                        "productRatingType": {"codeName": "Request"},
-                    },
-                    "usage": {
-                        "userUsageQuantity": quantity,
-                        "userUnit": {"code": "COUNT_TIMES"},
-                        "meteringType": {"code": "REQ_CNT"},
-                    },
-                }]
+                rows = [
+                    {
+                        "account": {"memberNo": "member-1"},
+                        "contract": {"contractType": {"codeName": "Image Optimizer"}},
+                        "contractProduct": {
+                            "priceNo": "image-optimizer",
+                            "productRatingType": {"codeName": "Request"},
+                        },
+                        "usage": {
+                            "userUsageQuantity": quantity,
+                            "userUnit": {"code": "COUNT_TIMES"},
+                            "meteringType": {"code": "REQ_CNT"},
+                        },
+                    }
+                ]
                 summary = self.normalizer.summarize_expected_cost(
                     rows,
                     [price],
@@ -986,41 +1016,43 @@ class BillingNormalizerTests(unittest.TestCase):
                 self.assertEqual(summary[0]["expected_amount"], expected)
 
     def test_section_free_value_is_not_applied_twice(self):
-        rows = [{
-            "account": {"memberNo": "member-1"},
-            "contract": {"contractType": {"codeName": "Object Storage"}},
-            "contractProduct": {
-                "priceNo": "tier-with-free",
-                "productRatingType": {"codeName": "Network OUT"},
-            },
-            "usage": {
-                "userUsageQuantity": 1536,
-                "userUnit": {"code": "GBYTE"},
-                "meteringType": {"code": "NETOT"},
-            },
-        }]
+        rows = [
+            {
+                "account": {"memberNo": "member-1"},
+                "contract": {"contractType": {"codeName": "Object Storage"}},
+                "contractProduct": {
+                    "priceNo": "tier-with-free",
+                    "productRatingType": {"codeName": "Network OUT"},
+                },
+                "usage": {
+                    "userUsageQuantity": 1536,
+                    "userUnit": {"code": "GBYTE"},
+                    "meteringType": {"code": "NETOT"},
+                },
+            }
+        ]
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "tier-with-free",
-                "price": 0,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "SECT"},
-                "unit": {"code": "USAGE_1GB"},
-                "freeUnit": {"code": "SAVE_CAPA_1G"},
-                "freeValue": 1024,
-                "periodUnitList": [
-                    {"startValue": 0, "endValue": 1024 ** 4, "price": 0},
-                    {"startValue": 1024 ** 4, "endValue": -1, "price": 100},
-                ],
-            }],
+            [
+                {
+                    "priceNo": "tier-with-free",
+                    "price": 0,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "SECT"},
+                    "unit": {"code": "USAGE_1GB"},
+                    "freeUnit": {"code": "SAVE_CAPA_1G"},
+                    "freeValue": 1024,
+                    "periodUnitList": [
+                        {"startValue": 0, "endValue": 1024**4, "price": 0},
+                        {"startValue": 1024**4, "endValue": -1, "price": 100},
+                    ],
+                }
+            ],
             31,
         )
 
         self.assertEqual(summary[0]["expected_amount"], 51200)
-        self.assertTrue(
-            summary[0]["rating_details"]["free_quantity_already_in_tiers"]
-        )
+        self.assertTrue(summary[0]["rating_details"]["free_quantity_already_in_tiers"])
 
     def test_description_rule_calculates_secret_manager_hourly_fallback(self):
         calculated = self.normalizer.calculate_expected_amount(
@@ -1041,28 +1073,32 @@ class BillingNormalizerTests(unittest.TestCase):
         self.assertEqual(calculated["expected_amount"], 8.4)
 
         summary = self.normalizer.summarize_expected_cost(
-            [{
-                "account": {"memberNo": "member-1"},
-                "contract": {"contractType": {"codeName": "Secret Manager"}},
-                "contractProduct": {
+            [
+                {
+                    "account": {"memberNo": "member-1"},
+                    "contract": {"contractType": {"codeName": "Secret Manager"}},
+                    "contractProduct": {
+                        "priceNo": "secret-maintenance",
+                        "productRatingType": {"codeName": "Maintenance"},
+                    },
+                    "usage": {
+                        "userUsageQuantity": 14.107778,
+                        "userUnit": {"code": "HOUR"},
+                        "meteringType": {"code": "MAINT"},
+                    },
+                }
+            ],
+            [
+                {
                     "priceNo": "secret-maintenance",
-                    "productRatingType": {"codeName": "Maintenance"},
-                },
-                "usage": {
-                    "userUsageQuantity": 14.107778,
-                    "userUnit": {"code": "HOUR"},
-                    "meteringType": {"code": "MAINT"},
-                },
-            }],
-            [{
-                "priceNo": "secret-maintenance",
-                "price": 0.6,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "REQ_CNT"},
-                "meteringUnit": {"code": "USAGE_SEC"},
-                "priceDescription": "Usage time (hour) * Price",
-            }],
+                    "price": 0.6,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "REQ_CNT"},
+                    "meteringUnit": {"code": "USAGE_SEC"},
+                    "priceDescription": "Usage time (hour) * Price",
+                }
+            ],
             31,
         )
         self.assertEqual(summary[0]["expected_amount"], 9.0)
@@ -1094,30 +1130,34 @@ class BillingNormalizerTests(unittest.TestCase):
         self.assertEqual(day_to_hours["expected_amount"], 2400)
 
     def test_units_charging_basic_value_uses_ceiling_blocks(self):
-        rows = [{
-            "account": {"memberNo": "member-1"},
-            "contract": {"contractType": {"codeName": "Secret Manager"}},
-            "contractProduct": {
-                "priceNo": "secret-api",
-                "productRatingType": {"codeName": "API Call"},
-            },
-            "usage": {
-                "userUsageQuantity": 7500,
-                "userUnit": {"code": "COUNT_TIMES"},
-                "meteringType": {"code": "API_CALL"},
-            },
-        }]
+        rows = [
+            {
+                "account": {"memberNo": "member-1"},
+                "contract": {"contractType": {"codeName": "Secret Manager"}},
+                "contractProduct": {
+                    "priceNo": "secret-api",
+                    "productRatingType": {"codeName": "API Call"},
+                },
+                "usage": {
+                    "userUsageQuantity": 7500,
+                    "userUnit": {"code": "COUNT_TIMES"},
+                    "meteringType": {"code": "API_CALL"},
+                },
+            }
+        ]
         summary = self.normalizer.summarize_expected_cost(
             rows,
-            [{
-                "priceNo": "secret-api",
-                "price": 5,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "POINT"},
-                "unit": {"code": "REQ_CNT"},
-                "chargingUnitType": {"code": "UNITS"},
-                "chargingUnitBasicValue": 1000,
-            }],
+            [
+                {
+                    "priceNo": "secret-api",
+                    "price": 5,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "POINT"},
+                    "unit": {"code": "REQ_CNT"},
+                    "chargingUnitType": {"code": "UNITS"},
+                    "chargingUnitBasicValue": 1000,
+                }
+            ],
             31,
         )
 
@@ -1145,9 +1185,12 @@ class BillingNormalizerTests(unittest.TestCase):
                 "useStartDate": "2026-08-01",
                 "useEndDate": "2026-08-16",
             },
-            "contract": {"contractNo": "network-1", "contractType": {
-                "codeName": "Server",
-            }},
+            "contract": {
+                "contractNo": "network-1",
+                "contractType": {
+                    "codeName": "Server",
+                },
+            },
             "contractProduct": {
                 "contractProductSequence": "1",
                 "priceNo": "network",
@@ -1156,7 +1199,7 @@ class BillingNormalizerTests(unittest.TestCase):
                 "productRatingType": {"code": "NETOT", "codeName": "Network OUT"},
             },
             "usage": {
-                "usageQuantity": 800 * 1024 ** 3,
+                "usageQuantity": 800 * 1024**3,
                 "unit": {"code": "USAGE_1BYTE"},
                 "userUsageQuantity": 800,
                 "userUnit": {"code": "GBYTE"},
@@ -1171,17 +1214,19 @@ class BillingNormalizerTests(unittest.TestCase):
         )
         summary = self.normalizer.summarize_expected_cost(
             projected_rows,
-            [{
-                "priceNo": "network",
-                "price": 0,
-                "priceType": {"code": "MTRAT"},
-                "ratingUnitType": {"code": "SECT"},
-                "unit": {"code": "USAGE_1GB"},
-                "periodUnitList": [
-                    {"startValue": 0, "endValue": 1024 ** 4, "price": 0},
-                    {"startValue": 1024 ** 4, "endValue": -1, "price": 100},
-                ],
-            }],
+            [
+                {
+                    "priceNo": "network",
+                    "price": 0,
+                    "priceType": {"code": "MTRAT"},
+                    "ratingUnitType": {"code": "SECT"},
+                    "unit": {"code": "USAGE_1GB"},
+                    "periodUnitList": [
+                        {"startValue": 0, "endValue": 1024**4, "price": 0},
+                        {"startValue": 1024**4, "endValue": -1, "price": 100},
+                    ],
+                }
+            ],
             31,
         )
         self.assertEqual(summary[0]["expected_amount"], 52600.0)
@@ -1292,9 +1337,12 @@ class BillingNormalizerTests(unittest.TestCase):
                 "useStartDate": "2026-08-01",
                 "useEndDate": "2026-08-16",
             },
-            "contract": {"contractNo": "server-1", "contractType": {
-                "codeName": "Server (VPC)",
-            }},
+            "contract": {
+                "contractNo": "server-1",
+                "contractType": {
+                    "codeName": "Server (VPC)",
+                },
+            },
             "contractProduct": {
                 "contractProductSequence": "1",
                 "priceNo": "hourly",
@@ -1309,23 +1357,33 @@ class BillingNormalizerTests(unittest.TestCase):
         }
         result = self.normalizer.normalize(
             {
-                "product_demand_cost": [{"productDemandCostList": [{
-                    "productDemandType": {"codeName": "Server(VPC)"},
-                    "useAmount": 100000,
-                    "demandAmount": 100000,
-                    "writeDate": "2026-08-16T10:00:00+09:00",
-                }]}],
+                "product_demand_cost": [
+                    {
+                        "productDemandCostList": [
+                            {
+                                "productDemandType": {"codeName": "Server(VPC)"},
+                                "useAmount": 100000,
+                                "demandAmount": 100000,
+                                "writeDate": "2026-08-16T10:00:00+09:00",
+                            }
+                        ]
+                    }
+                ],
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "month_to_date_usage": [{
-                    "contractUsageListByDaily": [usage_row]
-                }],
-                "price_list": [{"priceList": [{
-                    "priceNo": "hourly",
-                    "price": 100,
-                    "priceType": {"code": "MTRAT"},
-                    "ratingUnitType": {"code": "POINT"},
-                    "unit": {"code": "USAGE_HH"},
-                }]}],
+                "month_to_date_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "price_list": [
+                    {
+                        "priceList": [
+                            {
+                                "priceNo": "hourly",
+                                "price": 100,
+                                "priceType": {"code": "MTRAT"},
+                                "ratingUnitType": {"code": "POINT"},
+                                "unit": {"code": "USAGE_HH"},
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202608",
             report_period={
@@ -1352,12 +1410,18 @@ class BillingNormalizerTests(unittest.TestCase):
             result["month_end_projection"]["total_amount"],
             result["month_to_date_estimate"]["total_amount"],
         )
-        self.assertTrue(all(
-            fact["confidence"] in {
-                "CONFIRMED", "VERIFIED_ESTIMATE", "PARTIAL", "UNAVAILABLE",
-            }
-            for fact in result["cost_facts"]
-        ))
+        self.assertTrue(
+            all(
+                fact["confidence"]
+                in {
+                    "CONFIRMED",
+                    "VERIFIED_ESTIMATE",
+                    "PARTIAL",
+                    "UNAVAILABLE",
+                }
+                for fact in result["cost_facts"]
+            )
+        )
 
     def test_current_complex_price_uses_fresh_ncp_partial_fallback(self):
         usage_row = {
@@ -1378,22 +1442,32 @@ class BillingNormalizerTests(unittest.TestCase):
         }
         result = self.normalizer.normalize(
             {
-                "product_demand_cost": [{"productDemandCostList": [{
-                    "productDemandType": {"codeName": "Complex Service"},
-                    "useAmount": 1234,
-                    "writeDate": "2026-08-17T10:00:00+09:00",
-                }]}],
+                "product_demand_cost": [
+                    {
+                        "productDemandCostList": [
+                            {
+                                "productDemandType": {"codeName": "Complex Service"},
+                                "useAmount": 1234,
+                                "writeDate": "2026-08-17T10:00:00+09:00",
+                            }
+                        ]
+                    }
+                ],
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "month_to_date_usage": [{
-                    "contractUsageListByDaily": [usage_row]
-                }],
-                "price_list": [{"priceList": [{
-                    "priceNo": "package-price",
-                    "price": 100,
-                    "priceType": {"code": "MTRAT"},
-                    "ratingUnitType": {"code": "PKG"},
-                    "unit": {"code": "REQ_CNT"},
-                }]}],
+                "month_to_date_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "price_list": [
+                    {
+                        "priceList": [
+                            {
+                                "priceNo": "package-price",
+                                "price": 100,
+                                "priceType": {"code": "MTRAT"},
+                                "ratingUnitType": {"code": "PKG"},
+                                "unit": {"code": "REQ_CNT"},
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202608",
             report_period={
@@ -1419,27 +1493,33 @@ class BillingNormalizerTests(unittest.TestCase):
 
     def test_current_fallback_requires_every_ncp_row_to_be_fresh(self):
         cutoff = self.normalizer._parse_api_date("2026-08-16")
-        self.assertTrue(self.normalizer.all_rows_written_on_or_after(
-            [
-                {"writeDate": "2026-08-16T10:00:00+09:00"},
-                {"writeDate": "2026-08-17T10:00:00+09:00"},
-            ],
-            cutoff,
-        ))
-        self.assertFalse(self.normalizer.all_rows_written_on_or_after(
-            [
-                {"writeDate": "2026-08-17T10:00:00+09:00"},
-                {"writeDate": "2026-08-15T10:00:00+09:00"},
-            ],
-            cutoff,
-        ))
-        self.assertFalse(self.normalizer.all_rows_written_on_or_after(
-            [
-                {"writeDate": "2026-08-17T10:00:00+09:00"},
-                {},
-            ],
-            cutoff,
-        ))
+        self.assertTrue(
+            self.normalizer.all_rows_written_on_or_after(
+                [
+                    {"writeDate": "2026-08-16T10:00:00+09:00"},
+                    {"writeDate": "2026-08-17T10:00:00+09:00"},
+                ],
+                cutoff,
+            )
+        )
+        self.assertFalse(
+            self.normalizer.all_rows_written_on_or_after(
+                [
+                    {"writeDate": "2026-08-17T10:00:00+09:00"},
+                    {"writeDate": "2026-08-15T10:00:00+09:00"},
+                ],
+                cutoff,
+            )
+        )
+        self.assertFalse(
+            self.normalizer.all_rows_written_on_or_after(
+                [
+                    {"writeDate": "2026-08-17T10:00:00+09:00"},
+                    {},
+                ],
+                cutoff,
+            )
+        )
 
     def test_actual_usage_coverage_controls_month_end_projection(self):
         usage_row = {
@@ -1462,16 +1542,20 @@ class BillingNormalizerTests(unittest.TestCase):
         result = self.normalizer.normalize(
             {
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "month_to_date_usage": [{
-                    "contractUsageListByDaily": [usage_row]
-                }],
-                "price_list": [{"priceList": [{
-                    "priceNo": "point-price",
-                    "price": 1,
-                    "priceType": {"code": "MTRAT"},
-                    "ratingUnitType": {"code": "POINT"},
-                    "unit": {"code": "USAGE_HH"},
-                }]}],
+                "month_to_date_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "price_list": [
+                    {
+                        "priceList": [
+                            {
+                                "priceNo": "point-price",
+                                "price": 1,
+                                "priceType": {"code": "MTRAT"},
+                                "ratingUnitType": {"code": "POINT"},
+                                "unit": {"code": "USAGE_HH"},
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202608",
             report_period={
@@ -1509,21 +1593,31 @@ class BillingNormalizerTests(unittest.TestCase):
         }
         result = self.normalizer.normalize(
             {
-                "product_demand_cost": [{"productDemandCostList": [{
-                    "productDemandType": {"codeName": "Server"},
-                    "useAmount": 310,
-                }]}],
+                "product_demand_cost": [
+                    {
+                        "productDemandCostList": [
+                            {
+                                "productDemandType": {"codeName": "Server"},
+                                "useAmount": 310,
+                            }
+                        ]
+                    }
+                ],
                 "daily_usage": [{"contractUsageListByDaily": [usage_row]}],
-                "month_to_date_usage": [{
-                    "contractUsageListByDaily": [usage_row]
-                }],
-                "price_list": [{"priceList": [{
-                    "priceNo": "point-price",
-                    "price": 1,
-                    "priceType": {"code": "MTRAT"},
-                    "ratingUnitType": {"code": "POINT"},
-                    "unit": {"code": "USAGE_HH"},
-                }]}],
+                "month_to_date_usage": [{"contractUsageListByDaily": [usage_row]}],
+                "price_list": [
+                    {
+                        "priceList": [
+                            {
+                                "priceNo": "point-price",
+                                "price": 1,
+                                "priceType": {"code": "MTRAT"},
+                                "ratingUnitType": {"code": "POINT"},
+                                "unit": {"code": "USAGE_HH"},
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202606",
             report_period={
@@ -1547,13 +1641,19 @@ class BillingNormalizerTests(unittest.TestCase):
     def test_closed_month_uses_contract_cost_when_product_cost_is_missing(self):
         result = self.normalizer.normalize(
             {
-                "contract_demand_cost": [{"contractDemandCostList": [{
-                    "contract": {
-                        "contractType": {"codeName": "Complex Service"},
-                    },
-                    "useAmount": 4321,
-                    "demandAmount": 4000,
-                }]}],
+                "contract_demand_cost": [
+                    {
+                        "contractDemandCostList": [
+                            {
+                                "contract": {
+                                    "contractType": {"codeName": "Complex Service"},
+                                },
+                                "useAmount": 4321,
+                                "demandAmount": 4000,
+                            }
+                        ]
+                    }
+                ],
             },
             billing_month="202606",
             report_period={
@@ -1599,10 +1699,7 @@ class BillingCollectorTests(unittest.TestCase):
             },
         )
 
-        integrated_calls = [
-            kwargs for _, kwargs in platform.calls
-            if "is_organization" in kwargs
-        ]
+        integrated_calls = [kwargs for _, kwargs in platform.calls if "is_organization" in kwargs]
         self.assertTrue(integrated_calls)
         self.assertTrue(all(call["is_organization"] for call in integrated_calls))
         self.assertTrue(all(call["member_no_list"] is None for call in integrated_calls))
@@ -1656,11 +1753,7 @@ class BillingCollectorTests(unittest.TestCase):
 
     def test_optional_source_failure_preserves_other_billing_results(self):
         collector = BillingCollector(
-            FakeFactory(
-                BillingPlatformStub(
-                    failing_method="get_coin_history_list"
-                )
-            )
+            FakeFactory(BillingPlatformStub(failing_method="get_coin_history_list"))
         )
 
         raw = collector.collect_raw(
@@ -1671,9 +1764,7 @@ class BillingCollectorTests(unittest.TestCase):
 
         self.assertEqual(raw["coin_history"], [])
         self.assertEqual(len(collector.last_errors), 1)
-        self.assertFalse(
-            collector.last_errors[0]["comparison_required"]
-        )
+        self.assertFalse(collector.last_errors[0]["comparison_required"])
         self.assertNotIn(
             "do-not-store",
             str(raw["_meta"]["collection_errors"]),
@@ -1681,11 +1772,7 @@ class BillingCollectorTests(unittest.TestCase):
 
     def test_core_source_failure_marks_comparison_partial(self):
         collector = BillingCollector(
-            FakeFactory(
-                BillingPlatformStub(
-                    failing_method="get_product_demand_cost_list"
-                )
-            )
+            FakeFactory(BillingPlatformStub(failing_method="get_product_demand_cost_list"))
         )
         raw = collector.collect_raw(
             use_start_date="20260101",
@@ -1710,11 +1797,7 @@ class BillingCollectorTests(unittest.TestCase):
 
     def test_nested_billing_error_envelope_is_not_treated_as_empty(self):
         collector = BillingCollector(
-            FakeFactory(
-                BillingPlatformStub(
-                    error_method="get_coin_history_list"
-                )
-            )
+            FakeFactory(BillingPlatformStub(error_method="get_coin_history_list"))
         )
 
         raw = collector.collect_raw(
@@ -1724,12 +1807,7 @@ class BillingCollectorTests(unittest.TestCase):
         )
 
         self.assertEqual(raw["coin_history"], [])
-        self.assertTrue(
-            any(
-                error["source"] == "coin_history"
-                for error in collector.last_errors
-            )
-        )
+        self.assertTrue(any(error["source"] == "coin_history" for error in collector.last_errors))
 
 
 if __name__ == "__main__":

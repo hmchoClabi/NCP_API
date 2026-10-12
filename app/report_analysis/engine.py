@@ -46,9 +46,7 @@ def analyze_report(
     metrics, metric_findings = analyze_metrics(report, effective_policy)
     events, event_findings = analyze_events(report)
     changes, change_findings = analyze_changes(report)
-    availability, availability_findings = analyze_availability(
-        report, effective_policy
-    )
+    availability, availability_findings = analyze_availability(report, effective_policy)
     security, security_findings = analyze_security(report)
     # 거버넌스 준수 여부는 실제 장애나 자원 포화와 동일한 운영 경고로
     # 취급하지 않는다. 기존 저장 스냅샷과의 JSON 계약만 빈 요약으로 유지한다.
@@ -65,15 +63,17 @@ def analyze_report(
         policy=effective_policy,
     )
     resource_changes = analyze_resource_changes(report, baseline=baseline)
-    findings = sort_findings([
-        *quality_findings,
-        *metric_findings,
-        *event_findings,
-        *change_findings,
-        *availability_findings,
-        *security_findings,
-        *cost_findings,
-    ])
+    findings = sort_findings(
+        [
+            *quality_findings,
+            *metric_findings,
+            *event_findings,
+            *change_findings,
+            *availability_findings,
+            *security_findings,
+            *cost_findings,
+        ]
+    )
     _apply_quality_status(metrics, dataset_status(quality, "monitoring"))
     _apply_quality_status(events, dataset_status(quality, "insight_events"))
     _apply_quality_status(changes, dataset_status(quality, "activity_events"))
@@ -115,11 +115,7 @@ def _overall_status(
     findings: list[dict[str, Any]],
     quality: Mapping[str, Any],
 ) -> str:
-    operational = [
-        finding
-        for finding in findings
-        if finding.get("category") != "DATA_QUALITY"
-    ]
+    operational = [finding for finding in findings if finding.get("category") != "DATA_QUALITY"]
     if any(finding.get("severity") == "CRITICAL" for finding in operational):
         return "RISK"
     if any(finding.get("severity") == "WARNING" for finding in operational):
@@ -130,16 +126,8 @@ def _overall_status(
 
 
 def _key_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    operational = [
-        finding
-        for finding in findings
-        if finding.get("category") != "DATA_QUALITY"
-    ]
-    quality = [
-        finding
-        for finding in findings
-        if finding.get("category") == "DATA_QUALITY"
-    ]
+    operational = [finding for finding in findings if finding.get("category") != "DATA_QUALITY"]
+    quality = [finding for finding in findings if finding.get("category") == "DATA_QUALITY"]
     return [*operational, *quality][:5]
 
 

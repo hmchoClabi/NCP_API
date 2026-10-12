@@ -7,6 +7,7 @@ class CloudActivityTracerAPI(BaseNCPAPI):
     CloudActivityTracerAPI 클래스
 
     """
+
     ENDPOINT_KEY = "cloudactivitytracer"
 
     """
@@ -15,16 +16,14 @@ class CloudActivityTracerAPI(BaseNCPAPI):
     ================================================================
     """
 
-    def get_activity_list (
+    def get_activity_list(
         self,
-        fromEventTime : Optional[int] = None,
-        toEventTime : Optional[int] = None,
-        nrn : Optional[str] = None,
-        page : Optional[int] = None,
-        size : Optional[int] = None,
-
+        fromEventTime: Optional[int] = None,
+        toEventTime: Optional[int] = None,
+        nrn: Optional[str] = None,
+        page: Optional[int] = None,
+        size: Optional[int] = None,
     ) -> Dict:
-        
         """
         리소스 작업 내역을 조회합니다. 리소스는 사용자가 네이버 클라우드 플랫폼에서 생성한 자원의 단위입니다. 리소스는 식별이 가능하도록 NRN(Ncloud Resource Names)이라는 고유한 키 값으로 구분하여 관리하기 때문에 NRN을 사용하여 호출 시 특정 리소스에 대한 작업 내역을 조회할 수 있습니다.
 
@@ -37,7 +36,7 @@ class CloudActivityTracerAPI(BaseNCPAPI):
 
 
         Returns:
-            Dict: 
+            Dict:
                 page	Integer	-	페이지 번호
                 size	Integer	-	페이지 출력 수
                 itemCount	Integer	-	응답 결과 수
@@ -62,24 +61,23 @@ class CloudActivityTracerAPI(BaseNCPAPI):
                     sourceIp	String	-	작업을 요청한 클라이언트 IP 주소 sourceType이 CONSOLE이거나 PORTAL인 경우 표시
                     productData	Object	-	리소스 상세 정보 각 필드 정보: 리소스별 API 가이드 참조
 
-                
+
         """
         json_body = {}
 
         if fromEventTime is not None:
-            json_body['fromEventTime'] = fromEventTime
+            json_body["fromEventTime"] = fromEventTime
         if toEventTime is not None:
-            json_body['toEventTime'] = toEventTime
+            json_body["toEventTime"] = toEventTime
         if nrn is not None:
-            json_body['nrn'] = nrn
+            json_body["nrn"] = nrn
         if page is not None:
-            json_body['page'] = page
+            json_body["page"] = page
         if size is not None:
-            json_body['size'] = size
+            json_body["size"] = size
 
         return self.client.post(
-            f'/api/v1/activities',
+            f"/api/v1/activities",
             json_data=json_body,
             retry_safe=True,
         )
-    

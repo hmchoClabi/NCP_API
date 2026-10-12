@@ -72,7 +72,4 @@ API_RETRY_COUNT = _read_positive_int("API_RETRY_COUNT", 3)
 # 리포트 설정
 # ============================================================
 
-REPORT_OUTPUT_DIR = os.getenv(
-    "REPORT_OUTPUT_DIR",
-    "./reports"
-)
+REPORT_OUTPUT_DIR = os.getenv("REPORT_OUTPUT_DIR", "./reports")

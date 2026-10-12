@@ -24,9 +24,7 @@ class WebCliTests(unittest.TestCase):
         self.assertEqual(password, "long-password-two")
 
     def test_environment_password_is_validated(self):
-        with patch.dict(
-            "webapp.cli.os.environ", {"TEST_PASSWORD": "short"}, clear=True
-        ):
+        with patch.dict("webapp.cli.os.environ", {"TEST_PASSWORD": "short"}, clear=True):
             with self.assertRaisesRegex(ValueError, "at least 12"):
                 prompt_new_password("TEST_PASSWORD", "Test")
 

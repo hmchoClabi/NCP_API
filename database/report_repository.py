@@ -36,9 +36,9 @@ class PostgresReportRepository:
     ):
         self.settings = settings
         self.idempotency_suffix = idempotency_suffix
-        self.trigger_type = trigger_type if trigger_type in {
-            "MANUAL", "SCHEDULED", "RETRY", "API"
-        } else "MANUAL"
+        self.trigger_type = (
+            trigger_type if trigger_type in {"MANUAL", "SCHEDULED", "RETRY", "API"} else "MANUAL"
+        )
         self.last_report_run_id: Optional[str] = None
 
     def save_report(
@@ -77,12 +77,14 @@ class PostgresReportRepository:
                         cursor, report, tenant_id, environment, cloud_account_id
                     )
                     self._replace_report_details(
-                        cursor, report, report_run_id, tenant_id, environment,
+                        cursor,
+                        report,
+                        report_run_id,
+                        tenant_id,
+                        environment,
                         cloud_account_id,
                     )
-                    self._replace_artifacts(
-                        cursor, report_run_id, tenant_id, artifacts or {}
-                    )
+                    self._replace_artifacts(cursor, report_run_id, tenant_id, artifacts or {})
                     self._replace_errors(cursor, report, report_run_id, tenant_id)
                     self._upsert_daily_fact(
                         cursor,
@@ -116,11 +118,7 @@ class PostgresReportRepository:
         tenant_id = self.settings.tenant_id
         cloud_account_id = customer.get("cloud_account_id")
         environment = str(customer.get("api_type") or "public").casefold()
-        if (
-            not tenant_id
-            or not cloud_account_id
-            or environment not in self.SCHEMAS
-        ):
+        if not tenant_id or not cloud_account_id or environment not in self.SCHEMAS:
             return None
 
         window = self._snapshot_eligibility_window(period, reference_at)
@@ -165,9 +163,10 @@ class PostgresReportRepository:
         )
 
         try:
-            with psycopg.connect(
-                **self.settings.connection_kwargs()
-            ) as connection, connection.cursor() as cursor:
+            with (
+                psycopg.connect(**self.settings.connection_kwargs()) as connection,
+                connection.cursor() as cursor,
+            ):
                 cursor.execute(
                     "SELECT set_config('app.tenant_id', %s, true)",
                     (str(tenant_id),),
@@ -211,9 +210,7 @@ class PostgresReportRepository:
         infrastructure_snapshot = result.get("infrastructure_snapshot")
         if isinstance(infrastructure_snapshot, Mapping):
             snapshot_servers = infrastructure_snapshot.get("servers")
-            snapshot_infrastructure = infrastructure_snapshot.get(
-                "infrastructure"
-            )
+            snapshot_infrastructure = infrastructure_snapshot.get("infrastructure")
             snapshot_metadata = infrastructure_snapshot.get("metadata")
             if isinstance(snapshot_servers, list):
                 result["servers"] = list(snapshot_servers)
@@ -222,13 +219,9 @@ class PostgresReportRepository:
             if isinstance(snapshot_metadata, Mapping):
                 collection_metadata = result.get("collection_metadata")
                 collection_metadata = (
-                    dict(collection_metadata)
-                    if isinstance(collection_metadata, Mapping)
-                    else {}
+                    dict(collection_metadata) if isinstance(collection_metadata, Mapping) else {}
                 )
-                collection_metadata["infrastructure"] = dict(
-                    snapshot_metadata
-                )
+                collection_metadata["infrastructure"] = dict(snapshot_metadata)
                 result["collection_metadata"] = collection_metadata
         result["_snapshot_reference"] = {
             "report_run_id": str(row[1]),
@@ -238,11 +231,7 @@ class PostgresReportRepository:
             "eligible_end": window["eligible_end"].isoformat(),
             "snapshot_age_seconds": max(
                 0,
-                int(
-                    (
-                        window["reference_at"] - observed_at
-                    ).total_seconds()
-                ),
+                int((window["reference_at"] - observed_at).total_seconds()),
             ),
         }
         return result
@@ -263,11 +252,7 @@ class PostgresReportRepository:
         tenant_id = self.settings.tenant_id
         cloud_account_id = customer.get("cloud_account_id")
         environment = str(customer.get("api_type") or "public").casefold()
-        if (
-            not tenant_id
-            or not cloud_account_id
-            or environment not in self.SCHEMAS
-        ):
+        if not tenant_id or not cloud_account_id or environment not in self.SCHEMAS:
             return None
 
         window = self._snapshot_eligibility_window(period, reference_at)
@@ -283,9 +268,10 @@ class PostgresReportRepository:
 
         schema = self.SCHEMAS[environment]
         try:
-            with psycopg.connect(
-                **self.settings.connection_kwargs()
-            ) as connection, connection.cursor() as cursor:
+            with (
+                psycopg.connect(**self.settings.connection_kwargs()) as connection,
+                connection.cursor() as cursor,
+            ):
                 cursor.execute(
                     "SELECT set_config('app.tenant_id', %s, true)",
                     (str(tenant_id),),
@@ -325,9 +311,7 @@ class PostgresReportRepository:
         metadata = row[8] if isinstance(row[8], dict) else {}
         raw_selected_categories = metadata.get("selected_categories")
         selected_categories = (
-            list(raw_selected_categories)
-            if isinstance(raw_selected_categories, list)
-            else []
+            list(raw_selected_categories) if isinstance(raw_selected_categories, list) else []
         )
         return {
             "configuration": list(row[0]),
@@ -340,9 +324,7 @@ class PostgresReportRepository:
             "metadata": dict(metadata),
             "selected_categories": selected_categories,
             "collection_source": metadata.get("collection_source"),
-            "collection_completeness": metadata.get(
-                "collection_completeness"
-            ),
+            "collection_completeness": metadata.get("collection_completeness"),
             "collection_issue_count": metadata.get(
                 "collection_issue_count",
                 0,
@@ -357,11 +339,7 @@ class PostgresReportRepository:
                 "eligible_end": window["eligible_end"].isoformat(),
                 "snapshot_age_seconds": max(
                     0,
-                    int(
-                        (
-                            window["reference_at"] - captured_at
-                        ).total_seconds()
-                    ),
+                    int((window["reference_at"] - captured_at).total_seconds()),
                 ),
             },
         }
@@ -380,11 +358,7 @@ class PostgresReportRepository:
         tenant_id = self.settings.tenant_id
         cloud_account_id = customer.get("cloud_account_id")
         environment = str(customer.get("api_type") or "public").casefold()
-        if (
-            not tenant_id
-            or not cloud_account_id
-            or environment not in self.SCHEMAS
-        ):
+        if not tenant_id or not cloud_account_id or environment not in self.SCHEMAS:
             return None
 
         period_start, _, _ = self._period_bounds(period)
@@ -398,9 +372,10 @@ class PostgresReportRepository:
 
         schema = self.SCHEMAS[environment]
         try:
-            with psycopg.connect(
-                **self.settings.connection_kwargs()
-            ) as connection, connection.cursor() as cursor:
+            with (
+                psycopg.connect(**self.settings.connection_kwargs()) as connection,
+                connection.cursor() as cursor,
+            ):
                 cursor.execute(
                     "SELECT set_config('app.tenant_id', %s, true)",
                     (str(tenant_id),),
@@ -436,9 +411,7 @@ class PostgresReportRepository:
                 )
                 row = cursor.fetchone()
         except Exception as exc:
-            raise DatabasePersistenceError(
-                "Previous report comparison lookup failed."
-            ) from exc
+            raise DatabasePersistenceError("Previous report comparison lookup failed.") from exc
 
         if not row or not isinstance(row[0], dict):
             return None
@@ -448,9 +421,7 @@ class PostgresReportRepository:
             "period_start": self._parse_datetime(row[2]).isoformat(),
             "period_end": self._parse_datetime(row[3]).isoformat(),
             "completed_at": (
-                self._parse_datetime(row[4]).isoformat()
-                if row[4] is not None
-                else None
+                self._parse_datetime(row[4]).isoformat() if row[4] is not None else None
             ),
         }
         return result
@@ -462,9 +433,7 @@ class PostgresReportRepository:
     ) -> Optional[Dict[str, datetime]]:
         period_start, period_end, _ = self._period_bounds(period)
         reference = (
-            datetime.now(self.KST)
-            if reference_at is None
-            else self._parse_datetime(reference_at)
+            datetime.now(self.KST) if reference_at is None else self._parse_datetime(reference_at)
         )
         return build_snapshot_eligibility_window(
             period_start,
@@ -493,9 +462,7 @@ class PostgresReportRepository:
             return row[0], row[1]
 
         if self.settings.role != "msp":
-            raise DatabasePersistenceError(
-                "Only the MSP role may register a tenant automatically."
-            )
+            raise DatabasePersistenceError("Only the MSP role may register a tenant automatically.")
 
         customer_id = str(customer.get("id") or "default")
         customer_code = self._customer_code(customer_id)
@@ -522,16 +489,18 @@ class PostgresReportRepository:
         return row[0], row[1]
 
     def _upsert_report_run(
-        self, cursor: Any, report: ReportResult, tenant_id: Any, environment: str,
+        self,
+        cursor: Any,
+        report: ReportResult,
+        tenant_id: Any,
+        environment: str,
         cloud_account_id: Any,
     ) -> Any:
         start, end, end_exclusive = self._period_bounds(report.period)
         report_type = self._report_type(report.period)
         error_count = len(report.collection_errors)
         status = "PARTIAL_SUCCESS" if error_count else "SUCCESS"
-        idempotency_parts = [
-            str(tenant_id), str(cloud_account_id), report.report_id
-        ]
+        idempotency_parts = [str(tenant_id), str(cloud_account_id), report.report_id]
         if self.idempotency_suffix:
             idempotency_parts.append(self.idempotency_suffix)
         idempotency_key = ":".join(idempotency_parts)[:255]
@@ -562,8 +531,15 @@ class PostgresReportRepository:
             RETURNING id
             """,
             (
-                tenant_id, environment, report_type, start, end,
-                end_exclusive, status, self.trigger_type, idempotency_key,
+                tenant_id,
+                environment,
+                report_type,
+                start,
+                end,
+                end_exclusive,
+                status,
+                self.trigger_type,
+                idempotency_key,
                 cloud_account_id,
                 error_count,
             ),
@@ -599,8 +575,10 @@ class PostgresReportRepository:
             RETURNING id
             """,
             (
-                tenant_id, account_code,
-                str(customer.get("name") or account_code)[:200], environment,
+                tenant_id,
+                account_code,
+                str(customer.get("name") or account_code)[:200],
+                environment,
                 str(customer.get("region") or "KR")[:20],
             ),
         )
@@ -617,9 +595,14 @@ class PostgresReportRepository:
     ) -> None:
         schema = self.SCHEMAS[environment]
         for table in (
-            "report_snapshots", "insight_events", "activity_events",
-            "metric_series", "metric_summaries", "cost_details",
-            "billing_cost_facts", "raw_payload_refs",
+            "report_snapshots",
+            "insight_events",
+            "activity_events",
+            "metric_series",
+            "metric_summaries",
+            "cost_details",
+            "billing_cost_facts",
+            "raw_payload_refs",
             "billing_account_cost_facts",
             "network_configuration_snapshots",
         ):
@@ -654,30 +637,26 @@ class PostgresReportRepository:
             tenant_id,
             cloud_account_id,
         )
-        self._insert_insight_events(
-            cursor, schema, report, report_run_id, tenant_id
-        )
-        self._insert_activity_events(
-            cursor, schema, report, report_run_id, tenant_id
-        )
-        self._insert_metric_series(
-            cursor, schema, report, report_run_id, tenant_id
-        )
-        self._insert_metric_summaries(
-            cursor, schema, report, report_run_id, tenant_id
-        )
-        self._insert_cost_details(
-            cursor, schema, report, report_run_id, tenant_id
-        )
+        self._insert_insight_events(cursor, schema, report, report_run_id, tenant_id)
+        self._insert_activity_events(cursor, schema, report, report_run_id, tenant_id)
+        self._insert_metric_series(cursor, schema, report, report_run_id, tenant_id)
+        self._insert_metric_summaries(cursor, schema, report, report_run_id, tenant_id)
+        self._insert_cost_details(cursor, schema, report, report_run_id, tenant_id)
         self._insert_billing_cost_facts(
-            cursor, schema, report, report_run_id, tenant_id,
+            cursor,
+            schema,
+            report,
+            report_run_id,
+            tenant_id,
             cloud_account_id,
         )
-        self._upsert_organization_members(
-            cursor, report, tenant_id, cloud_account_id
-        )
+        self._upsert_organization_members(cursor, report, tenant_id, cloud_account_id)
         self._insert_billing_account_cost_facts(
-            cursor, schema, report, report_run_id, tenant_id,
+            cursor,
+            schema,
+            report,
+            report_run_id,
+            tenant_id,
             cloud_account_id,
         )
 
@@ -700,9 +679,7 @@ class PostgresReportRepository:
         if snapshot is None:
             return
         if not isinstance(snapshot, Mapping):
-            raise DatabasePersistenceError(
-                "Network configuration snapshot must be an object."
-            )
+            raise DatabasePersistenceError("Network configuration snapshot must be an object.")
         if not snapshot:
             return
 
@@ -717,9 +694,7 @@ class PostgresReportRepository:
 
         raw_configuration = snapshot.get("configuration")
         if not isinstance(raw_configuration, list):
-            raise DatabasePersistenceError(
-                "Network configuration snapshot data must be an array."
-            )
+            raise DatabasePersistenceError("Network configuration snapshot data must be an array.")
 
         configuration = []
         configuration_categories = set()
@@ -737,16 +712,17 @@ class PostgresReportRepository:
             configuration_categories.add(category)
 
         raw_selected_categories = snapshot.get("selected_categories")
-        selected_categories = sorted({
-            str(category).strip().upper()
-            for category in (
-                raw_selected_categories
-                if isinstance(raw_selected_categories, (list, tuple, set))
-                else []
-            )
-            if str(category).strip().upper()
-            in NETWORK_CONFIGURATION_CATEGORIES
-        })
+        selected_categories = sorted(
+            {
+                str(category).strip().upper()
+                for category in (
+                    raw_selected_categories
+                    if isinstance(raw_selected_categories, (list, tuple, set))
+                    else []
+                )
+                if str(category).strip().upper() in NETWORK_CONFIGURATION_CATEGORIES
+            }
+        )
         if not selected_categories:
             selected_categories = sorted(configuration_categories)
         if not selected_categories:
@@ -769,8 +745,7 @@ class PostgresReportRepository:
             collection_issue_count = 0
         category_counts = {
             category: sum(
-                str(item.get("category") or "").upper() == category
-                for item in configuration
+                str(item.get("category") or "").upper() == category for item in configuration
             )
             for category in selected_categories
         }
@@ -780,18 +755,15 @@ class PostgresReportRepository:
             "category_counts": category_counts,
             "resource_count": len(configuration),
             "collection_source": self._text(
-                metadata.get("collection_source")
-                or snapshot.get("collection_source"),
+                metadata.get("collection_source") or snapshot.get("collection_source"),
                 80,
             ),
             "collection_started_at": self._text(
-                metadata.get("collection_started_at")
-                or snapshot.get("collection_started_at"),
+                metadata.get("collection_started_at") or snapshot.get("collection_started_at"),
                 80,
             ),
             "collection_completed_at": self._text(
-                metadata.get("collection_completed_at")
-                or snapshot.get("collection_completed_at"),
+                metadata.get("collection_completed_at") or snapshot.get("collection_completed_at"),
                 80,
             ),
             "collection_completeness": self._text(
@@ -804,17 +776,11 @@ class PostgresReportRepository:
             "collection_issue_count": collection_issue_count,
         }
         capture_metadata = {
-            key: value
-            for key, value in capture_metadata.items()
-            if value is not None
+            key: value for key, value in capture_metadata.items() if value is not None
         }
 
-        captured_at = self._parse_datetime(
-            snapshot.get("captured_at") or report.generated_at
-        )
-        period_start, period_end, end_exclusive = self._period_bounds(
-            report.period
-        )
+        captured_at = self._parse_datetime(snapshot.get("captured_at") or report.generated_at)
+        period_start, period_end, end_exclusive = self._period_bounds(report.period)
         configuration_payload = self._json(configuration)
         cursor.execute(
             f"""
@@ -839,15 +805,17 @@ class PostgresReportRepository:
                 self.NETWORK_SNAPSHOT_SCHEMA_VERSION,
                 configuration_payload,
                 self._json(capture_metadata),
-                hashlib.sha256(
-                    configuration_payload.encode("utf-8")
-                ).hexdigest(),
+                hashlib.sha256(configuration_payload.encode("utf-8")).hexdigest(),
             ),
         )
 
     def _insert_insight_events(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
     ) -> None:
         fallback_time = self._period_bounds(report.period)[0]
         for event in report.insight_events:
@@ -867,7 +835,9 @@ class PostgresReportRepository:
                 )
                 """,
                 (
-                    report_run_id, tenant_id, self._text(event.get("event_id"), 255),
+                    report_run_id,
+                    tenant_id,
+                    self._text(event.get("event_id"), 255),
                     self._event_datetime(event.get("start_time")) or fallback_time,
                     self._event_datetime(event.get("end_time")),
                     self._text(event.get("level"), 20),
@@ -892,15 +862,21 @@ class PostgresReportRepository:
             )
 
     def _insert_activity_events(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
     ) -> None:
         fallback_time = self._period_bounds(report.period)[0]
         seen = set()
         for event in self._event_records(report.activity_events):
             signature = (
-                event.get("event_id"), event.get("event_time"),
-                event.get("action_name"), event.get("resource_id"),
+                event.get("event_id"),
+                event.get("event_time"),
+                event.get("action_name"),
+                event.get("resource_id"),
             )
             if signature in seen:
                 continue
@@ -918,23 +894,30 @@ class PostgresReportRepository:
                 )
                 """,
                 (
-                    report_run_id, tenant_id, self._text(event.get("event_id"), 255),
+                    report_run_id,
+                    tenant_id,
+                    self._text(event.get("event_id"), 255),
                     self._event_datetime(event.get("event_time")) or fallback_time,
-                    self._text(account_name, 320), self._text(event.get("user_type"), 100),
-                    self._text(
-                        event.get("product_display_name") or event.get("product_name"), 200
-                    ),
+                    self._text(account_name, 320),
+                    self._text(event.get("user_type"), 100),
+                    self._text(event.get("product_display_name") or event.get("product_name"), 200),
                     self._text(event.get("resource_type"), 200),
                     self._text(event.get("resource_id"), 500),
                     self._text(event.get("resource_name"), 500),
                     self._text(event.get("action_name"), 300),
-                    self._text(event.get("result"), 50), source_ip, self._json(event),
+                    self._text(event.get("result"), 50),
+                    source_ip,
+                    self._json(event),
                 ),
             )
 
     def _insert_metric_summaries(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
     ) -> None:
         groups = (
             ("CPU", "cpu", "used_rto"),
@@ -958,9 +941,15 @@ class PostgresReportRepository:
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        report_run_id, tenant_id, resource_id,
-                        self._text(metric.get("server_name"), 500), group, metric_name,
-                        values[0], values[1], values[2],
+                        report_run_id,
+                        tenant_id,
+                        resource_id,
+                        self._text(metric.get("server_name"), 500),
+                        group,
+                        metric_name,
+                        values[0],
+                        values[1],
+                        values[2],
                         self._metric_sample_count(metric, metric_name),
                     ),
                 )
@@ -993,23 +982,15 @@ class PostgresReportRepository:
                 entries = statistics.get("avg")
                 if not isinstance(entries, list):
                     entries = next(
-                        (
-                            value
-                            for value in statistics.values()
-                            if isinstance(value, list)
-                        ),
+                        (value for value in statistics.values() if isinstance(value, list)),
                         [],
                     )
                 for entry in entries:
                     if not isinstance(entry, Mapping):
                         continue
-                    dimensions = self._safe_metric_dimensions(
-                        entry.get("dimensions")
-                    )
+                    dimensions = self._safe_metric_dimensions(entry.get("dimensions"))
                     raw = entry.get("raw")
-                    raw_points = (
-                        raw.get("dps") if isinstance(raw, Mapping) else None
-                    )
+                    raw_points = raw.get("dps") if isinstance(raw, Mapping) else None
                     points = self._normalized_metric_points(raw_points)
                     if not points:
                         continue
@@ -1030,9 +1011,7 @@ class PostgresReportRepository:
                             tenant_id,
                             resource_id,
                             self._text(metric.get("server_name"), 500),
-                            self._server_metric_group(
-                                str(metric_name), dimensions
-                            ),
+                            self._server_metric_group(str(metric_name), dimensions),
                             self._text(metric_name, 255) or "unknown",
                             self._json(dimensions),
                             self._text(raw.get("interval"), 30)
@@ -1059,18 +1038,18 @@ class PostgresReportRepository:
                 points = self._normalized_metric_points(series.get("points"))
                 if not resource_id or not points:
                     continue
-                dimensions = self._safe_metric_dimensions(
-                    series.get("dimensions")
+                dimensions = self._safe_metric_dimensions(series.get("dimensions"))
+                dimensions.update(
+                    {
+                        key: value
+                        for key, value in {
+                            "category": self._text(group.get("category"), 80),
+                            "product": self._text(group.get("product"), 120),
+                            "unit": self._text(group.get("unit"), 40),
+                        }.items()
+                        if value
+                    }
                 )
-                dimensions.update({
-                    key: value
-                    for key, value in {
-                        "category": self._text(group.get("category"), 80),
-                        "product": self._text(group.get("product"), 120),
-                        "unit": self._text(group.get("unit"), 40),
-                    }.items()
-                    if value
-                })
                 cursor.execute(
                     f"""
                     INSERT INTO {schema}.metric_series (
@@ -1134,9 +1113,7 @@ class PostgresReportRepository:
             if timestamp < 0 or not (-1e300 < metric_value < 1e300):
                 continue
             points[timestamp] = metric_value
-        return [
-            [timestamp, points[timestamp]] for timestamp in sorted(points)
-        ]
+        return [[timestamp, points[timestamp]] for timestamp in sorted(points)]
 
     @staticmethod
     def _server_metric_group(
@@ -1149,17 +1126,23 @@ class PostgresReportRepository:
         if normalized == "mem_usert":
             return "MEM"
         if normalized == "fs_usert":
-            mount = str(
-                dimensions.get("mnt_nm") or dimensions.get("mount") or ""
-            ).replace("\\", "/").rstrip("/")
+            mount = (
+                str(dimensions.get("mnt_nm") or dimensions.get("mount") or "")
+                .replace("\\", "/")
+                .rstrip("/")
+            )
             if mount in {"", "/"} or mount.casefold().startswith("c:"):
                 return "ROOT_DISK"
             return "DATA_DISK"
         return "OTHER"
 
     def _insert_cost_details(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
     ) -> None:
         billing = report.billing if isinstance(report.billing, dict) else {}
         billing_month = str(report.period.get("billing_month") or "")
@@ -1176,11 +1159,15 @@ class PostgresReportRepository:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (
-                    report_run_id, tenant_id, billing_month,
+                    report_run_id,
+                    tenant_id,
+                    billing_month,
                     self._text(row.get("service_name") or "Unknown", 300),
                     self._text(row.get("item_name"), 500),
-                    self._text(row.get("item_code"), 255), row.get("usage_quantity"),
-                    self._text(row.get("unit_code"), 100), row.get("raw_price"),
+                    self._text(row.get("item_code"), 255),
+                    row.get("usage_quantity"),
+                    self._text(row.get("unit_code"), 100),
+                    row.get("raw_price"),
                     row.get("expected_amount"),
                     self._text(row.get("calculation_method"), 255),
                     self._text(row.get("calculation_status") or "UNKNOWN", 100),
@@ -1189,22 +1176,27 @@ class PostgresReportRepository:
             )
 
     def _insert_billing_cost_facts(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any, cloud_account_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+        cloud_account_id: Any,
     ) -> None:
         billing = report.billing if isinstance(report.billing, dict) else {}
         allowed_types = {
-            "CONFIRMED", "PERIOD_ESTIMATE",
-            "MONTH_TO_DATE_ESTIMATE", "MONTH_END_PROJECTION",
+            "CONFIRMED",
+            "PERIOD_ESTIMATE",
+            "MONTH_TO_DATE_ESTIMATE",
+            "MONTH_END_PROJECTION",
         }
         for fact in billing.get("cost_facts", []):
             if not isinstance(fact, dict):
                 continue
             cost_type = str(fact.get("cost_type") or "")
             status = str(fact.get("status") or "")
-            if cost_type not in allowed_types or status not in {
-                "AVAILABLE", "UNAVAILABLE"
-            }:
+            if cost_type not in allowed_types or status not in {"AVAILABLE", "UNAVAILABLE"}:
                 continue
             cursor.execute(
                 f"""
@@ -1223,12 +1215,20 @@ class PostgresReportRepository:
                 )
                 """,
                 (
-                    report_run_id, tenant_id, cloud_account_id, cost_type,
-                    status, fact.get("period_start"), fact.get("period_end"),
-                    fact.get("coverage_start"), fact.get("coverage_end"),
+                    report_run_id,
+                    tenant_id,
+                    cloud_account_id,
+                    cost_type,
+                    status,
+                    fact.get("period_start"),
+                    fact.get("period_end"),
+                    fact.get("coverage_start"),
+                    fact.get("coverage_end"),
                     fact.get("calculated_at") or report.generated_at,
-                    fact.get("subtotal_amount"), fact.get("discount_amount"),
-                    fact.get("vat_amount"), fact.get("total_amount"),
+                    fact.get("subtotal_amount"),
+                    fact.get("discount_amount"),
+                    fact.get("vat_amount"),
+                    fact.get("total_amount"),
                     self._text(fact.get("currency") or "KRW", 3),
                     self._text(fact.get("amount_basis") or "UNKNOWN", 60),
                     bool(fact.get("includes_discount")),
@@ -1238,14 +1238,16 @@ class PostgresReportRepository:
                     self._text(fact.get("source_api"), 500),
                     self._text(fact.get("calculation_version") or "1.1", 40),
                     self._json(
-                        fact.get("details")
-                        if isinstance(fact.get("details"), dict) else {}
+                        fact.get("details") if isinstance(fact.get("details"), dict) else {}
                     ),
                 ),
             )
 
     def _upsert_organization_members(
-        self, cursor: Any, report: ReportResult, tenant_id: Any,
+        self,
+        cursor: Any,
+        report: ReportResult,
+        tenant_id: Any,
         cloud_account_id: Any,
     ) -> None:
         billing = report.billing if isinstance(report.billing, dict) else {}
@@ -1272,7 +1274,8 @@ class PostgresReportRepository:
                     last_seen_at = clock_timestamp()
                 """,
                 (
-                    tenant_id, cloud_account_id,
+                    tenant_id,
+                    cloud_account_id,
                     self._text(member.get("member_no"), 30),
                     self._text(member.get("display_name") or member.get("member_no"), 200),
                     self._text(organization.get("organization_no"), 30),
@@ -1284,8 +1287,13 @@ class PostgresReportRepository:
             )
 
     def _insert_billing_account_cost_facts(
-        self, cursor: Any, schema: str, report: ReportResult,
-        report_run_id: Any, tenant_id: Any, cloud_account_id: Any,
+        self,
+        cursor: Any,
+        schema: str,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+        cloud_account_id: Any,
     ) -> None:
         billing = report.billing if isinstance(report.billing, dict) else {}
         for account in billing.get("account_costs", []):
@@ -1315,22 +1323,30 @@ class PostgresReportRepository:
                     )
                     """,
                     (
-                        report_run_id, tenant_id, cloud_account_id,
+                        report_run_id,
+                        tenant_id,
+                        cloud_account_id,
                         self._text(account.get("member_no"), 30),
                         self._text(account.get("display_name") or account.get("member_no"), 200),
                         bool(account.get("is_master")),
                         self._text(fact.get("cost_type"), 40),
                         self._text(fact.get("status") or "UNAVAILABLE", 30),
-                        fact.get("period_start"), fact.get("period_end"),
-                        fact.get("subtotal_amount"), fact.get("vat_amount"),
+                        fact.get("period_start"),
+                        fact.get("period_end"),
+                        fact.get("subtotal_amount"),
+                        fact.get("vat_amount"),
                         fact.get("total_amount"),
                         self._text(fact.get("confidence") or "UNAVAILABLE", 30),
-                        self._json(service_costs), self._json(fact.get("details") or {}),
+                        self._json(service_costs),
+                        self._json(fact.get("details") or {}),
                     ),
                 )
 
     def _replace_artifacts(
-        self, cursor: Any, report_run_id: Any, tenant_id: Any,
+        self,
+        cursor: Any,
+        report_run_id: Any,
+        tenant_id: Any,
         artifacts: Mapping[str, Path | str],
     ) -> None:
         cursor.execute(
@@ -1351,9 +1367,17 @@ class PostgresReportRepository:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    report_run_id, tenant_id, artifact_type, path.as_uri(),
-                    {"HTML": "text/html", "PDF": "application/pdf", "PUBLIC_JSON": "application/json"}[artifact_type],
-                    path.stat().st_size, self._file_hash(path),
+                    report_run_id,
+                    tenant_id,
+                    artifact_type,
+                    path.as_uri(),
+                    {
+                        "HTML": "text/html",
+                        "PDF": "application/pdf",
+                        "PUBLIC_JSON": "application/json",
+                    }[artifact_type],
+                    path.stat().st_size,
+                    self._file_hash(path),
                 ),
             )
 
@@ -1375,11 +1399,13 @@ class PostgresReportRepository:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    report_run_id, tenant_id,
+                    report_run_id,
+                    tenant_id,
                     self._text(error.get("collector") or error.get("normalizer") or "unknown", 100),
                     self._text(error.get("stage"), 100),
                     self._text(error.get("target_type"), 100),
-                    self._text(error.get("target_id"), 255), error.get("status_code"),
+                    self._text(error.get("target_id"), 255),
+                    error.get("status_code"),
                     self._text(error.get("error_code"), 100),
                     str(error.get("message") or "Collection error")[:10000],
                     bool(error.get("retryable", False)),
@@ -1387,16 +1413,17 @@ class PostgresReportRepository:
             )
 
     def _upsert_daily_fact(
-        self, cursor: Any, report: ReportResult, report_run_id: Any,
-        tenant_id: Any, environment: str, cloud_account_id: Any,
+        self,
+        cursor: Any,
+        report: ReportResult,
+        report_run_id: Any,
+        tenant_id: Any,
+        environment: str,
+        cloud_account_id: Any,
     ) -> None:
         insight = [event for event in report.insight_events if isinstance(event, dict)]
-        insight_levels = [
-            str(event.get("level") or "").upper() for event in insight
-        ]
-        analysis = (
-            report.analysis if isinstance(report.analysis, Mapping) else {}
-        )
+        insight_levels = [str(event.get("level") or "").upper() for event in insight]
+        analysis = report.analysis if isinstance(report.analysis, Mapping) else {}
         active_findings = [
             finding
             for finding in analysis.get("findings") or []
@@ -1404,19 +1431,14 @@ class PostgresReportRepository:
             and finding.get("status") != "EXCEPTION"
             and finding.get("category") != "DATA_QUALITY"
         ]
-        finding_levels = [
-            str(finding.get("severity") or "").upper()
-            for finding in active_findings
-        ]
+        finding_levels = [str(finding.get("severity") or "").upper() for finding in active_findings]
         levels = finding_levels if analysis else insight_levels
         quality = (
             analysis.get("data_quality")
             if isinstance(analysis.get("data_quality"), Mapping)
             else {}
         )
-        quality_status = str(
-            quality.get("overall_status") or ""
-        ).upper()
+        quality_status = str(quality.get("overall_status") or "").upper()
         if quality_status == "COMPLETE":
             collection_status = "SUCCESS"
         elif quality_status == "FAILED":
@@ -1424,9 +1446,7 @@ class PostgresReportRepository:
         elif quality_status:
             collection_status = "PARTIAL_SUCCESS"
         else:
-            collection_status = (
-                "PARTIAL_SUCCESS" if report.collection_errors else "SUCCESS"
-            )
+            collection_status = "PARTIAL_SUCCESS" if report.collection_errors else "SUCCESS"
         activities = list(self._event_records(report.activity_events))
         billing = report.billing if isinstance(report.billing, dict) else {}
         period_estimate = billing.get("period_estimate", {})
@@ -1441,9 +1461,7 @@ class PostgresReportRepository:
             else period_estimate
         )
         confidence = str(
-            active_estimate.get("confidence")
-            or invoice_summary.get("confidence")
-            or "UNAVAILABLE"
+            active_estimate.get("confidence") or invoice_summary.get("confidence") or "UNAVAILABLE"
         )
         fact_date = self._period_bounds(report.period)[0].date()
         cursor.execute(
@@ -1477,18 +1495,25 @@ class PostgresReportRepository:
                 updated_at = clock_timestamp()
             """,
             (
-                tenant_id, cloud_account_id,
-                fact_date, environment,
-                report_run_id, collection_status,
-                len(report.servers), levels.count("CRITICAL"), levels.count("WARNING"),
+                tenant_id,
+                cloud_account_id,
+                fact_date,
+                environment,
+                report_run_id,
+                collection_status,
+                len(report.servers),
+                levels.count("CRITICAL"),
+                levels.count("WARNING"),
                 levels.count("INFO"),
                 sum(
                     bool(event.get("result"))
                     and str(event.get("result")).upper() not in {"SUCCESS", "SUCCEED"}
                     for event in activities
                 ),
-                len(report.collection_errors), active_estimate.get("total_amount"),
-                invoice_summary.get("total_amount"), confidence,
+                len(report.collection_errors),
+                active_estimate.get("total_amount"),
+                invoice_summary.get("total_amount"),
+                confidence,
             ),
         )
         # 구버전 코드 원복 호환을 위해 기존 고객/일자 사실 테이블의 키와

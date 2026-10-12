@@ -236,10 +236,7 @@ class OverlappingSecurityAPI(SecurityAPI):
     def get_ids_list(self, **kwargs):
         page = kwargs["page"]
         if page == 1:
-            rows = [
-                {"ticketId": str(index), "date": "1720000000000"}
-                for index in range(100)
-            ]
+            rows = [{"ticketId": str(index), "date": "1720000000000"} for index in range(100)]
         elif page == 2:
             rows = [
                 {"ticketId": "99", "date": "1720000000000"},
@@ -275,26 +272,20 @@ class WMSCollectorTests(unittest.TestCase):
         self.assertNotIn("url", rendered)
 
     def test_empty_scenario_list_is_collected_empty(self):
-        collector = WMSCollector(
-            FakeFactory(web_service_monitor=EmptyWMSAPI())
-        )
+        collector = WMSCollector(FakeFactory(web_service_monitor=EmptyWMSAPI()))
 
         self.assertEqual(collector.collect(1_000, 2_000), [])
         self.assertEqual(collector.last_dataset_status, "COLLECTED_EMPTY")
         self.assertEqual(collector.last_errors, [])
 
     def test_invalid_scenario_is_not_reported_as_successful_empty(self):
-        collector = WMSCollector(
-            FakeFactory(web_service_monitor=InvalidWMSAPI())
-        )
+        collector = WMSCollector(FakeFactory(web_service_monitor=InvalidWMSAPI()))
 
         self.assertEqual(collector.collect(1_000, 2_000), [])
         self.assertEqual(collector.last_dataset_status, "FAILED")
 
     def test_scenario_failure_is_isolated(self):
-        collector = WMSCollector(
-            FakeFactory(web_service_monitor=PartialWMSAPI())
-        )
+        collector = WMSCollector(FakeFactory(web_service_monitor=PartialWMSAPI()))
 
         result = collector.collect(1_000, 2_000)
 
@@ -303,17 +294,13 @@ class WMSCollectorTests(unittest.TestCase):
         self.assertEqual(collector.last_errors[0]["target"], "20")
 
     def test_all_scenario_failures_are_failed(self):
-        collector = WMSCollector(
-            FakeFactory(web_service_monitor=FailedWMSAPI())
-        )
+        collector = WMSCollector(FakeFactory(web_service_monitor=FailedWMSAPI()))
 
         self.assertEqual(collector.collect(1_000, 2_000), [])
         self.assertEqual(collector.last_dataset_status, "FAILED")
 
     def test_scenario_without_period_observations_is_collected_empty(self):
-        collector = WMSCollector(
-            FakeFactory(web_service_monitor=EmptyObservationWMSAPI())
-        )
+        collector = WMSCollector(FakeFactory(web_service_monitor=EmptyObservationWMSAPI()))
 
         result = collector.collect(1_000, 2_000)
 
@@ -323,9 +310,7 @@ class WMSCollectorTests(unittest.TestCase):
 
 class SecurityMonitoringCollectorTests(unittest.TestCase):
     def test_all_successful_empty_services_are_collected_empty(self):
-        collector = SecurityMonitoringCollector(
-            FakeFactory(security_monitoring=SecurityAPI())
-        )
+        collector = SecurityMonitoringCollector(FakeFactory(security_monitoring=SecurityAPI()))
 
         self.assertEqual(collector.collect(1_000, 2_000), [])
         self.assertEqual(collector.last_dataset_status, "COLLECTED_EMPTY")
@@ -336,20 +321,14 @@ class SecurityMonitoringCollectorTests(unittest.TestCase):
 
     def test_paginates_normalizes_and_omits_sensitive_path(self):
         api = PagedSecurityAPI()
-        collector = SecurityMonitoringCollector(
-            FakeFactory(security_monitoring=api)
-        )
+        collector = SecurityMonitoringCollector(FakeFactory(security_monitoring=api))
 
         result = collector.collect(1_720_000_000_000, 1_720_086_400_000)
 
         self.assertEqual(len(result), 102)
         self.assertEqual(collector.last_dataset_status, "COLLECTED")
         self.assertEqual(
-            [
-                call[1]["page"]
-                for call in api.calls
-                if call[0] == "get_ddos_list"
-            ],
+            [call[1]["page"] for call in api.calls if call[0] == "get_ddos_list"],
             [1, 2],
         )
         antivirus = next(item for item in result if item["event_id"] == "av-1")

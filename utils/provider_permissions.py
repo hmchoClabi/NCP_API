@@ -12,11 +12,13 @@ _ACTION_PATTERN = re.compile(
     r"(?![A-Za-z0-9_-])"
 )
 _CODE_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}")
-_ROOT_MESSAGE_KEYS = frozenset({
-    "message",
-    "devmessage",
-    "errormessage",
-})
+_ROOT_MESSAGE_KEYS = frozenset(
+    {
+        "message",
+        "devmessage",
+        "errormessage",
+    }
+)
 _ERROR_MESSAGE_KEYS = _ROOT_MESSAGE_KEYS | {"description", "returnmessage"}
 _ERROR_ENVELOPE_KEYS = frozenset({"error", "errors", "responseerror"})
 
@@ -36,11 +38,9 @@ def extract_required_actions(response: Any) -> tuple[str, ...]:
                 _collect_error_messages(value, messages, depth=0)
         if _is_error_response(response, payload):
             _append_message_fields(payload, messages, _ERROR_MESSAGE_KEYS)
-    return tuple(dict.fromkeys(
-        action
-        for message in messages
-        for action in _ACTION_PATTERN.findall(message)
-    ))
+    return tuple(
+        dict.fromkeys(action for message in messages for action in _ACTION_PATTERN.findall(message))
+    )
 
 
 def extract_provider_code(response: Any) -> str | None:
@@ -87,15 +87,9 @@ def _is_error_response(response: Any, payload: Mapping[Any, Any]) -> bool:
             return True
     except (AttributeError, TypeError, ValueError):
         pass
-    if any(
-        _normalized_key(key) in _ERROR_ENVELOPE_KEYS
-        for key in payload
-    ):
+    if any(_normalized_key(key) in _ERROR_ENVELOPE_KEYS for key in payload):
         return True
-    return any(
-        _normalize_provider_code(payload.get(key))
-        for key in ("errorCode", "returnCode")
-    )
+    return any(_normalize_provider_code(payload.get(key)) for key in ("errorCode", "returnCode"))
 
 
 def _find_specific_provider_code(value: Any, depth: int) -> str | None:
@@ -180,9 +174,7 @@ def _collect_error_messages(
                     item,
                     output,
                     depth + 1,
-                    trusted=(
-                        _normalized_key(key) in _ERROR_ENVELOPE_KEYS
-                    ),
+                    trusted=(_normalized_key(key) in _ERROR_ENVELOPE_KEYS),
                 )
     elif isinstance(value, (list, tuple)):
         for item in value[:100]:

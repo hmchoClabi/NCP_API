@@ -61,13 +61,11 @@ class PortalIntegrationTests(unittest.TestCase):
                 tenant_ids = [str(row[0]) for row in cursor.fetchall()]
                 if tenant_ids:
                     cursor.execute(
-                        "DELETE FROM control.email_deliveries "
-                        "WHERE tenant_id = ANY(%s::uuid[])",
+                        "DELETE FROM control.email_deliveries WHERE tenant_id = ANY(%s::uuid[])",
                         (tenant_ids,),
                     )
                     cursor.execute(
-                        "DELETE FROM control.report_runs "
-                        "WHERE tenant_id = ANY(%s::uuid[])",
+                        "DELETE FROM control.report_runs WHERE tenant_id = ANY(%s::uuid[])",
                         (tenant_ids,),
                     )
                     cursor.execute(
@@ -81,22 +79,20 @@ class PortalIntegrationTests(unittest.TestCase):
                     )
                 cursor.execute(
                     "DELETE FROM control.users WHERE email = ANY(%s)",
-                    ([
-                        self.ADMIN_EMAIL,
-                        self.SECOND_ADMIN_EMAIL,
-                        self.OPERATOR_EMAIL,
-                        self.USER_EMAIL,
-                    ],),
+                    (
+                        [
+                            self.ADMIN_EMAIL,
+                            self.SECOND_ADMIN_EMAIL,
+                            self.OPERATOR_EMAIL,
+                            self.USER_EMAIL,
+                        ],
+                    ),
                 )
                 cursor.execute(
                     "DELETE FROM control.customer_deletion_tombstones "
                     "WHERE archive_reference = 'TEST-ARCHIVE-001' "
                     "OR customer_code_hash = %s",
-                    (
-                        sha256(
-                            self.TENANT_CODE.casefold().encode("utf-8")
-                        ).hexdigest(),
-                    ),
+                    (sha256(self.TENANT_CODE.casefold().encode("utf-8")).hexdigest(),),
                 )
 
     def test_msp_accounts_are_created_listed_and_independently_disabled(self):
@@ -125,7 +121,8 @@ class PortalIntegrationTests(unittest.TestCase):
         managed_ids = {
             str(user["id"])
             for user in users
-            if user["email"] in {
+            if user["email"]
+            in {
                 self.ADMIN_EMAIL,
                 self.SECOND_ADMIN_EMAIL,
                 self.OPERATOR_EMAIL,
@@ -181,9 +178,14 @@ class PortalIntegrationTests(unittest.TestCase):
             "Portal Customer",
             self.TENANT_CODE,
         )
-        self.created_user_ids.extend([
-            admin_id, second_admin_id, operator_id, customer_user_id,
-        ])
+        self.created_user_ids.extend(
+            [
+                admin_id,
+                second_admin_id,
+                operator_id,
+                customer_user_id,
+            ]
+        )
         operator_session, _ = self.repository.create_session(operator_id)
         customer_session, _ = self.repository.create_session(customer_user_id)
         self.repository.log_authentication(
@@ -191,27 +193,17 @@ class PortalIntegrationTests(unittest.TestCase):
             "DENIED",
             failure_reason="INVALID_CREDENTIALS",
         )
-        self.repository.set_msp_user_enabled(
-            admin_id, second_admin_id, False
-        )
+        self.repository.set_msp_user_enabled(admin_id, second_admin_id, False)
         with self.assertRaises(PermissionError):
-            self.repository.delete_user_account(
-                operator_id, admin_id, self.OPERATOR_EMAIL
-            )
-        self.repository.set_msp_user_enabled(
-            admin_id, second_admin_id, True
-        )
+            self.repository.delete_user_account(operator_id, admin_id, self.OPERATOR_EMAIL)
+        self.repository.set_msp_user_enabled(admin_id, second_admin_id, True)
 
         self.assertEqual(
-            self.repository.delete_user_account(
-                operator_id, admin_id, self.OPERATOR_EMAIL
-            ),
+            self.repository.delete_user_account(operator_id, admin_id, self.OPERATOR_EMAIL),
             ("Portal Operator", "MSP"),
         )
         self.assertEqual(
-            self.repository.delete_user_account(
-                customer_user_id, admin_id, self.USER_EMAIL
-            ),
+            self.repository.delete_user_account(customer_user_id, admin_id, self.USER_EMAIL),
             ("Portal Customer", "CUSTOMER"),
         )
 
@@ -302,9 +294,12 @@ class PortalIntegrationTests(unittest.TestCase):
             "Replacement Customer",
             self.TENANT_CODE,
         )
-        self.created_user_ids.extend([
-            replacement_operator_id, replacement_customer_id,
-        ])
+        self.created_user_ids.extend(
+            [
+                replacement_operator_id,
+                replacement_customer_id,
+            ]
+        )
         self.assertNotEqual(replacement_operator_id, operator_id)
         self.assertNotEqual(replacement_customer_id, customer_user_id)
 
@@ -325,9 +320,7 @@ class PortalIntegrationTests(unittest.TestCase):
         tenant_users = self.repository.users_for_tenant(tenant_id)
         self.assertEqual([str(item["id"]) for item in tenant_users], [customer_user_id])
         self.assertEqual(tenant_users[0]["role"], "CUSTOMER_VIEWER")
-        self.repository.assign_customer_membership(
-            customer_user_id, tenant_id, "CUSTOMER_ADMIN"
-        )
+        self.repository.assign_customer_membership(customer_user_id, tenant_id, "CUSTOMER_ADMIN")
         tenant_users = self.repository.users_for_tenant(tenant_id)
         self.assertEqual(tenant_users[0]["role"], "CUSTOMER_ADMIN")
         with self.assertRaisesRegex(ValueError, "다른 활성 고객 관리자"):
@@ -335,9 +328,7 @@ class PortalIntegrationTests(unittest.TestCase):
                 customer_user_id, tenant_id, "CUSTOMER_VIEWER"
             )
         global_users = self.repository.customer_users()
-        customer_user = next(
-            item for item in global_users if str(item["id"]) == customer_user_id
-        )
+        customer_user = next(item for item in global_users if str(item["id"]) == customer_user_id)
         self.assertEqual(customer_user["memberships"][0]["customer_name"], "Portal Integration")
         authenticated = self.repository.authenticate(self.ADMIN_EMAIL)
         self.assertTrue(
@@ -379,16 +370,12 @@ class PortalIntegrationTests(unittest.TestCase):
                 "image/png",
             )
             self.repository.update_tenant_logo(tenant_id, logo, admin_id)
-            customer, credentials = self.repository.account_credentials(
-                account_id, cipher
-            )
+            customer, credentials = self.repository.account_credentials(account_id, cipher)
 
         self.assertEqual(customer.customer_id, self.TENANT_CODE)
         self.assertEqual(customer.cloud_account_id, account_id)
         self.assertTrue(customer.report_options.section_enabled("billing"))
-        self.assertFalse(
-            customer.report_options.section_enabled("activity_history")
-        )
+        self.assertFalse(customer.report_options.section_enabled("activity_history"))
         self.assertEqual(customer.logo_data_uri, logo.data_uri)
         self.assertEqual(credentials.access_key, "PORTAL-ACCESS-KEY")
         self.assertEqual(credentials.secret_key, "PORTAL-SECRET-KEY")
@@ -415,14 +402,11 @@ class PortalIntegrationTests(unittest.TestCase):
         events = self.repository.notification_events(
             [tenant_id], datetime.now(timezone.utc) - timedelta(minutes=1)
         )
-        self.assertTrue(any(
-            str(event["id"]) == job_id and event["status"] == "QUEUED"
-            for event in events
-        ))
-
-        deleted_name = self.repository.delete_account_credential(
-            tenant_id, account_id, admin_id
+        self.assertTrue(
+            any(str(event["id"]) == job_id and event["status"] == "QUEUED" for event in events)
         )
+
+        deleted_name = self.repository.delete_account_credential(tenant_id, account_id, admin_id)
         self.assertEqual(deleted_name, "Primary account")
         detail = self.repository.tenant_detail(tenant_id)
         self.assertEqual(detail["accounts"][0]["status"], "DISABLED")
@@ -437,9 +421,7 @@ class PortalIntegrationTests(unittest.TestCase):
         reactivated_name = self.repository.reactivate_tenant(tenant_id, admin_id)
         self.assertEqual(reactivated_name, "Portal Integration")
         self.assertEqual(self.repository.tenant_detail(tenant_id)["status"], "ACTIVE")
-        self.repository.assign_customer_membership(
-            customer_user_id, tenant_id, "CUSTOMER_VIEWER"
-        )
+        self.repository.assign_customer_membership(customer_user_id, tenant_id, "CUSTOMER_VIEWER")
         self.repository.offboard_tenant(tenant_id, admin_id)
 
         with psycopg.connect(**self.settings.connection_kwargs()) as connection:
@@ -472,17 +454,21 @@ class PortalIntegrationTests(unittest.TestCase):
                     (
                         report_id,
                         tenant_id,
-                        json.dumps({
-                            "period": {"file_suffix": "test"},
-                            "customer": {
-                                "id": self.TENANT_CODE,
-                                "name": "Portal Integration",
-                            },
-                            "activity_events": [{
-                                "user_name": "customer-person",
-                                "action": "Login",
-                            }],
-                        }),
+                        json.dumps(
+                            {
+                                "period": {"file_suffix": "test"},
+                                "customer": {
+                                    "id": self.TENANT_CODE,
+                                    "name": "Portal Integration",
+                                },
+                                "activity_events": [
+                                    {
+                                        "user_name": "customer-person",
+                                        "action": "Login",
+                                    }
+                                ],
+                            }
+                        ),
                     ),
                 )
 
@@ -506,9 +492,7 @@ class PortalIntegrationTests(unittest.TestCase):
                 )
                 anonymized_user = cursor.fetchone()
         self.assertEqual(snapshot["customer"]["name"], anonymous_name)
-        self.assertEqual(
-            snapshot["activity_events"][0]["user_name"], "[익명화됨]"
-        )
+        self.assertEqual(snapshot["activity_events"][0]["user_name"], "[익명화됨]")
         self.assertTrue(anonymized_user[0].endswith("@deleted.invalid"))
         self.assertEqual(anonymized_user[1:], ("익명 사용자", "DISABLED"))
 
@@ -526,11 +510,7 @@ class PortalIntegrationTests(unittest.TestCase):
                     "SELECT report_count, forced, archive_reference "
                     "FROM control.customer_deletion_tombstones "
                     "WHERE customer_code_hash = %s",
-                    (
-                        sha256(
-                            self.TENANT_CODE.casefold().encode("utf-8")
-                        ).hexdigest(),
-                    ),
+                    (sha256(self.TENANT_CODE.casefold().encode("utf-8")).hexdigest(),),
                 )
                 self.assertEqual(
                     cursor.fetchone(),

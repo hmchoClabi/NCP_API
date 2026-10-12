@@ -610,9 +610,7 @@ CATEGORY_ID_DIMENSIONS = {
         }
     ),
     "TARGET_GROUP": frozenset({"targetgroupno"}),
-    "CDB": frozenset(
-        {"instanceno", "dbinstanceno", "clouddbinstanceno"}
-    ),
+    "CDB": frozenset({"instanceno", "dbinstanceno", "clouddbinstanceno"}),
     "NKS": frozenset({"clusteruuid", "clusterid"}),
     "NAS": frozenset({"instanceno", "nasvolumeinstanceno"}),
     "OBJECT_STORAGE": frozenset({"resourceid"}),
@@ -623,21 +621,13 @@ CATEGORY_ID_DIMENSIONS = {
     "DATA_STREAM": frozenset({"topicid"}),
 }
 CATEGORY_DETAIL_ID_FIELDS = {
-    "LOAD_BALANCER": frozenset(
-        {"loadbalancerinstanceno", "loadbalancerid"}
-    ),
+    "LOAD_BALANCER": frozenset({"loadbalancerinstanceno", "loadbalancerid"}),
     "TARGET_GROUP": frozenset({"targetgroupno"}),
-    "CDB": frozenset(
-        {"serverinstanceno", "serverinstancenos"}
-    ),
-    "NKS": frozenset(
-        {"clusteruuid", "clusterid", "uuid", "clusterno"}
-    ),
+    "CDB": frozenset({"serverinstanceno", "serverinstancenos"}),
+    "NKS": frozenset({"clusteruuid", "clusterid", "uuid", "clusterno"}),
     "NAS": frozenset({"nasvolumeinstanceno", "instanceno"}),
     "OBJECT_STORAGE": frozenset({"resourceid", "bucketid"}),
-    "AUTO_SCALING": frozenset(
-        {"autoscalinggroupno", "autoscalinggroupid"}
-    ),
+    "AUTO_SCALING": frozenset({"autoscalinggroupno", "autoscalinggroupid"}),
     "SEARCH_ENGINE": frozenset(
         {
             "svcgroupinstanceno",
@@ -645,12 +635,8 @@ CATEGORY_DETAIL_ID_FIELDS = {
             "clusterinstanceno",
         }
     ),
-    "DATA_STREAMING": frozenset(
-        {"instanceno", "clusterinstanceno"}
-    ),
-    "CLOUD_HADOOP": frozenset(
-        {"instanceno", "clusterinstanceno"}
-    ),
+    "DATA_STREAMING": frozenset({"instanceno", "clusterinstanceno"}),
+    "CLOUD_HADOOP": frozenset({"instanceno", "clusterinstanceno"}),
     "DATA_STREAM": frozenset({"topicid"}),
 }
 

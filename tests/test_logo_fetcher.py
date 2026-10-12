@@ -8,8 +8,7 @@ from webapp.logo_fetcher import fetch_customer_logo_from_url
 
 
 _PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
-    "AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 
@@ -33,7 +32,7 @@ class _FakeResponse:
         return self.headers.get(name.casefold(), default)
 
     def read(self, amount):
-        chunk = self.body[self.offset:self.offset + amount]
+        chunk = self.body[self.offset : self.offset + amount]
         self.offset += len(chunk)
         return chunk
 
@@ -88,9 +87,14 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
 
         self.assertEqual(logo.content, _PNG)
         self.assertEqual(logo.content_type, "image/png")
-        self.assertEqual(factory_calls[0][:3], (
-            "logo.example.com", "93.184.216.34", 443,
-        ))
+        self.assertEqual(
+            factory_calls[0][:3],
+            (
+                "logo.example.com",
+                "93.184.216.34",
+                443,
+            ),
+        )
 
     def test_private_loopback_link_local_and_mixed_dns_are_rejected(self):
         blocked_sets = [
@@ -133,10 +137,14 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
 
         def resolver(hostname, *_args, **_kwargs):
             resolved_hosts.append(hostname)
-            return [_dns_result({
-                "logo.example.com": "93.184.216.34",
-                "cdn.example.net": "142.250.72.14",
-            }[hostname])]
+            return [
+                _dns_result(
+                    {
+                        "logo.example.com": "93.184.216.34",
+                        "cdn.example.net": "142.250.72.14",
+                    }[hostname]
+                )
+            ]
 
         def factory(hostname, resolved_ip, port, timeout):
             connections.append((hostname, resolved_ip, port))
@@ -150,10 +158,13 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
 
         self.assertEqual(logo.content, _PNG)
         self.assertEqual(resolved_hosts, ["logo.example.com", "cdn.example.net"])
-        self.assertEqual(connections, [
-            ("logo.example.com", "93.184.216.34", 443),
-            ("cdn.example.net", "142.250.72.14", 443),
-        ])
+        self.assertEqual(
+            connections,
+            [
+                ("logo.example.com", "93.184.216.34", 443),
+                ("cdn.example.net", "142.250.72.14", 443),
+            ],
+        )
 
     def test_redirect_to_private_address_is_blocked_before_second_request(self):
         responses = [
@@ -226,15 +237,14 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
                 body=b"x" * (512 * 1024 + 1),
             ),
         ]:
-            with self.subTest(headers=response.headers), self.assertRaisesRegex(
-                ValueError, "512KB"
+            with (
+                self.subTest(headers=response.headers),
+                self.assertRaisesRegex(ValueError, "512KB"),
             ):
                 fetch_customer_logo_from_url(
                     "https://logo.example.com/logo.png",
                     resolver=resolver,
-                    connection_factory=lambda *_args, response=response: (
-                        _FakeConnection(response)
-                    ),
+                    connection_factory=lambda *_args, response=response: _FakeConnection(response),
                 )
 
     def test_slow_dns_lookup_is_bounded_by_timeout(self):
@@ -245,10 +255,13 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
             return [_dns_result("93.184.216.34")]
 
         try:
-            with patch(
-                "webapp.logo_fetcher.CUSTOMER_LOGO_DNS_TIMEOUT_SECONDS",
-                0.01,
-            ), self.assertRaisesRegex(ValueError, "DNS 확인 시간이 초과"):
+            with (
+                patch(
+                    "webapp.logo_fetcher.CUSTOMER_LOGO_DNS_TIMEOUT_SECONDS",
+                    0.01,
+                ),
+                self.assertRaisesRegex(ValueError, "DNS 확인 시간이 초과"),
+            ):
                 fetch_customer_logo_from_url(
                     "https://logo.example.com/logo.png",
                     resolver=resolver,

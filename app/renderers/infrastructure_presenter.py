@@ -102,19 +102,13 @@ _SIZE_DIMENSIONS: dict[
         (("partition_count",), "파티션", "개"),
         (("retention_hours",), "보관", "시간"),
     ),
-    "BLOCK_STORAGE_SNAPSHOT": (
-        (("snapshot_volume_size_gb",), "스냅샷 용량", " GB"),
-    ),
-    "SERVER_IMAGE": (
-        (("block_storage_size_gb",), "이미지 용량", " GB"),
-    ),
+    "BLOCK_STORAGE_SNAPSHOT": ((("snapshot_volume_size_gb",), "스냅샷 용량", " GB"),),
+    "SERVER_IMAGE": ((("block_storage_size_gb",), "이미지 용량", " GB"),),
     "BACKUP": (
         (("storage_size_gb", "backup_size_gb"), "백업 용량", " GB"),
         (("retention_days",), "보관", "일"),
     ),
-    "ARCHIVE_STORAGE": (
-        (("storage_size_gb", "size_gb"), "보관 용량", " GB"),
-    ),
+    "ARCHIVE_STORAGE": ((("storage_size_gb", "size_gb"), "보관 용량", " GB"),),
 }
 
 
@@ -150,12 +144,10 @@ def merge_server_details(
         "storage_count": _server_storage_count(server),
         "storage_size_gb_total": _server_storage_size_gb(server),
         "server_product_code": (
-            server.get("server_product_code")
-            or raw_server.get("serverProductCode")
+            server.get("server_product_code") or raw_server.get("serverProductCode")
         ),
         "server_product_name": (
-            server.get("server_product_name")
-            or raw_server.get("serverProductName")
+            server.get("server_product_name") or raw_server.get("serverProductName")
         ),
     }
     for key, value in values.items():
@@ -163,9 +155,7 @@ def merge_server_details(
             details[key] = value
     if not _has_value(merged.get("create_time")):
         create_time = (
-            server.get("create_date")
-            or server.get("create_time")
-            or raw_server.get("createDate")
+            server.get("create_date") or server.get("create_time") or raw_server.get("createDate")
         )
         if _has_value(create_time):
             merged["create_time"] = create_time
@@ -221,9 +211,7 @@ def resource_connection_summary(
     parts = []
 
     if normalized_category == "SERVER":
-        private_ips = details.get("all_private_ips") or details.get(
-            "private_ip"
-        )
+        private_ips = details.get("all_private_ips") or details.get("private_ip")
         _append_value(parts, "Private", private_ips)
         _append_value(parts, "Public", details.get("public_ip"))
         storage_count = details.get("storage_count")
@@ -269,8 +257,7 @@ def resource_connection_summary(
         _append_value(
             parts,
             "연결 서버",
-            details.get("attached_server_name")
-            or details.get("attached_server_id"),
+            details.get("attached_server_name") or details.get("attached_server_id"),
         )
     elif normalized_category == "NAS":
         _append_value(parts, "연결 서버", details.get("server_instance_nos"))

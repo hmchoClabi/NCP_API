@@ -44,46 +44,53 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         resource_id = event.get("resource_id")
         resource_name = event.get("resource_name") or resource_id or "대상 미확인"
         rule_name = event.get("rule_name") or event.get("metric") or "Cloud Insight 이벤트"
-        summaries.append({
-            "source_state": OBSERVED,
-            "event_id": event.get("event_id"),
-            "severity": severity,
-            "resource_id": resource_id,
-            "resource_name": resource_name,
-            "rule_name": rule_name,
-            "metric": event.get("metric"),
-            "start_time": start_value,
-            "end_time": event.get("end_time"),
-            "duration_seconds": duration_seconds,
-            "is_open": is_open,
-        })
+        summaries.append(
+            {
+                "source_state": OBSERVED,
+                "event_id": event.get("event_id"),
+                "severity": severity,
+                "resource_id": resource_id,
+                "resource_name": resource_name,
+                "rule_name": rule_name,
+                "metric": event.get("metric"),
+                "start_time": start_value,
+                "end_time": event.get("end_time"),
+                "duration_seconds": duration_seconds,
+                "is_open": is_open,
+            }
+        )
 
         if severity in {"CRITICAL", "WARNING"}:
-            findings.append(Finding(
-                rule_id="INSIGHT_EVENT_OPEN" if is_open else "INSIGHT_EVENT_OCCURRED",
-                severity=severity,
-                category="EVENT",
-                title=f"{resource_name}에서 {rule_name} 이벤트가 발생했습니다.",
-                evidence=[
-                    {"label": "이벤트 등급", "value": severity},
-                    {"label": "시작 시각", "value": event.get("start_time_kst") or start_value},
-                    {"label": "종료 시각", "value": event.get("end_time_kst") or event.get("end_time") or "미종료"},
-                    {"label": "지속 시간", "value": duration_seconds, "unit": "초"},
-                ],
-                impact="모니터링 규칙이 임계 상태를 감지했습니다. 실제 고객 영향은 별도 확인이 필요합니다.",
-                recommendation="같은 시간대의 지표와 변경 이력을 함께 확인하고 원인과 조치 결과를 기록하세요.",
-                resource={
-                    "id": resource_id,
-                    "name": resource_name,
-                    "type": event.get("resource_type") or event.get("prod_name"),
-                },
-                occurrence_key=(
-                    event.get("event_id"),
-                    event.get("rule_id") or rule_name,
-                    event.get("metric"),
-                    start_value,
-                ),
-            ))
+            findings.append(
+                Finding(
+                    rule_id="INSIGHT_EVENT_OPEN" if is_open else "INSIGHT_EVENT_OCCURRED",
+                    severity=severity,
+                    category="EVENT",
+                    title=f"{resource_name}에서 {rule_name} 이벤트가 발생했습니다.",
+                    evidence=[
+                        {"label": "이벤트 등급", "value": severity},
+                        {"label": "시작 시각", "value": event.get("start_time_kst") or start_value},
+                        {
+                            "label": "종료 시각",
+                            "value": event.get("end_time_kst") or event.get("end_time") or "미종료",
+                        },
+                        {"label": "지속 시간", "value": duration_seconds, "unit": "초"},
+                    ],
+                    impact="모니터링 규칙이 임계 상태를 감지했습니다. 실제 고객 영향은 별도 확인이 필요합니다.",
+                    recommendation="같은 시간대의 지표와 변경 이력을 함께 확인하고 원인과 조치 결과를 기록하세요.",
+                    resource={
+                        "id": resource_id,
+                        "name": resource_name,
+                        "type": event.get("resource_type") or event.get("prod_name"),
+                    },
+                    occurrence_key=(
+                        event.get("event_id"),
+                        event.get("rule_id") or rule_name,
+                        event.get("metric"),
+                        start_value,
+                    ),
+                )
+            )
 
     summaries.sort(
         key=lambda item: (
@@ -102,20 +109,19 @@ def analyze_events(report: Any) -> tuple[dict[str, Any], list[Finding]]:
         "duration_available_count": duration_count,
         "duration_note": (
             "시작·종료 시각 차이이며 MTTA 또는 MTTR이 아닙니다."
-            if duration_count else
-            "시작·종료 시각이 모두 있는 이벤트가 없어 지속 시간을 계산하지 않았습니다."
+            if duration_count
+            else "시작·종료 시각이 모두 있는 이벤트가 없어 지속 시간을 계산하지 않았습니다."
         ),
         "items": summaries,
     }, findings
 
 
 def _severity(event: dict[str, Any]) -> str:
-    raw = str(
-        event.get("level")
-        or event.get("severity")
-        or event.get("event_level")
-        or ""
-    ).strip().upper()
+    raw = (
+        str(event.get("level") or event.get("severity") or event.get("event_level") or "")
+        .strip()
+        .upper()
+    )
     if raw in _CRITICAL_LEVELS:
         return "CRITICAL"
     if raw in _WARNING_LEVELS:

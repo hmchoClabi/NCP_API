@@ -6,11 +6,13 @@ from app.report_pipeline import ObservabilityResult, build_collection_plan
 
 class ReportPipelineSupportTest(unittest.TestCase):
     def test_collection_plan_separates_display_and_monitoring_scope(self):
-        options = ReportOptions.from_value({
-            "sections": ["infrastructure_inventory", "monitoring"],
-            "resource_categories": ["SERVER", "VPC"],
-            "monitoring_categories": ["LOAD_BALANCER"],
-        })
+        options = ReportOptions.from_value(
+            {
+                "sections": ["infrastructure_inventory", "monitoring"],
+                "resource_categories": ["SERVER", "VPC"],
+                "monitoring_categories": ["LOAD_BALANCER"],
+            }
+        )
 
         plan = build_collection_plan(options)
 
@@ -37,11 +39,15 @@ class ReportPipelineSupportTest(unittest.TestCase):
         self.assertEqual(second.errors, [])
 
     def test_network_configuration_does_not_use_inventory_snapshot(self):
-        plan = build_collection_plan(ReportOptions.from_value({
-            "sections": ["infrastructure_inventory"],
-            "resource_categories": ["ACCESS_CONTROL_GROUP", "NETWORK_ACL"],
-            "monitoring_categories": [],
-        }))
+        plan = build_collection_plan(
+            ReportOptions.from_value(
+                {
+                    "sections": ["infrastructure_inventory"],
+                    "resource_categories": ["ACCESS_CONTROL_GROUP", "NETWORK_ACL"],
+                    "monitoring_categories": [],
+                }
+            )
+        )
 
         self.assertTrue(plan.needs_infrastructure_collection)
         self.assertFalse(plan.needs_resource_snapshot)

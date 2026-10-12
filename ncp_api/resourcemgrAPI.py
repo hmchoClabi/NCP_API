@@ -1,5 +1,5 @@
 """
-    ResourceManager 리소스 API 모듈
+ResourceManager 리소스 API 모듈
 """
 
 from typing import Dict, Optional
@@ -9,16 +9,17 @@ from ncp_api.base import BaseNCPAPI
 class ResourceManagerAPI(BaseNCPAPI):
     """
     ResourceManager 리소스 API 클래스
-    
+
     ResourceManager 인스턴스 및 관련 정보를 조회합니다.
     """
-    
+
     ENDPOINT_KEY = "resourcemanager"
     """
     ================================================================
     리소스 매니져 관련 API
     ================================================================
     """
+
     def get_group_list(
         self,
         group_name: Optional[str] = None,
@@ -44,38 +45,34 @@ class ResourceManagerAPI(BaseNCPAPI):
 
         if page is not None:
             if page_index is not None and page_index != page:
-                raise ValueError(
-                    "page_index와 page에 서로 다른 값을 지정할 수 없습니다."
-                )
+                raise ValueError("page_index와 page에 서로 다른 값을 지정할 수 없습니다.")
             page_index = page
         if size is not None:
             if page_size is not None and page_size != size:
-                raise ValueError(
-                    "page_size와 size에 서로 다른 값을 지정할 수 없습니다."
-                )
+                raise ValueError("page_size와 size에 서로 다른 값을 지정할 수 없습니다.")
             page_size = size
 
         if group_name is not None:
-            params['groupName'] = group_name
+            params["groupName"] = group_name
         if page_index is not None:
-            params['page'] = page_index
+            params["page"] = page_index
         if page_size is not None:
-            params['size'] = page_size
+            params["size"] = page_size
 
-        return self.client.get('/api/v1/groups', params=params)
+        return self.client.get("/api/v1/groups", params=params)
 
     def get_resource_list(
         self,
-        nrn : Optional[str] = None,
-        product_name : Optional[str] = None,
-        region_code : Optional[str] = None,
-        resource_type : Optional[str] = None,
-        resource_id : Optional[str] = None,
-        resource_name : Optional[str] = None,
-        tag : Optional[list[dict[str, str]]] = None,
-        group_name : Optional[str] = None,
-        page : Optional[int] = None,
-        size : Optional[int] = None
+        nrn: Optional[str] = None,
+        product_name: Optional[str] = None,
+        region_code: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        tag: Optional[list[dict[str, str]]] = None,
+        group_name: Optional[str] = None,
+        page: Optional[int] = None,
+        size: Optional[int] = None,
     ) -> Dict:
         """
         리소스 목록을 조회합니다.
@@ -95,28 +92,28 @@ class ResourceManagerAPI(BaseNCPAPI):
         """
         params = {}
         if nrn is not None:
-            params['nrn'] = nrn
+            params["nrn"] = nrn
         if product_name is not None:
-            params['productName'] = product_name
+            params["productName"] = product_name
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if resource_type is not None:
-            params['resourceType'] = resource_type
+            params["resourceType"] = resource_type
         if resource_id is not None:
-            params['resourceId'] = resource_id
+            params["resourceId"] = resource_id
         if resource_name is not None:
-            params['resourceName'] = resource_name
+            params["resourceName"] = resource_name
         if tag is not None:
-            params['tag'] = tag
+            params["tag"] = tag
         if group_name is not None:
-            params['groupName'] = group_name
+            params["groupName"] = group_name
         if page is not None:
-            params['page'] = page
+            params["page"] = page
         if size is not None:
-            params['size'] = size
+            params["size"] = size
 
         return self.client.post(
-            '/api/v1/resources',
+            "/api/v1/resources",
             json_data=params,
             retry_safe=True,
         )

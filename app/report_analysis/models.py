@@ -42,11 +42,7 @@ class Finding:
             "severity": self.severity,
             "category": self.category,
             "title": self.title,
-            "resource": {
-                key: value
-                for key, value in identity.items()
-                if value not in (None, "")
-            },
+            "resource": {key: value for key, value in identity.items() if value not in (None, "")},
             "evidence": list(self.evidence),
             "impact": self.impact,
             "recommendation": self.recommendation,

@@ -18,8 +18,7 @@ class DatabaseSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env.db").write_text(
-                "DB_HOST=localhost\n"
-                "DB_MSP_APP_PASSWORD=file-password\n",
+                "DB_HOST=localhost\nDB_MSP_APP_PASSWORD=file-password\n",
                 encoding="utf-8",
             )
             settings = DatabaseSettings.from_env(

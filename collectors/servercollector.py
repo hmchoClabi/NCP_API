@@ -24,9 +24,7 @@ class ServerCollector:
         credentials = getattr(api_factory, "credentials", None)
         region = getattr(credentials, "region", None)
         self.region_code = (
-            region.strip().upper()
-            if isinstance(region, str) and region.strip()
-            else None
+            region.strip().upper() if isinstance(region, str) and region.strip() else None
         )
 
     def collect(self) -> List[Dict[str, Any]]:
@@ -78,12 +76,10 @@ class ServerCollector:
     def _get_all_nics(self) -> List[Dict[str, Any]]:
         vserver_api = self.api_factory.get("vserver")
         return self._collect_paginated(
-            fetch_page=lambda page_no: (
-                vserver_api.get_network_interface_instance_list(
-                    page_no=page_no,
-                    page_size=self.PAGE_SIZE,
-                    **self._region_kwargs(),
-                )
+            fetch_page=lambda page_no: vserver_api.get_network_interface_instance_list(
+                page_no=page_no,
+                page_size=self.PAGE_SIZE,
+                **self._region_kwargs(),
             ),
             extract_items=self._extract_nics,
             identity_fields=("networkInterfaceNo",),
@@ -94,12 +90,10 @@ class ServerCollector:
     def _get_all_storages(self) -> List[Dict[str, Any]]:
         vserver_api = self.api_factory.get("vserver")
         return self._collect_paginated(
-            fetch_page=lambda page_no: (
-                vserver_api.get_block_storage_instance_list(
-                    page_no=page_no,
-                    page_size=self.PAGE_SIZE,
-                    **self._region_kwargs(),
-                )
+            fetch_page=lambda page_no: vserver_api.get_block_storage_instance_list(
+                page_no=page_no,
+                page_size=self.PAGE_SIZE,
+                **self._region_kwargs(),
             ),
             extract_items=self._extract_storages,
             identity_fields=("blockStorageInstanceNo",),
@@ -117,11 +111,7 @@ class ServerCollector:
             return []
 
         container = response.get("getServerInstanceListResponse", {})
-        items = (
-            container.get("serverInstanceList", [])
-            if isinstance(container, dict)
-            else []
-        )
+        items = container.get("serverInstanceList", []) if isinstance(container, dict) else []
         return self._dict_items(items)
 
     def _extract_nics(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -134,11 +124,7 @@ class ServerCollector:
             return []
 
         container = response.get("getNetworkInterfaceListResponse", {})
-        items = (
-            container.get("networkInterfaceList", [])
-            if isinstance(container, dict)
-            else []
-        )
+        items = container.get("networkInterfaceList", []) if isinstance(container, dict) else []
         return self._dict_items(items)
 
     def _extract_storages(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -151,11 +137,7 @@ class ServerCollector:
             return []
 
         container = response.get("getBlockStorageInstanceListResponse", {})
-        items = (
-            container.get("blockStorageInstanceList", [])
-            if isinstance(container, dict)
-            else []
-        )
+        items = container.get("blockStorageInstanceList", []) if isinstance(container, dict) else []
         return self._dict_items(items)
 
     def _collect_paginated(
@@ -194,10 +176,7 @@ class ServerCollector:
                     page_no=page_no,
                 )
                 break
-            fingerprint = tuple(
-                item_identity(item, identity_fields)
-                for item in items
-            )
+            fingerprint = tuple(item_identity(item, identity_fields) for item in items)
 
             if items and fingerprint == previous_fingerprint:
                 self._record_error(
@@ -240,10 +219,7 @@ class ServerCollector:
                 api=api_name,
                 target_type=target_type,
                 page_no=self.MAX_PAGES,
-                message=(
-                    f"최대 페이지 수({self.MAX_PAGES})에 도달해 "
-                    "수집을 중단했습니다."
-                ),
+                message=(f"최대 페이지 수({self.MAX_PAGES})에 도달해 수집을 중단했습니다."),
             )
 
         return result
@@ -271,14 +247,7 @@ class ServerCollector:
             "stage": stage,
             "target_type": target_type,
             "api": api,
-            "message": (
-                message
-                or (
-                    safe_exception_message(exc)
-                    if exc
-                    else "알 수 없는 오류"
-                )
-            ),
+            "message": (message or (safe_exception_message(exc) if exc else "알 수 없는 오류")),
         }
 
         if page_no is not None:

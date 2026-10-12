@@ -16,16 +16,10 @@ def analyze_availability(
 ) -> tuple[dict[str, Any], list[Finding]]:
     source = mapping(field(report, "service_availability", {}))
     scenarios = records(source.get("scenarios"))
-    warning_threshold = _policy_number(
-        policy, "availability_warning_percent", 99.0
-    )
-    critical_threshold = _policy_number(
-        policy, "availability_critical_percent", 95.0
-    )
+    warning_threshold = _policy_number(policy, "availability_warning_percent", 99.0)
+    critical_threshold = _policy_number(policy, "availability_critical_percent", 95.0)
     critical_threshold = min(critical_threshold, warning_threshold)
-    response_threshold = _policy_number(
-        policy, "response_time_warning_ms", None
-    )
+    response_threshold = _policy_number(policy, "response_time_warning_ms", None)
     findings: list[Finding] = []
     items: list[dict[str, Any]] = []
 
@@ -58,20 +52,22 @@ def analyze_availability(
             else:
                 severity = None
             if severity:
-                findings.append(Finding(
-                    rule_id="WMS_AVAILABILITY_BELOW_THRESHOLD",
-                    severity=severity,
-                    category="AVAILABILITY",
-                    title=f"{scenario_name} 가용성이 기준보다 낮습니다.",
-                    evidence=[
-                        {"label": "가용성", "value": rounded(availability), "unit": "%"},
-                        {"label": "전체 실행", "value": total_count, "unit": "회"},
-                        {"label": "오류", "value": error_count, "unit": "회"},
-                    ],
-                    impact="외부 관측 위치에서 서비스 요청이 실패했을 가능성이 있습니다.",
-                    recommendation="WMS 상세 결과와 같은 시간대의 애플리케이션·LB 지표를 확인하세요.",
-                    resource={"id": scenario_id, "name": scenario_name, "type": "WMS_SCENARIO"},
-                ))
+                findings.append(
+                    Finding(
+                        rule_id="WMS_AVAILABILITY_BELOW_THRESHOLD",
+                        severity=severity,
+                        category="AVAILABILITY",
+                        title=f"{scenario_name} 가용성이 기준보다 낮습니다.",
+                        evidence=[
+                            {"label": "가용성", "value": rounded(availability), "unit": "%"},
+                            {"label": "전체 실행", "value": total_count, "unit": "회"},
+                            {"label": "오류", "value": error_count, "unit": "회"},
+                        ],
+                        impact="외부 관측 위치에서 서비스 요청이 실패했을 가능성이 있습니다.",
+                        recommendation="WMS 상세 결과와 같은 시간대의 애플리케이션·LB 지표를 확인하세요.",
+                        resource={"id": scenario_id, "name": scenario_name, "type": "WMS_SCENARIO"},
+                    )
+                )
 
         if (
             response_threshold is not None
@@ -80,30 +76,26 @@ def analyze_availability(
             and total_count > 0
             and avg_load_time > response_threshold
         ):
-            findings.append(Finding(
-                rule_id="WMS_RESPONSE_TIME_ABOVE_THRESHOLD",
-                severity="WARNING",
-                category="PERFORMANCE",
-                title=f"{scenario_name} 평균 응답 시간이 기준을 초과했습니다.",
-                evidence=[
-                    {"label": "평균 로드 시간", "value": rounded(avg_load_time), "unit": "ms"},
-                    {"label": "설정 기준", "value": response_threshold, "unit": "ms"},
-                ],
-                impact="사용자가 체감하는 응답 속도가 저하되었을 수 있습니다.",
-                recommendation="구간별 응답 결과와 서버·DB·LB 지표를 함께 확인하세요.",
-                resource={"id": scenario_id, "name": scenario_name, "type": "WMS_SCENARIO"},
-            ))
+            findings.append(
+                Finding(
+                    rule_id="WMS_RESPONSE_TIME_ABOVE_THRESHOLD",
+                    severity="WARNING",
+                    category="PERFORMANCE",
+                    title=f"{scenario_name} 평균 응답 시간이 기준을 초과했습니다.",
+                    evidence=[
+                        {"label": "평균 로드 시간", "value": rounded(avg_load_time), "unit": "ms"},
+                        {"label": "설정 기준", "value": response_threshold, "unit": "ms"},
+                    ],
+                    impact="사용자가 체감하는 응답 속도가 저하되었을 수 있습니다.",
+                    recommendation="구간별 응답 결과와 서버·DB·LB 지표를 함께 확인하세요.",
+                    resource={"id": scenario_id, "name": scenario_name, "type": "WMS_SCENARIO"},
+                )
+            )
 
     items.sort(key=lambda item: str(item.get("name") or "").casefold())
     collection_status = str(source.get("status") or "UNAVAILABLE").upper()
-    observed_total = sum(
-        item["total_count"] or 0 for item in items
-        if item["has_observations"]
-    )
-    observed_success = sum(
-        item["success_count"] or 0 for item in items
-        if item["has_observations"]
-    )
+    observed_total = sum(item["total_count"] or 0 for item in items if item["has_observations"])
+    observed_success = sum(item["success_count"] or 0 for item in items if item["has_observations"])
     return {
         "status": collection_status,
         "source_state": calculated_source_state(collection_status),
@@ -113,8 +105,7 @@ def analyze_availability(
         "observed_scenario_count": sum(item["has_observations"] for item in items),
         "observation_count": observed_total,
         "overall_availability_percent": rounded(
-            observed_success / observed_total * 100
-            if observed_total else None
+            observed_success / observed_total * 100 if observed_total else None
         ),
         "thresholds": {
             "warning_percent": warning_threshold,

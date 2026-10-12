@@ -180,9 +180,7 @@ class MainTests(unittest.TestCase):
         send_report_email.assert_called_once_with(
             report=report,
             runner=runner,
-            recipient_values=[
-                "first@example.com,second@example.com"
-            ],
+            recipient_values=["first@example.com,second@example.com"],
         )
 
     @patch("main.HtmlReportRenderer")
@@ -205,9 +203,7 @@ class MainTests(unittest.TestCase):
         report.customer = {"name": "테스트 고객"}
         report.generated_at = "2026-08-19 01:00:00"
         runner = MagicMock(output_dir="output/report/test")
-        renderer_class.return_value.render_email_summary.return_value = (
-            "<html>summary</html>"
-        )
+        renderer_class.return_value.render_email_summary.return_value = "<html>summary</html>"
         mailer_class.return_value.send.return_value = "message-id"
 
         result = main.send_report_email(
@@ -218,9 +214,7 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(result, "message-id")
         config_from_env.assert_called_once_with()
-        renderer_class.return_value.render_email_summary.assert_called_once_with(
-            report
-        )
+        renderer_class.return_value.render_email_summary.assert_called_once_with(report)
         self.assertEqual(
             mailer_class.return_value.send.call_args.kwargs["html_body"],
             "<html>summary</html>",

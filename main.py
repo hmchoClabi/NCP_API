@@ -83,24 +83,18 @@ def resolve_target_day(
     if not normalized:
         raise ValueError("--target-day 값이 비어 있습니다.")
 
-    base_date = (
-        reference_date
-        or datetime.now(KOREA_TIMEZONE).date()
-    )
+    base_date = reference_date or datetime.now(KOREA_TIMEZONE).date()
 
     day_offset = DAY_ALIASES.get(normalized)
 
     if day_offset is not None:
-        return (
-            base_date + timedelta(days=day_offset)
-        ).isoformat()
+        return (base_date + timedelta(days=day_offset)).isoformat()
 
     try:
         return date.fromisoformat(normalized).isoformat()
     except ValueError as exc:
         raise ValueError(
-            "--target-day는 YYYY-MM-DD, today, yesterday, "
-            "오늘, 어제 중 하나여야 합니다."
+            "--target-day는 YYYY-MM-DD, today, yesterday, 오늘, 어제 중 하나여야 합니다."
         ) from exc
 
 
@@ -109,12 +103,7 @@ def shift_month(
     month_offset: int,
 ) -> str:
     """기준 날짜에서 지정한 개월만큼 이동한 YYYY-MM을 반환합니다."""
-    month_index = (
-        reference_date.year * 12
-        + reference_date.month
-        - 1
-        + month_offset
-    )
+    month_index = reference_date.year * 12 + reference_date.month - 1 + month_offset
 
     year, zero_based_month = divmod(month_index, 12)
 
@@ -141,10 +130,7 @@ def resolve_target_month(
     if not normalized:
         raise ValueError("--target-month 값이 비어 있습니다.")
 
-    base_date = (
-        reference_date
-        or datetime.now(KOREA_TIMEZONE).date()
-    )
+    base_date = reference_date or datetime.now(KOREA_TIMEZONE).date()
 
     month_offset = MONTH_ALIASES.get(normalized)
 
@@ -155,13 +141,10 @@ def resolve_target_month(
         )
 
     try:
-        parsed = date.fromisoformat(
-            f"{normalized}-01"
-        )
+        parsed = date.fromisoformat(f"{normalized}-01")
     except ValueError as exc:
         raise ValueError(
-            "--target-month는 YYYY-MM, this-month, last-month, "
-            "이번달, 지난달 중 하나여야 합니다."
+            "--target-month는 YYYY-MM, this-month, last-month, 이번달, 지난달 중 하나여야 합니다."
         ) from exc
 
     return f"{parsed.year:04d}-{parsed.month:02d}"
@@ -185,18 +168,15 @@ def build_parser() -> argparse.ArgumentParser:
     period_group.add_argument(
         "--target-month",
         metavar="YYYY-MM|this-month|last-month",
-         help=(
-        "지정한 월 전체를 조회합니다. "
-        "this-month/이번달, last-month/지난달도 사용할 수 있습니다."
+        help=(
+            "지정한 월 전체를 조회합니다. "
+            "this-month/이번달, last-month/지난달도 사용할 수 있습니다."
         ),
     )
     period_group.add_argument(
         "--target-day",
-         metavar="YYYY-MM-DD|today|yesterday",
-        help=(
-        "지정한 하루를 조회합니다. "
-        "today/오늘, yesterday/어제도 사용할 수 있습니다."
-        ),
+        metavar="YYYY-MM-DD|today|yesterday",
+        help=("지정한 하루를 조회합니다. today/오늘, yesterday/어제도 사용할 수 있습니다."),
     )
     period_group.add_argument(
         "--target-week",
@@ -271,7 +251,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-
 def setup_logging() -> None:
     log_path = Path(LOG_FILE).expanduser()
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -282,12 +261,7 @@ def setup_logging() -> None:
             LOG_LEVEL.upper(),
             logging.INFO,
         ),
-        format=(
-            "%(asctime)s - "
-            "%(name)s - "
-            "%(levelname)s - "
-            "%(message)s"
-        ),
+        format=("%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
         handlers=[
             logging.FileHandler(
                 log_path,
@@ -326,33 +300,17 @@ def validate_settings(
 
 
 def build_customer_profile(args: argparse.Namespace) -> CustomerProfile:
-    customer_name = (
-        args.customer_name
-        or os.getenv("NCP_CUSTOMER_NAME")
-        or "default"
-    ).strip()
+    customer_name = (args.customer_name or os.getenv("NCP_CUSTOMER_NAME") or "default").strip()
     customer_id = (
         args.customer_id
         or os.getenv("NCP_CUSTOMER_ID")
-        or (
-            "default"
-            if customer_name == "default"
-            else customer_id_from_name(customer_name)
-        )
+        or ("default" if customer_name == "default" else customer_id_from_name(customer_name))
     )
     return CustomerProfile(
         customer_id=customer_id,
         customer_name=customer_name,
-        api_type=(
-            args.api_type
-            or os.getenv("NCP_API_TYPE")
-            or NCP_API_TYPE
-        ),
-        region=(
-            args.region
-            or os.getenv("NCP_REGION")
-            or NCP_REGION
-        ),
+        api_type=(args.api_type or os.getenv("NCP_API_TYPE") or NCP_API_TYPE),
+        region=(args.region or os.getenv("NCP_REGION") or NCP_REGION),
         credential_ref=os.getenv("NCP_CREDENTIAL_REF") or None,
     )
 
@@ -363,14 +321,10 @@ def send_report_email(
     recipient_values: Optional[Sequence[str]] = None,
 ) -> str:
     recipients = parse_recipients(
-        recipient_values
-        if recipient_values
-        else [os.getenv("REPORT_EMAIL_TO", "")]
+        recipient_values if recipient_values else [os.getenv("REPORT_EMAIL_TO", "")]
     )
     if not recipients:
-        raise ValueError(
-            "--send-email requires --email-to or REPORT_EMAIL_TO."
-        )
+        raise ValueError("--send-email requires --email-to or REPORT_EMAIL_TO.")
 
     period = report.period
     start_dt = str(period.get("start_dt", "")).split(" ", 1)[0]
@@ -384,14 +338,8 @@ def send_report_email(
     customer_name = str(report.customer.get("name") or "").strip()
     customer_prefix = f"{customer_name} " if customer_name else ""
 
-    attachment = (
-        Path(runner.output_dir)
-        / f"ncp_report_{period['file_suffix']}.html"
-    )
-    subject = (
-        f"[{customer_prefix}NCP {report_label} 보고서] "
-        f"{start_dt} ~ {end_dt}"
-    )
+    attachment = Path(runner.output_dir) / f"ncp_report_{period['file_suffix']}.html"
+    subject = f"[{customer_prefix}NCP {report_label} 보고서] {start_dt} ~ {end_dt}"
     body = (
         "NCP 보고서가 생성되었습니다.\n\n"
         f"고객명: {customer_name or '-'}\n"
@@ -421,21 +369,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     if bool(args.start_date) != bool(args.end_date):
-        parser.error(
-            "--start-date와 --end-date는 함께 지정해야 합니다."
-        )
+        parser.error("--start-date와 --end-date는 함께 지정해야 합니다.")
     if bool(args.start_datetime) != bool(args.end_datetime):
-        parser.error(
-            "--start-datetime과 --end-datetime은 함께 지정해야 합니다."
-        )
+        parser.error("--start-datetime과 --end-datetime은 함께 지정해야 합니다.")
 
     try:
-        target_month = resolve_target_month(
-            args.target_month
-        )
-        target_day = resolve_target_day(
-            args.target_day
-        )
+        target_month = resolve_target_month(args.target_month)
+        target_day = resolve_target_day(args.target_day)
         target_week = resolve_target_week(args.target_week)
     except ValueError as exc:
         parser.error(str(exc))
@@ -460,14 +400,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     customer = build_customer_profile(args)
 
     credential_provider = EnvironmentCredentialProvider()
-    credentials = credential_provider.get_credentials(
-        customer
-    )
+    credentials = credential_provider.get_credentials(customer)
     validate_settings(credentials)
 
-    api_factory = APIFactory(
-        credentials=credentials
-    )
+    api_factory = APIFactory(credentials=credentials)
 
     runner = ReportRunner(
         output_dir=args.output_dir,

@@ -97,8 +97,8 @@ class InventoryCloudDbAPI(EmptyCloudDbAPI):
                             "vpcNo": "vpc-1",
                             "subnetNo": "subnet-1",
                             "cpuCount": 2,
-                            "memorySize": 4 * 1024 ** 3,
-                            "dataStorageSize": 100 * 1024 ** 3,
+                            "memorySize": 4 * 1024**3,
+                            "dataStorageSize": 100 * 1024**3,
                         }
                     ],
                 }
@@ -165,7 +165,7 @@ class InventoryNasAPI(EmptyNasAPI):
                     "nasVolumeInstanceStatusName": "running",
                     "regionCode": "KR",
                     "zoneCode": "KR-1",
-                    "volumeTotalSize": 500 * 1024 ** 3,
+                    "volumeTotalSize": 500 * 1024**3,
                     "volumeAllotmentProtocolType": {"code": "NFS"},
                 }
             ],
@@ -445,8 +445,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
         response._content = b'{"error":{"errorCode":"2300"}}'
         response.headers["Content-Type"] = "application/json"
         failing_api = Mock()
-        failing_api.get_nas_volume_instance_list.side_effect = (
-            requests.HTTPError("forbidden", response=response)
+        failing_api.get_nas_volume_instance_list.side_effect = requests.HTTPError(
+            "forbidden", response=response
         )
         factory = build_factory(vnas=failing_api)
         collector = InfrastructureCollector(factory)
@@ -579,9 +579,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 }
             ],
         )
-        collector = InfrastructureCollector(
-            build_factory(vpc=vpc, vserver=vserver)
-        )
+        collector = InfrastructureCollector(build_factory(vpc=vpc, vserver=vserver))
 
         resources = collector.collect(
             [],
@@ -592,9 +590,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 "NETWORK_ACL",
             ),
         )
-        by_category = {
-            resource["category"]: resource for resource in resources
-        }
+        by_category = {resource["category"]: resource for resource in resources}
 
         route_table = by_category["ROUTE_TABLE"]
         self.assertEqual(
@@ -615,9 +611,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )
 
         access_control_group = by_category["ACCESS_CONTROL_GROUP"]
-        self.assertTrue(
-            access_control_group["details"]["rule_snapshot_available"]
-        )
+        self.assertTrue(access_control_group["details"]["rule_snapshot_available"])
         self.assertEqual(
             access_control_group["details"]["outbound_rule_count"],
             1,
@@ -652,15 +646,11 @@ class InfrastructureCollectorTests(unittest.TestCase):
             with self.subTest(category=category):
                 vpc = Mock(wraps=EmptyVpcAPI())
                 vserver = Mock(wraps=EmptyVserverAPI())
-                collector = InfrastructureCollector(
-                    build_factory(vpc=vpc, vserver=vserver)
-                )
+                collector = InfrastructureCollector(build_factory(vpc=vpc, vserver=vserver))
 
                 collector.collect([], {}, categories=(category,))
 
-                expected_api = (
-                    vserver if category == "ACCESS_CONTROL_GROUP" else vpc
-                )
+                expected_api = vserver if category == "ACCESS_CONTROL_GROUP" else vpc
                 getattr(expected_api, expected_method).assert_called_once()
                 unexpected_methods = {
                     "get_route_table_list",
@@ -668,11 +658,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
                     "get_network_acl_list",
                 } - {expected_method}
                 for method_name in unexpected_methods:
-                    api = (
-                        vserver
-                        if method_name == "get_access_control_group_list"
-                        else vpc
-                    )
+                    api = vserver if method_name == "get_access_control_group_list" else vpc
                     getattr(api, method_name).assert_not_called()
 
     def test_normalizer_canonicalizes_supported_category_aliases(self):
@@ -726,38 +712,42 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )
 
     def test_same_name_without_ids_is_not_heuristically_merged(self):
-        resources = InfrastructureNormalizer().finalize([
-            {
-                "category": "SERVER",
-                "resource_name": "duplicate-name",
-                "platform": "VPC",
-                "region_code": "KR",
-                "zone_code": "KR-1",
-                "details": {"private_ip": "10.0.0.1"},
-            },
-            {
-                "category": "SERVER",
-                "resource_name": "duplicate-name",
-                "platform": "VPC",
-                "region_code": "KR",
-                "zone_code": "KR-2",
-                "details": {"private_ip": "10.0.0.2"},
-            },
-        ])
+        resources = InfrastructureNormalizer().finalize(
+            [
+                {
+                    "category": "SERVER",
+                    "resource_name": "duplicate-name",
+                    "platform": "VPC",
+                    "region_code": "KR",
+                    "zone_code": "KR-1",
+                    "details": {"private_ip": "10.0.0.1"},
+                },
+                {
+                    "category": "SERVER",
+                    "resource_name": "duplicate-name",
+                    "platform": "VPC",
+                    "region_code": "KR",
+                    "zone_code": "KR-2",
+                    "details": {"private_ip": "10.0.0.2"},
+                },
+            ]
+        )
 
         self.assertEqual(len(resources), 2)
 
     def test_resource_manager_preserves_nrn_as_canonical_evidence(self):
-        resources = InfrastructureNormalizer().normalize_resource_manager([
-            {
-                "nrn": "nrn:PUB:Server:KR:123:Server/456",
-                "productName": "VPCServer",
-                "resourceType": "ServerInstance",
-                "resourceId": "456",
-                "resourceName": "server",
-                "platformType": "VPC",
-            }
-        ])
+        resources = InfrastructureNormalizer().normalize_resource_manager(
+            [
+                {
+                    "nrn": "nrn:PUB:Server:KR:123:Server/456",
+                    "productName": "VPCServer",
+                    "resourceType": "ServerInstance",
+                    "resourceId": "456",
+                    "resourceName": "server",
+                    "platformType": "VPC",
+                }
+            ]
+        )
 
         self.assertEqual(resources[0]["resource_id"], "456")
         self.assertEqual(
@@ -850,28 +840,25 @@ class InfrastructureCollectorTests(unittest.TestCase):
 
     def test_resource_manager_creation_time_can_match_canonical_nrn(self):
         nrn = "nrn:PUB:Server:KR:123:Server/456"
-        enriched = (
-            InfrastructureNormalizer()
-            .enrich_resource_manager_creation_times(
-                [
-                    {
-                        "category": "SERVER",
-                        "resource_id": "service-api-alias",
-                        "resource_name": "app-server",
-                        "create_time": "service-api-time",
-                        "details": {"source_nrn": nrn},
-                    }
-                ],
-                [
-                    {
-                        "nrn": nrn,
-                        "productName": "VPCServer",
-                        "resourceType": "ServerInstance",
-                        "resourceId": "456",
-                        "createTime": 1_767_225_600_000,
-                    }
-                ],
-            )
+        enriched = InfrastructureNormalizer().enrich_resource_manager_creation_times(
+            [
+                {
+                    "category": "SERVER",
+                    "resource_id": "service-api-alias",
+                    "resource_name": "app-server",
+                    "create_time": "service-api-time",
+                    "details": {"source_nrn": nrn},
+                }
+            ],
+            [
+                {
+                    "nrn": nrn,
+                    "productName": "VPCServer",
+                    "resourceType": "ServerInstance",
+                    "resourceId": "456",
+                    "createTime": 1_767_225_600_000,
+                }
+            ],
         )
 
         self.assertEqual(enriched[0]["create_time"], 1_767_225_600_000)
@@ -901,10 +888,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            {
-                resource["resource_id"]: resource["platform"]
-                for resource in resources
-            },
+            {resource["resource_id"]: resource["platform"] for resource in resources},
             {
                 "redis-1": "CACHE",
                 "serverless-1": "SERVERLESS",
@@ -914,20 +898,24 @@ class InfrastructureCollectorTests(unittest.TestCase):
     def test_target_group_health_is_counted_without_response_payload(self):
         normalizer = InfrastructureNormalizer()
         resources = normalizer.normalize_load_balancers(
-            [{
-                "loadBalancerInstanceNo": "lb-1",
-                "loadBalancerName": "public-alb",
-                "vpcNo": "vpc-1",
-            }],
-            [{
-                "targetGroupNo": "tg-1",
-                "targetGroupName": "web-targets",
-                "loadBalancerInstanceNo": "lb-1",
-                "vpcNo": "vpc-1",
-                "targetType": {"code": "VSVR"},
-                "targetGroupProtocolType": {"code": "HTTP"},
-                "targetGroupPort": 8080,
-            }],
+            [
+                {
+                    "loadBalancerInstanceNo": "lb-1",
+                    "loadBalancerName": "public-alb",
+                    "vpcNo": "vpc-1",
+                }
+            ],
+            [
+                {
+                    "targetGroupNo": "tg-1",
+                    "targetGroupName": "web-targets",
+                    "loadBalancerInstanceNo": "lb-1",
+                    "vpcNo": "vpc-1",
+                    "targetType": {"code": "VSVR"},
+                    "targetGroupProtocolType": {"code": "HTTP"},
+                    "targetGroupPort": 8080,
+                }
+            ],
             {
                 "tg-1": [
                     {
@@ -952,14 +940,10 @@ class InfrastructureCollectorTests(unittest.TestCase):
         )
 
         load_balancer = next(
-            resource
-            for resource in resources
-            if resource["category"] == "LOAD_BALANCER"
+            resource for resource in resources if resource["category"] == "LOAD_BALANCER"
         )
         target_group = next(
-            resource
-            for resource in resources
-            if resource["category"] == "TARGET_GROUP"
+            resource for resource in resources if resource["category"] == "TARGET_GROUP"
         )
         details = target_group["details"]
 
@@ -976,13 +960,15 @@ class InfrastructureCollectorTests(unittest.TestCase):
 
     def test_target_group_empty_and_failed_health_snapshots_are_distinct(self):
         normalizer = InfrastructureNormalizer()
-        groups = [{
-            "targetGroupNo": "tg-1",
-            "targetGroupName": "web-targets",
-            "loadBalancerInstanceNo": "lb-1",
-            "targetType": {"code": "VSVR"},
-            "targetNoList": ["server-1"],
-        }]
+        groups = [
+            {
+                "targetGroupNo": "tg-1",
+                "targetGroupName": "web-targets",
+                "loadBalancerInstanceNo": "lb-1",
+                "targetType": {"code": "VSVR"},
+                "targetNoList": ["server-1"],
+            }
+        ]
         load_balancers = [{"loadBalancerInstanceNo": "lb-1"}]
 
         empty = normalizer.normalize_load_balancers(
@@ -995,22 +981,14 @@ class InfrastructureCollectorTests(unittest.TestCase):
             groups,
             {},
         )
-        empty_group = next(
-            item for item in empty if item["category"] == "TARGET_GROUP"
-        )
-        failed_group = next(
-            item for item in failed if item["category"] == "TARGET_GROUP"
-        )
+        empty_group = next(item for item in empty if item["category"] == "TARGET_GROUP")
+        failed_group = next(item for item in failed if item["category"] == "TARGET_GROUP")
 
         self.assertEqual(empty_group["status"], "EMPTY")
-        self.assertTrue(
-            empty_group["details"]["health_snapshot_available"]
-        )
+        self.assertTrue(empty_group["details"]["health_snapshot_available"])
         self.assertEqual(empty_group["details"]["registered_target_count"], 0)
         self.assertEqual(failed_group["status"], "UNKNOWN")
-        self.assertFalse(
-            failed_group["details"]["health_snapshot_available"]
-        )
+        self.assertFalse(failed_group["details"]["health_snapshot_available"])
         self.assertEqual(failed_group["details"]["registered_target_count"], 1)
 
     def test_resource_manager_uses_official_parent_resource_codes(self):
@@ -1045,9 +1023,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             for product, resource_type, resource_id in items + excluded
         ]
 
-        resources = InfrastructureNormalizer().normalize_resource_manager(
-            raw_resources
-        )
+        resources = InfrastructureNormalizer().normalize_resource_manager(raw_resources)
 
         self.assertEqual(
             {resource["resource_id"] for resource in resources},
@@ -1164,20 +1140,12 @@ class InfrastructureCollectorTests(unittest.TestCase):
             for product, resource_type, resource_id in excluded_specs
         )
 
-        resources = InfrastructureNormalizer().normalize_resource_manager(
-            raw_resources
-        )
+        resources = InfrastructureNormalizer().normalize_resource_manager(raw_resources)
         by_id = {resource["resource_id"]: resource for resource in resources}
 
         self.assertEqual(
-            {
-                resource_id: resource["category"]
-                for resource_id, resource in by_id.items()
-            },
-            {
-                resource_id: category
-                for resource_id, (_, _, category) in specs.items()
-            },
+            {resource_id: resource["category"] for resource_id, resource in by_id.items()},
+            {resource_id: category for resource_id, (_, _, category) in specs.items()},
         )
         for resource in resources:
             self.assertEqual(
@@ -1405,9 +1373,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
             "forbidden",
             response=response,
         )
-        collector = InfrastructureCollector(
-            build_factory(resource_manager=resource_manager)
-        )
+        collector = InfrastructureCollector(build_factory(resource_manager=resource_manager))
 
         resources = collector.collect(
             [
@@ -1459,12 +1425,12 @@ class InfrastructureCollectorTests(unittest.TestCase):
                 {
                     "blockStorageInstanceNo": "storage-1",
                     "blockStorageName": "data-volume",
-                    "blockStorageSize": 100 * 1024 ** 3,
+                    "blockStorageSize": 100 * 1024**3,
                     "serverInstanceNo": "server-1",
                     "regionCode": "KR",
                     "zoneCode": "KR-1",
                 }
-            ]
+            ],
         }
 
         resources = collector.collect(
@@ -1496,20 +1462,10 @@ class InfrastructureCollectorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            len(
-                [
-                    resource
-                    for resource in resources
-                    if resource["category"] == "SERVER"
-                ]
-            ),
+            len([resource for resource in resources if resource["category"] == "SERVER"]),
             1,
         )
-        cloud_db = next(
-            resource
-            for resource in resources
-            if resource["category"] == "CLOUD_DB"
-        )
+        cloud_db = next(resource for resource in resources if resource["category"] == "CLOUD_DB")
         self.assertEqual(
             cloud_db["details"]["server_instance_nos"],
             ["db-server-1"],
@@ -1540,8 +1496,8 @@ class InfrastructureCollectorTests(unittest.TestCase):
         response._content = b'{"error":{"errorCode":"2300"}}'
         response.headers["Content-Type"] = "application/json"
         failing_load_balancer = Mock()
-        failing_load_balancer.get_load_balancer_instance_list.side_effect = (
-            requests.HTTPError("forbidden", response=response)
+        failing_load_balancer.get_load_balancer_instance_list.side_effect = requests.HTTPError(
+            "forbidden", response=response
         )
         factory = build_factory(
             loadbalancer=failing_load_balancer,
@@ -1551,12 +1507,7 @@ class InfrastructureCollectorTests(unittest.TestCase):
 
         resources = collector.collect([], {"storages": []})
 
-        self.assertTrue(
-            any(
-                resource["category"] == "OBJECT_STORAGE"
-                for resource in resources
-            )
-        )
+        self.assertTrue(any(resource["category"] == "OBJECT_STORAGE" for resource in resources))
         self.assertEqual(collector.last_errors, [])
         self.assertEqual(collector.last_warnings[0]["status_code"], 403)
         self.assertEqual(collector.last_warnings[0]["error_code"], "2300")

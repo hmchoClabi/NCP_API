@@ -76,10 +76,7 @@ class ServerNormalizer:
                 nic_map=nic_map,
             )
 
-            nics = [
-                self._normalize_nic(nic)
-                for nic in raw_nics
-            ]
+            nics = [self._normalize_nic(nic) for nic in raw_nics]
 
             primary_nic = next(
                 (nic for nic in nics if nic.get("is_default")),
@@ -88,10 +85,7 @@ class ServerNormalizer:
 
             raw_storages = storage_map.get(normalized_server_id, [])
 
-            storages = [
-                self._normalize_storage(storage)
-                for storage in raw_storages
-            ]
+            storages = [self._normalize_storage(storage) for storage in raw_storages]
 
             os_storages, data_storages = self._split_storages(storages)
 
@@ -106,16 +100,13 @@ class ServerNormalizer:
                     "memory_gb": bytes_to_gb(server.get("memorySize")),
                     "login_key": server.get("loginKeyName"),
                     "public_ip": server.get("publicIp"),
-
                     "private_ip": primary_nic.get("primary_ip"),
                     "mac_address": primary_nic.get("mac_address"),
                     "nic_id": primary_nic.get("nic_id"),
                     "nics": nics,
-
                     "os_storages": os_storages,
                     "data_storages": data_storages,
                     "storages": storages,
-
                     "status": server.get("serverInstanceStatusName"),
                     "uptime": server.get("uptime"),
                     "is_protected": server.get("isProtectServerTermination"),
@@ -213,46 +204,33 @@ class ServerNormalizer:
             "server_id": storage.get("serverInstanceNo"),
             "storage_name": storage.get("blockStorageName"),
             "device_name": storage.get("deviceName"),
-
             "is_os_disk": block_storage_type.get("code") == "BASIC",
-
             "storage_type_code": block_storage_type.get("code"),
             "storage_type_name": block_storage_type.get("codeName"),
-
             "size_gb": bytes_to_gb(storage.get("blockStorageSize")),
-
             "disk_type_code": disk_type.get("code"),
             "disk_type_name": disk_type.get("codeName"),
-
             "disk_detail_type_code": disk_detail_type.get("code"),
             "disk_detail_type_name": disk_detail_type.get("codeName"),
-
             "volume_type_code": volume_type.get("code"),
             "volume_type_name": volume_type.get("codeName"),
-
             "iops": storage.get("iops"),
             "max_iops_throughput": storage.get("maxIopsThroughput"),
-
             "throughput_bps": throughput,
             "throughput_mbps": bytes_to_mb(throughput),
-
             "status": storage.get("blockStorageInstanceStatusName"),
             "status_name": storage.get(
                 "blockStorageInstanceStatus",
                 {},
             ).get("codeName"),
-
             "is_encrypted": storage.get("isEncryptedVolume"),
             "is_return_protection": storage.get("isReturnProtection"),
-
             "zone_code": storage.get("zoneCode"),
             "region_code": storage.get("regionCode"),
-
             "hypervisor_type": hypervisor_type.get("codeName"),
             "product_code": storage.get("blockStorageProductCode"),
             "snapshot_id": storage.get("blockStorageSnapshotInstanceNo"),
             "create_date": storage.get("createDate"),
-
             "raw": storage,
         }
 

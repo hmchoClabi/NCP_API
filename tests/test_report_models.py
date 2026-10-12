@@ -9,26 +9,34 @@ class ReportResultSnapshotTests(unittest.TestCase):
             period={"file_suffix": "20260802", "period_type": "day"},
             infrastructure_snapshot={
                 "servers": [{"server_id": "observed-server"}],
-                "infrastructure": [{
-                    "category": "SERVER",
-                    "resource_id": "observed-server",
-                }],
+                "infrastructure": [
+                    {
+                        "category": "SERVER",
+                        "resource_id": "observed-server",
+                    }
+                ],
                 "metadata": {"source": "LIVE_API_COLLECTION"},
             },
-            infrastructure=[{
-                "category": "LOAD_BALANCER",
-                "resource_id": "lb-1",
-                "resource_name": "frontend",
-            }],
-            infrastructure_metrics=[{
-                "category": "LOAD_BALANCER",
-                "metric": "connections_per_second",
-                "series": [{"points": [[1, 2.0]]}],
-            }],
-            server_metrics=[{
-                "server_name": "web-1",
-                "raw_metrics": {"CPU/used_rto": {"avg": [{"values": [1, 2]}]}},
-            }],
+            infrastructure=[
+                {
+                    "category": "LOAD_BALANCER",
+                    "resource_id": "lb-1",
+                    "resource_name": "frontend",
+                }
+            ],
+            infrastructure_metrics=[
+                {
+                    "category": "LOAD_BALANCER",
+                    "metric": "connections_per_second",
+                    "series": [{"points": [[1, 2.0]]}],
+                }
+            ],
+            server_metrics=[
+                {
+                    "server_name": "web-1",
+                    "raw_metrics": {"CPU/used_rto": {"avg": [{"values": [1, 2]}]}},
+                }
+            ],
         )
         snapshot = report.to_persistence_dict()
         snapshot["server_metrics"] = report.server_metrics
@@ -49,14 +57,18 @@ class ReportResultSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["schema_version"], "1.5")
 
     def test_legacy_snapshot_uses_servers_as_infrastructure_fallback(self):
-        restored = ReportResult.from_dict({
-            "period": {"file_suffix": "legacy"},
-            "servers": [{
-                "server_id": "server-1",
-                "server_name": "web-1",
-                "status": "RUN",
-            }],
-        })
+        restored = ReportResult.from_dict(
+            {
+                "period": {"file_suffix": "legacy"},
+                "servers": [
+                    {
+                        "server_id": "server-1",
+                        "server_name": "web-1",
+                        "status": "RUN",
+                    }
+                ],
+            }
+        )
 
         self.assertEqual(len(restored.display_infrastructure), 1)
         self.assertEqual(
@@ -64,9 +76,7 @@ class ReportResultSnapshotTests(unittest.TestCase):
             "SERVER",
         )
         self.assertTrue(
-            restored.selected_report_options.section_enabled(
-                "infrastructure_inventory"
-            )
+            restored.selected_report_options.section_enabled("infrastructure_inventory")
         )
 
     def test_public_and_persistence_inventory_are_separated(self):
@@ -91,10 +101,7 @@ class ReportResultSnapshotTests(unittest.TestCase):
             ["SERVER"],
         )
         self.assertEqual(
-            [
-                item["category"]
-                for item in persistence_snapshot["infrastructure"]
-            ],
+            [item["category"] for item in persistence_snapshot["infrastructure"]],
             ["SERVER", "CLOUD_DB"],
         )
 
@@ -136,16 +143,11 @@ class ReportResultSnapshotTests(unittest.TestCase):
             ["LOAD_BALANCER"],
         )
         self.assertEqual(
-            [
-                item["category"]
-                for item in persistence_snapshot["infrastructure"]
-            ],
+            [item["category"] for item in persistence_snapshot["infrastructure"]],
             ["LOAD_BALANCER", "TARGET_GROUP"],
         )
         self.assertEqual(
-            public_snapshot["infrastructure"][0]["details"].get(
-                "ready_target_count"
-            ),
+            public_snapshot["infrastructure"][0]["details"].get("ready_target_count"),
             2,
         )
 
@@ -165,26 +167,30 @@ class ReportResultSnapshotTests(unittest.TestCase):
                 "resource_categories": ["SERVER"],
                 "monitoring_categories": [],
             },
-            servers=[{
-                "server_id": "server-secret",
-                "server_name": "web-1",
-                "private_ip": "10.0.0.10",
-                "status": "RUN",
-                "unexpected_internal_field": "server-internal-secret",
-            }],
-            infrastructure=[{
-                "category": "SERVER",
-                "resource_id": "resource-secret",
-                "resource_name": "web-1",
-                "status": "RUN",
-                "details": {
+            servers=[
+                {
+                    "server_id": "server-secret",
+                    "server_name": "web-1",
                     "private_ip": "10.0.0.10",
-                    "network_cidr": "10.0.0.0/24",
-                    "network_interfaces": [{"resource_id": "nic-secret"}],
-                    "size_gb": 100,
-                    "unexpected_internal_field": "inventory-internal-secret",
-                },
-            }],
+                    "status": "RUN",
+                    "unexpected_internal_field": "server-internal-secret",
+                }
+            ],
+            infrastructure=[
+                {
+                    "category": "SERVER",
+                    "resource_id": "resource-secret",
+                    "resource_name": "web-1",
+                    "status": "RUN",
+                    "details": {
+                        "private_ip": "10.0.0.10",
+                        "network_cidr": "10.0.0.0/24",
+                        "network_interfaces": [{"resource_id": "nic-secret"}],
+                        "size_gb": 100,
+                        "unexpected_internal_field": "inventory-internal-secret",
+                    },
+                }
+            ],
         )
 
         public_snapshot = report.to_dict()
@@ -197,12 +203,14 @@ class ReportResultSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(
             public_snapshot["infrastructure"],
-            [{
-                "category": "SERVER",
-                "resource_name": "web-1",
-                "status": "RUN",
-                "details": {"size_gb": 100},
-            }],
+            [
+                {
+                    "category": "SERVER",
+                    "resource_name": "web-1",
+                    "status": "RUN",
+                    "details": {"size_gb": 100},
+                }
+            ],
         )
         for secret in (
             "credential-secret",

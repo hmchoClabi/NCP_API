@@ -20,7 +20,6 @@ BASE_ENDPOINTS: Dict[str, Dict[str, str]] = {
         "webservicemonitor": "https://wms.apigw.gov-ntruss.com",
         "globaldns": "https://globaldns.apigw.gov-ntruss.com/dns/v1",
         "platform": "https://billingapi.apigw.gov-ntruss.com/billing/v1",
-        
     },
     "public": {
         "ncloud": "https://ncloud.apigw.ntruss.com",
@@ -50,9 +49,7 @@ def _validated_api_type_and_region(api_type: str, region: str) -> tuple[str, str
 
     if normalized_api_type not in BASE_ENDPOINTS:
         supported = ", ".join(sorted(BASE_ENDPOINTS))
-        raise ValueError(
-            f"지원하지 않는 api_type입니다: {api_type!r} (지원값: {supported})"
-        )
+        raise ValueError(f"지원하지 않는 api_type입니다: {api_type!r} (지원값: {supported})")
 
     supported_regions = SUPPORTED_REGIONS[normalized_api_type]
     if normalized_region not in supported_regions:
@@ -105,6 +102,5 @@ def build_api_endpoints(api_type: str, region: str) -> Dict[str, str]:
         "globaldns": base["globaldns"],
         "platform": base["platform"],
         **({"organization": base["organization"]} if "organization" in base else {}),
-
         "kubernetes": get_kubernetes_endpoint(api_type, region),
     }

@@ -47,30 +47,32 @@ class OrganizationCollector:
             if status and status != "JOIN":
                 continue
             seen.add(member_no)
-            members.append({
-                "member_no": member_no,
-                "display_name": str(
-                    row.get("memberAlias") or row.get("displayName")
-                    or member_no
-                )[:200],
-                "group_no": str(row.get("organizationGroupNo") or "")[:30],
-                "group_path": str(row.get("wholePath") or "")[:500],
-                "is_master": row.get("masterMemberYn") == "Y",
-                "status": status or "JOIN",
-            })
+            members.append(
+                {
+                    "member_no": member_no,
+                    "display_name": str(
+                        row.get("memberAlias") or row.get("displayName") or member_no
+                    )[:200],
+                    "group_no": str(row.get("organizationGroupNo") or "")[:30],
+                    "group_path": str(row.get("wholePath") or "")[:500],
+                    "is_master": row.get("masterMemberYn") == "Y",
+                    "status": status or "JOIN",
+                }
+            )
 
         master_no = str(organization.get("masterMemberNo") or "").strip()
         if master_no and master_no not in seen:
-            members.insert(0, {
-                "member_no": master_no,
-                "display_name": str(
-                    organization.get("organizationName") or "Master"
-                )[:200],
-                "group_no": "",
-                "group_path": "",
-                "is_master": True,
-                "status": "JOIN",
-            })
+            members.insert(
+                0,
+                {
+                    "member_no": master_no,
+                    "display_name": str(organization.get("organizationName") or "Master")[:200],
+                    "group_no": "",
+                    "group_path": "",
+                    "is_master": True,
+                    "status": "JOIN",
+                },
+            )
         return {
             "scope": "ORGANIZATION",
             "reason": "MASTER_CONFIRMED",

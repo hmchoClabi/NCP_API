@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class BaseNCPAPI:
-    
     ENDPOINT_KEY: str = ""
 
     def __init__(
@@ -53,9 +52,7 @@ class BaseNCPAPI:
 
     def _resolve_base_url(self, credentials: NCPCredentials) -> str:
         if not self.ENDPOINT_KEY:
-            raise ValueError(
-                f"{self.__class__.__name__} ENDPOINT_KEY가 설정되지 않았습니다."
-            )
+            raise ValueError(f"{self.__class__.__name__} ENDPOINT_KEY가 설정되지 않았습니다.")
 
         endpoints = build_api_endpoints(
             api_type=credentials.api_type,

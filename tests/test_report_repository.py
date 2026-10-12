@@ -70,28 +70,34 @@ class ReportRepositoryTests(unittest.TestCase):
                 "end_dt": "2026-07-31 23:59:59",
             },
             billing={
-                "cost_facts": [{
-                    "cost_type": "CONFIRMED",
-                    "status": "AVAILABLE",
-                    "period_start": "2026-07-01",
-                    "period_end": "2026-07-31",
-                    "coverage_start": "2026-07-01",
-                    "coverage_end": "2026-07-31",
-                    "calculated_at": "2026-08-07T12:00:00+09:00",
-                    "total_amount": 110,
-                    "currency": "KRW",
-                    "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
-                    "includes_discount": True,
-                    "includes_vat": True,
-                    "confidence": "CONFIRMED",
-                    "source_api": "getDemandCostList",
-                }]
+                "cost_facts": [
+                    {
+                        "cost_type": "CONFIRMED",
+                        "status": "AVAILABLE",
+                        "period_start": "2026-07-01",
+                        "period_end": "2026-07-31",
+                        "coverage_start": "2026-07-01",
+                        "coverage_end": "2026-07-31",
+                        "calculated_at": "2026-08-07T12:00:00+09:00",
+                        "total_amount": 110,
+                        "currency": "KRW",
+                        "amount_basis": "CURRENT_MONTH_INVOICE_TOTAL",
+                        "includes_discount": True,
+                        "includes_vat": True,
+                        "confidence": "CONFIRMED",
+                        "source_api": "getDemandCostList",
+                    }
+                ]
             },
         )
 
         self.repository._insert_billing_cost_facts(
-            cursor, "public_data", report,
-            "report-id", "tenant-id", "account-id",
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
         )
 
         self.assertEqual(len(cursor.calls), 1)
@@ -105,24 +111,38 @@ class ReportRepositoryTests(unittest.TestCase):
         cursor = RecordingCursor()
         report = ReportResult(
             period={"start_dt": "2026-07-01", "end_dt": "2026-07-31"},
-            billing={"account_costs": [{
-                "member_no": "200",
-                "display_name": "Child",
-                "is_master": False,
-                "service_summary": [{"service_name": "Server", "amount": 100}],
-                "expected_by_service": [],
-                "cost_facts": [{
-                    "cost_type": "CONFIRMED", "status": "AVAILABLE",
-                    "period_start": "2026-07-01", "period_end": "2026-07-31",
-                    "subtotal_amount": 100, "vat_amount": 10,
-                    "total_amount": 110, "confidence": "CONFIRMED",
-                }],
-            }]},
+            billing={
+                "account_costs": [
+                    {
+                        "member_no": "200",
+                        "display_name": "Child",
+                        "is_master": False,
+                        "service_summary": [{"service_name": "Server", "amount": 100}],
+                        "expected_by_service": [],
+                        "cost_facts": [
+                            {
+                                "cost_type": "CONFIRMED",
+                                "status": "AVAILABLE",
+                                "period_start": "2026-07-01",
+                                "period_end": "2026-07-31",
+                                "subtotal_amount": 100,
+                                "vat_amount": 10,
+                                "total_amount": 110,
+                                "confidence": "CONFIRMED",
+                            }
+                        ],
+                    }
+                ]
+            },
         )
 
         self.repository._insert_billing_account_cost_facts(
-            cursor, "public_data", report,
-            "report-id", "tenant-id", "account-id",
+            cursor,
+            "public_data",
+            report,
+            "report-id",
+            "tenant-id",
+            "account-id",
         )
 
         self.assertEqual(len(cursor.calls), 1)
@@ -298,9 +318,7 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertFalse(hasattr(self.repository, "_upsert_analysis_cases"))
 
     def test_historical_snapshot_query_uses_observation_time_not_report_date(self):
-        source = inspect.getsource(
-            self.repository.load_period_infrastructure_snapshot
-        )
+        source = inspect.getsource(self.repository.load_period_infrastructure_snapshot)
 
         self.assertIn("collection_metadata,infrastructure,completed_at", source)
         self.assertIn("AT TIME ZONE 'Asia/Seoul'", source)
@@ -314,10 +332,12 @@ class ReportRepositoryTests(unittest.TestCase):
         cursor.fetchone = lambda: (
             {
                 "servers": [{"server_id": "filtered-server"}],
-                "infrastructure": [{
-                    "category": "SERVER",
-                    "resource_id": "filtered-server",
-                }],
+                "infrastructure": [
+                    {
+                        "category": "SERVER",
+                        "resource_id": "filtered-server",
+                    }
+                ],
                 "collection_metadata": {
                     "infrastructure": {
                         "source": "CURRENT_API_COLLECTION",
@@ -326,10 +346,12 @@ class ReportRepositoryTests(unittest.TestCase):
                 },
                 "infrastructure_snapshot": {
                     "servers": [{"server_id": "observed-server"}],
-                    "infrastructure": [{
-                        "category": "SERVER",
-                        "resource_id": "observed-server",
-                    }],
+                    "infrastructure": [
+                        {
+                            "category": "SERVER",
+                            "resource_id": "observed-server",
+                        }
+                    ],
                     "metadata": {
                         "source": "LIVE_API_COLLECTION",
                         "completed_at": observed_at.isoformat(),
@@ -351,12 +373,8 @@ class ReportRepositoryTests(unittest.TestCase):
             def cursor(self):
                 return cursor
 
-        repository = PostgresReportRepository(
-            DatabaseSettings(tenant_id="tenant-id")
-        )
-        fake_psycopg = SimpleNamespace(
-            connect=lambda **_kwargs: Connection()
-        )
+        repository = PostgresReportRepository(DatabaseSettings(tenant_id="tenant-id"))
+        fake_psycopg = SimpleNamespace(connect=lambda **_kwargs: Connection())
 
         with patch.dict(sys.modules, {"psycopg": fake_psycopg}):
             snapshot = repository.load_period_infrastructure_snapshot(
@@ -427,7 +445,13 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertEqual(
             window["reference_at"],
             datetime(
-                2026, 7, 31, 23, 59, 59, 999999,
+                2026,
+                7,
+                31,
+                23,
+                59,
+                59,
+                999999,
                 tzinfo=self.repository.KST,
             ),
         )
@@ -457,19 +481,27 @@ class ReportRepositoryTests(unittest.TestCase):
         self.assertEqual(
             window["eligible_end"],
             datetime(
-                2026, 8, 7, 12, 0, 0, 1,
+                2026,
+                8,
+                7,
+                12,
+                0,
+                0,
+                1,
                 tzinfo=self.repository.KST,
             ),
         )
 
     def test_future_snapshot_window_is_unavailable(self):
-        self.assertIsNone(self.repository._snapshot_eligibility_window(
-            {
-                "start_dt": "2026-08-08 00:00:00",
-                "end_dt": "2026-08-08 23:59:59",
-            },
-            "2026-08-07T23:59:59+09:00",
-        ))
+        self.assertIsNone(
+            self.repository._snapshot_eligibility_window(
+                {
+                    "start_dt": "2026-08-08 00:00:00",
+                    "end_dt": "2026-08-08 23:59:59",
+                },
+                "2026-08-07T23:59:59+09:00",
+            )
+        )
 
     def test_naive_and_utc_snapshot_times_share_kst_interpretation(self):
         self.assertEqual(
@@ -499,11 +531,13 @@ class ReportRepositoryTests(unittest.TestCase):
             generated_at="2026-08-10T12:30:00+09:00",
         )
         report.network_configuration_snapshot = {
-            "configuration": [{
-                "category": "ROUTE_TABLE",
-                "resource_id": "route-table-1",
-                "details": {"routes": []},
-            }],
+            "configuration": [
+                {
+                    "category": "ROUTE_TABLE",
+                    "resource_id": "route-table-1",
+                    "details": {"routes": []},
+                }
+            ],
             "captured_at": report.generated_at,
             "source": "REPORT_GENERATION",
             "selected_categories": ["ROUTE_TABLE", "NETWORK_ACL"],
@@ -647,9 +681,7 @@ class ReportRepositoryTests(unittest.TestCase):
             def cursor(self):
                 return cursor
 
-        repository = PostgresReportRepository(
-            DatabaseSettings(tenant_id="tenant-id")
-        )
+        repository = PostgresReportRepository(DatabaseSettings(tenant_id="tenant-id"))
         fake_psycopg = SimpleNamespace(connect=lambda **_kwargs: Connection())
 
         with patch.dict(sys.modules, {"psycopg": fake_psycopg}):

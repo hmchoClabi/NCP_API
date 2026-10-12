@@ -35,9 +35,7 @@ class HtmlReportRendererTests(unittest.TestCase):
                     "mem_min": 40,
                     "mem_avg": 50,
                     "mem_max": 60,
-                    "os_fs_details": [
-                        {"mount": "/", "min": 20, "avg": 30, "max": 40}
-                    ],
+                    "os_fs_details": [{"mount": "/", "min": 20, "avg": 30, "max": 40}],
                     "data_fs_details": [
                         {
                             "mount": "/data",
@@ -119,9 +117,7 @@ class HtmlReportRendererTests(unittest.TestCase):
                     {
                         "event_id": "activity-1",
                         "event_time": 1781508312345,
-                        "event_time_kst": (
-                            "2026-06-15 13:45:12.345 KST"
-                        ),
+                        "event_time_kst": ("2026-06-15 13:45:12.345 KST"),
                         "user_name": "customer-admin",
                         "user_type": "Main",
                         "product_display_name": "Server",
@@ -209,11 +205,9 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertEqual(html.count('class="chart-hit-line"'), 4)
         self.assertEqual(html.count('data-chart-tooltip role="status"'), 4)
         self.assertIn('data-chart-points="[[', html)
-        self.assertIn(',1781485200000,10.0]', html)
-        self.assertNotIn('&quot;timestamp&quot;', html)
-        tooltip_payload = html.split(
-            'data-chart-points="', 1
-        )[1].split('"', 1)[0]
+        self.assertIn(",1781485200000,10.0]", html)
+        self.assertNotIn("&quot;timestamp&quot;", html)
+        tooltip_payload = html.split('data-chart-points="', 1)[1].split('"', 1)[0]
         self.assertNotIn("KST", tooltip_payload)
         self.assertNotIn("&quot;", tooltip_payload)
         first_svg = html.split("<svg ", 1)[1].split("</svg>", 1)[0]
@@ -226,21 +220,16 @@ class HtmlReportRendererTests(unittest.TestCase):
             4,
         )
         self.assertEqual(html.count("<select data-chart-export-width>"), 4)
-        metric_charts = html.split(
-            '<section class="report-section metric-trends">', 1
-        )[1].split("</section>", 1)[0]
+        metric_charts = html.split('<section class="report-section metric-trends">', 1)[1].split(
+            "</section>", 1
+        )[0]
         self.assertEqual(
-            metric_charts.count(
-                '<div class="chart-heading" data-chart-drag-handle '
-                'tabindex="0"'
-            ),
+            metric_charts.count('<div class="chart-heading" data-chart-drag-handle tabindex="0"'),
             4,
         )
         self.assertNotIn('draggable="true"', metric_charts)
         self.assertEqual(
-            metric_charts.count(
-                '<span class="chart-drag-grip" aria-hidden="true">⠿</span>'
-            ),
+            metric_charts.count('<span class="chart-drag-grip" aria-hidden="true">⠿</span>'),
             4,
         )
         self.assertIn(
@@ -299,7 +288,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertIn('line.addEventListener("pointermove"', html)
         self.assertIn('line.addEventListener("pointerleave"', html)
         self.assertIn('document.addEventListener("focusin"', html)
-        self.assertNotIn('data-chart-series tabindex=', html)
+        self.assertNotIn("data-chart-series tabindex=", html)
         self.assertNotIn('series.setAttribute("aria-pressed"', html)
         self.assertIn('document.addEventListener("keydown"', html)
         self.assertEqual(
@@ -313,9 +302,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("파일시스템 평균</th>", html)
         self.assertNotIn("45.00%</td>", html)
         self.assertNotIn("CPU 최소</th>", html)
-        cpu_chart = html.split(
-            "<h3>CPU Utilization Average</h3>", 1
-        )[1].split(
+        cpu_chart = html.split("<h3>CPU Utilization Average</h3>", 1)[1].split(
             "</article>",
             1,
         )[0]
@@ -334,9 +321,9 @@ class HtmlReportRendererTests(unittest.TestCase):
         self.assertNotIn("must-not-be-rendered", html)
 
         script = html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
-        script_hash = base64.b64encode(
-            hashlib.sha256(script.encode("utf-8")).digest()
-        ).decode("ascii")
+        script_hash = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode(
+            "ascii"
+        )
         self.assertEqual(
             HtmlReportRenderer.INTERACTION_SCRIPT_CSP_SOURCE,
             f"'sha256-{script_hash}'",
@@ -344,12 +331,14 @@ class HtmlReportRendererTests(unittest.TestCase):
 
     def test_weekly_report_uses_weekly_brief_label(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "week",
-            "start_dt": "2026-07-27 00:00:00",
-            "end_dt": "2026-08-02 23:59:59",
-            "file_suffix": "20260727_20260802",
-        })
+        report.period.update(
+            {
+                "period_type": "week",
+                "start_dt": "2026-07-27 00:00:00",
+                "end_dt": "2026-08-02 23:59:59",
+                "file_suffix": "20260727_20260802",
+            }
+        )
         report.analysis = {
             "period_type": "WEEKLY",
             "data_quality": {"overall_status": "COMPLETE", "datasets": []},
@@ -371,8 +360,7 @@ class HtmlReportRendererTests(unittest.TestCase):
         html = renderer.render(self._sample_report())
 
         self.assertIn(
-            "<strong>핵심</strong> · 합계 12,345원 · "
-            "최대 Server 12,345원",
+            "<strong>핵심</strong> · 합계 12,345원 · 최대 Server 12,345원",
             html,
         )
         self.assertIn("<strong>핵심</strong> · 경고 1건", html)
@@ -388,15 +376,15 @@ class HtmlReportRendererTests(unittest.TestCase):
         )
         collapsed_headers = [
             fragment.split("</summary>", 1)[0]
-            for fragment in html.split(
-                '<details class="report-section report-disclosure'
-            )[1:]
+            for fragment in html.split('<details class="report-section report-disclosure')[1:]
         ]
         self.assertTrue(collapsed_headers)
-        self.assertTrue(all(
-            'class="section-description section-summary"' in header
-            for header in collapsed_headers
-        ))
+        self.assertTrue(
+            all(
+                'class="section-description section-summary"' in header
+                for header in collapsed_headers
+            )
+        )
         self.assertEqual(
             renderer._counted_values_summary(
                 [
@@ -420,11 +408,13 @@ class HtmlReportRendererTests(unittest.TestCase):
         )
         self.assertEqual(
             renderer._numeric_rows_summary(
-                [{
-                    "service_name": "Network",
-                    "name": "Internet Outbound",
-                    "usage_gb": 2,
-                }],
+                [
+                    {
+                        "service_name": "Network",
+                        "name": "Internet Outbound",
+                        "usage_gb": 2,
+                    }
+                ],
                 "usage_gb",
                 unit="GB",
                 decimals=3,
@@ -433,33 +423,37 @@ class HtmlReportRendererTests(unittest.TestCase):
             "합계 2.000GB · 최대 Internet Outbound 2.000GB",
         )
         self.assertEqual(
+            renderer._server_metric_summary(self._sample_report().display_server_metrics),
+            "평균 90% 이상 0대 · 기간 평균 최고 web-01 파일시스템 /data 60.00%",
+        )
+        self.assertEqual(
             renderer._server_metric_summary(
-                self._sample_report().display_server_metrics
+                [
+                    {
+                        "server_name": "windows-01",
+                        "cpu_avg": 10,
+                        "mem_avg": 20,
+                        "os_fs_details": [
+                            {"mount": "C:", "avg": 5},
+                        ],
+                        "data_fs_details": [
+                            {"mount": "D:", "avg": 95},
+                        ],
+                    }
+                ]
             ),
-            "평균 90% 이상 0대 · 기간 평균 최고 web-01 "
-            "파일시스템 /data 60.00%",
+            "평균 90% 이상 1대 · 기간 평균 최고 windows-01 파일시스템 D: 95.00%",
         )
         self.assertEqual(
-            renderer._server_metric_summary([{
-                "server_name": "windows-01",
-                "cpu_avg": 10,
-                "mem_avg": 20,
-                "os_fs_details": [
-                    {"mount": "C:", "avg": 5},
-                ],
-                "data_fs_details": [
-                    {"mount": "D:", "avg": 95},
-                ],
-            }]),
-            "평균 90% 이상 1대 · 기간 평균 최고 windows-01 "
-            "파일시스템 D: 95.00%",
-        )
-        self.assertEqual(
-            renderer._filesystem_text([{
-                "mount": "X:",
-                "avg": None,
-                "max": float("nan"),
-            }]),
+            renderer._filesystem_text(
+                [
+                    {
+                        "mount": "X:",
+                        "avg": None,
+                        "max": float("nan"),
+                    }
+                ]
+            ),
             "X: · 평균 - / 최대 -",
         )
         many_servers = self._sample_report()
@@ -468,22 +462,27 @@ class HtmlReportRendererTests(unittest.TestCase):
             {**metric, "server_name": f"web-{index:02d}", "raw_metrics": {}}
             for index in range(1, 22)
         ]
-        utilization = renderer.render(many_servers).split(
-            "서버 이용 현황", 1
-        )[1].split("</summary>", 1)[0]
+        utilization = (
+            renderer.render(many_servers).split("서버 이용 현황", 1)[1].split("</summary>", 1)[0]
+        )
         self.assertIn(
-            "평균 90% 이상 0대 · 기간 평균 최고 web-01 "
-            "파일시스템 /data 60.00%",
+            "평균 90% 이상 0대 · 기간 평균 최고 web-01 파일시스템 /data 60.00%",
             utilization,
         )
-        organization = renderer._organization_cost_sections([{
-            "display_name": "Member",
-            "member_no": "member-1",
-            "cost_facts": [{
-                "cost_type": "CURRENT_PROVISIONAL",
-                "total_amount": 1000,
-            }],
-        }])
+        organization = renderer._organization_cost_sections(
+            [
+                {
+                    "display_name": "Member",
+                    "member_no": "member-1",
+                    "cost_facts": [
+                        {
+                            "cost_type": "CURRENT_PROVISIONAL",
+                            "total_amount": 1000,
+                        }
+                    ],
+                }
+            ]
+        )
         self.assertIn(
             "현재월 예상 합계(VAT 전) 1,000원",
             organization.split("</summary>", 1)[0],
@@ -504,44 +503,46 @@ class HtmlReportRendererTests(unittest.TestCase):
 
     def test_activity_summary_prioritizes_lifecycle_and_failures(self):
         report = self._sample_report()
-        report.activity_events = {"events": [
-            {
-                "event_id": "create",
-                "action_name": "Create Server",
-                "result": "SUCCESS",
-                "user_name": "sensitive-admin",
-                "source_ip": "203.0.113.10",
-                "product_data": {"accessToken": "must-not-summarize"},
-            },
-            {
-                "event_id": "delete",
-                "action_name": "Delete Server",
-                "result": "SUCCESS",
-            },
-            {
-                "event_id": "login",
-                "action_name": "Login",
-                "result": "FAIL",
-            },
-            {
-                "event_id": "failure",
-                "action_name": "Reboot",
-                "result": "REJECTED",
-            },
-            {
-                "event_id": "unknown",
-                "action_name": "Create Server",
-                "result": "PENDING",
-            },
-        ]}
+        report.activity_events = {
+            "events": [
+                {
+                    "event_id": "create",
+                    "action_name": "Create Server",
+                    "result": "SUCCESS",
+                    "user_name": "sensitive-admin",
+                    "source_ip": "203.0.113.10",
+                    "product_data": {"accessToken": "must-not-summarize"},
+                },
+                {
+                    "event_id": "delete",
+                    "action_name": "Delete Server",
+                    "result": "SUCCESS",
+                },
+                {
+                    "event_id": "login",
+                    "action_name": "Login",
+                    "result": "FAIL",
+                },
+                {
+                    "event_id": "failure",
+                    "action_name": "Reboot",
+                    "result": "REJECTED",
+                },
+                {
+                    "event_id": "unknown",
+                    "action_name": "Create Server",
+                    "result": "PENDING",
+                },
+            ]
+        }
         report.analysis = {"changes": {"status": "PARTIAL"}}
 
         html = HtmlReportRenderer().render(report)
         activity = html.split(">Cloud Activity Tracer</span>", 1)[1]
         header = activity.split("</summary>", 1)[0]
-        attention = activity.split(
-            '<section class="activity-attention-summary"', 1
-        )[1].split("</section>", 1)[0]
+        attention = activity.split('<section class="activity-attention-summary"', 1)[1].split(
+            "</section>", 1
+        )[0]
 
         self.assertIn(
             "부분 수집 · 확인된 5건 기준 · 전체 실패·거부 2건 "
@@ -574,25 +575,23 @@ class HtmlReportRendererTests(unittest.TestCase):
         report.activity_events = {}
         report.analysis = {"changes": {"status": "FAILED"}}
         failed_html = HtmlReportRenderer().render(report)
-        failed_header = failed_html.split(
-            ">Cloud Activity Tracer</span>", 1
-        )[1].split("</summary>", 1)[0]
+        failed_header = failed_html.split(">Cloud Activity Tracer</span>", 1)[1].split(
+            "</summary>", 1
+        )[0]
         self.assertIn("수집 실패 · 판정 불가", failed_header)
 
         report.analysis = {"changes": {"status": "PARTIAL"}}
         partial_html = HtmlReportRenderer().render(report)
         self.assertIn(
             "부분 수집 · 확인된 이력 없음 · 판정 불가",
-            partial_html.split(">Cloud Activity Tracer</span>", 1)[1]
-            .split("</summary>", 1)[0],
+            partial_html.split(">Cloud Activity Tracer</span>", 1)[1].split("</summary>", 1)[0],
         )
 
         report.analysis = {"changes": {"status": "COLLECTED_EMPTY"}}
         empty_html = HtmlReportRenderer().render(report)
         self.assertIn(
             "수집 완료 · 이력 없음 · 전체 실패·거부 0건",
-            empty_html.split(">Cloud Activity Tracer</span>", 1)[1]
-            .split("</summary>", 1)[0],
+            empty_html.split(">Cloud Activity Tracer</span>", 1)[1].split("</summary>", 1)[0],
         )
 
     @pytest.mark.js
@@ -1367,31 +1366,37 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "data_quality": {
                 "overall_status": "COMPLETE",
                 "source_state": "CALCULATED",
-                "datasets": [{
-                    "label": "서버",
-                    "status": "AVAILABLE",
-                    "status_label": "수집 완료",
-                    "record_count": 1,
-                    "error_count": 0,
-                    "warning_count": 0,
-                    "source_state": "OBSERVED",
-                }],
+                "datasets": [
+                    {
+                        "label": "서버",
+                        "status": "AVAILABLE",
+                        "status_label": "수집 완료",
+                        "record_count": 1,
+                        "error_count": 0,
+                        "warning_count": 0,
+                        "source_state": "OBSERVED",
+                    }
+                ],
             },
-            "findings": [{
-                "rule_id": "METRIC_CPU",
-                "severity": "WARNING",
-                "category": "PERFORMANCE",
-                "title": "CPU 확인 필요",
-                "impact": "응답 지연 가능",
-                "recommendation": "부하 원인을 확인하세요.",
-                "resource": {"name": "web-01"},
-                "evidence": [{
-                    "label": "threshold",
-                    "value": 90,
-                    "unit": "%",
-                }],
-                "source_state": "CALCULATED",
-            }],
+            "findings": [
+                {
+                    "rule_id": "METRIC_CPU",
+                    "severity": "WARNING",
+                    "category": "PERFORMANCE",
+                    "title": "CPU 확인 필요",
+                    "impact": "응답 지연 가능",
+                    "recommendation": "부하 원인을 확인하세요.",
+                    "resource": {"name": "web-01"},
+                    "evidence": [
+                        {
+                            "label": "threshold",
+                            "value": 90,
+                            "unit": "%",
+                        }
+                    ],
+                    "source_state": "CALCULATED",
+                }
+            ],
             "metrics": {"summaries": []},
             "availability": {},
             "security": {},
@@ -1458,12 +1463,14 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                         "category_label": "서버",
                         "resource_name": "web-01",
                         "platform": "VPC",
-                        "changed_fields": [{
-                            "field": "cpu_count",
-                            "label": "vCPU",
-                            "before": 2,
-                            "after": "<4>",
-                        }],
+                        "changed_fields": [
+                            {
+                                "field": "cpu_count",
+                                "label": "vCPU",
+                                "before": 2,
+                                "after": "<4>",
+                            }
+                        ],
                     },
                 ],
             },
@@ -1483,9 +1490,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertIn("&lt;new-server&gt;", html)
         self.assertIn("vCPU: 2 → &lt;4&gt;", html)
         self.assertNotIn("<new-server>", html)
-        self.assertNotIn('report-section warning', html.split(
-            "전월 대비 자원 변화", 1
-        )[0][-200:])
+        self.assertNotIn("report-section warning", html.split("전월 대비 자원 변화", 1)[0][-200:])
 
     def test_unavailable_resource_change_does_not_render_zero_counts(self):
         report = self._sample_report()
@@ -1567,9 +1572,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split(
-            ">서버 현황</span>", 1
-        )[1].split(
+        server_inventory = html.split(">서버 현황</span>", 1)[1].split(
             "</details>",
             1,
         )[0]
@@ -1606,11 +1609,13 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         )
         self.assertIn("전체 6건 표시 중", resource_inventory)
 
-        details = HtmlReportRenderer()._infrastructure_details_text({
-            "kubernetes_version": "1.32",
-            "high_availability": True,
-            "encrypted": False,
-        })
+        details = HtmlReportRenderer()._infrastructure_details_text(
+            {
+                "kubernetes_version": "1.32",
+                "high_availability": True,
+                "encrypted": False,
+            }
+        )
         self.assertIn("Kubernetes: 1.32", details)
         self.assertIn("HA: 사용", details)
         self.assertIn("암호화: 미사용", details)
@@ -1622,25 +1627,29 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": ["SERVER", "VPC", "SUBNET"],
             "monitoring_categories": [],
         }
-        report.servers = [{
-            "server_id": "server-1",
-            "server_name": "web-01",
-            "cpu_count": 4,
-            "memory_gb": 16,
-            "private_ip": "10.0.1.10",
-            "public_ip": "203.0.113.10",
-            "vpc_id": "vpc-1",
-            "subnet_id": "subnet-1",
-            "nics": [{
-                "all_private_ips": ["10.0.1.10", "10.0.1.11"],
-            }],
-            "storages": [{"size_gb": 50}, {"size_gb": 100}],
-            "raw_server": {
-                "serverProductCode": "SVR.VSVR.STAND.C002.M008.NET.SSD.B050.G002",
-                "serverProductName": "Standard 4 vCPU, 16 GB",
-                "createDate": "2026-07-01T00:00:00+09:00",
-            },
-        }]
+        report.servers = [
+            {
+                "server_id": "server-1",
+                "server_name": "web-01",
+                "cpu_count": 4,
+                "memory_gb": 16,
+                "private_ip": "10.0.1.10",
+                "public_ip": "203.0.113.10",
+                "vpc_id": "vpc-1",
+                "subnet_id": "subnet-1",
+                "nics": [
+                    {
+                        "all_private_ips": ["10.0.1.10", "10.0.1.11"],
+                    }
+                ],
+                "storages": [{"size_gb": 50}, {"size_gb": 100}],
+                "raw_server": {
+                    "serverProductCode": "SVR.VSVR.STAND.C002.M008.NET.SSD.B050.G002",
+                    "serverProductName": "Standard 4 vCPU, 16 GB",
+                    "createDate": "2026-07-01T00:00:00+09:00",
+                },
+            }
+        ]
         report.infrastructure = [
             {
                 "category": "SERVER",
@@ -1671,9 +1680,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split(
-            ">서버 현황</span>", 1
-        )[1].split(
+        server_inventory = html.split(">서버 현황</span>", 1)[1].split(
             "</section>",
             1,
         )[0]
@@ -1714,14 +1721,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": ["SERVER"],
             "monitoring_categories": [],
         }
-        report.infrastructure = [{
-            "category": "SERVER",
-            "category_label": "서버",
-            "resource_id": "server-1",
-            "resource_name": "server-only",
-            "status": "RUN",
-            "details": {},
-        }]
+        report.infrastructure = [
+            {
+                "category": "SERVER",
+                "category_label": "서버",
+                "resource_id": "server-1",
+                "resource_name": "server-only",
+                "status": "RUN",
+                "details": {},
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
 
@@ -1735,12 +1744,14 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": ["SERVER"],
             "monitoring_categories": [],
         }
-        report.servers = [{
-            "server_id": "server-1",
-            "server_name": "web-01",
-            "vpc_id": "vpc-1",
-            "subnet_id": "subnet-1",
-        }]
+        report.servers = [
+            {
+                "server_id": "server-1",
+                "server_name": "web-01",
+                "vpc_id": "vpc-1",
+                "subnet_id": "subnet-1",
+            }
+        ]
         report.infrastructure = [
             {
                 "category": "SERVER",
@@ -1763,9 +1774,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         ]
 
         html = HtmlReportRenderer().render(report)
-        server_inventory = html.split(
-            ">서버 현황</span>", 1
-        )[1].split(
+        server_inventory = html.split(">서버 현황</span>", 1)[1].split(
             "</section>",
             1,
         )[0]
@@ -1781,14 +1790,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": ["BLOCK_STORAGE"],
             "monitoring_categories": [],
         }
-        report.infrastructure = [{
-            "category": "BLOCK_STORAGE",
-            "category_label": "Block Storage",
-            "resource_id": "storage-1",
-            "resource_name": "data-volume",
-            "status": "ATTACHED",
-            "details": {"size_gb": 100},
-        }]
+        report.infrastructure = [
+            {
+                "category": "BLOCK_STORAGE",
+                "category_label": "Block Storage",
+                "resource_id": "storage-1",
+                "resource_name": "data-volume",
+                "status": "ATTACHED",
+                "details": {"size_gb": 100},
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
 
@@ -1809,9 +1820,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         report.collection_metadata = {
             "network_configuration": {
                 "source": "REPORT_GENERATION_SNAPSHOT",
-                "time_basis": (
-                    "REPORT_GENERATION_TIME_NOT_REPORT_PERIOD"
-                ),
+                "time_basis": ("REPORT_GENERATION_TIME_NOT_REPORT_PERIOD"),
                 "captured_at": "2026-08-10T09:30:00+09:00",
                 "backup_captured_at": "2026-08-10T09:30:00+09:00",
                 "capture_trigger": "REPORT_GENERATION",
@@ -1831,16 +1840,20 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "details": {
                     "vpc_no": "vpc-1",
                     "associated_subnet_count": 1,
-                    "associated_subnets": [{
-                        "subnet_no": "subnet-1",
-                        "subnet_name": "private-a",
-                    }],
+                    "associated_subnets": [
+                        {
+                            "subnet_no": "subnet-1",
+                            "subnet_name": "private-a",
+                        }
+                    ],
                     "route_count": 1,
-                    "routes": [{
-                        "destination_cidr": "0.0.0.0/0",
-                        "target_type": "NATGW",
-                        "target_name": "nat-main",
-                    }],
+                    "routes": [
+                        {
+                            "destination_cidr": "0.0.0.0/0",
+                            "target_type": "NATGW",
+                            "target_name": "nat-main",
+                        }
+                    ],
                 },
             },
             {
@@ -1852,13 +1865,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "details": {
                     "vpc_no": "vpc-1",
                     "rule_count": 1,
-                    "rules": [{
-                        "direction": "INBND",
-                        "protocol": "TCP",
-                        "source_ip_block": "10.0.0.0/8",
-                        "port_range": "443",
-                        "description": "HTTPS from private network",
-                    }],
+                    "rules": [
+                        {
+                            "direction": "INBND",
+                            "protocol": "TCP",
+                            "source_ip_block": "10.0.0.0/8",
+                            "port_range": "443",
+                            "description": "HTTPS from private network",
+                        }
+                    ],
                 },
             },
             {
@@ -1870,14 +1885,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "details": {
                     "vpc_no": "vpc-1",
                     "rule_count": 1,
-                    "rules": [{
-                        "priority": 10,
-                        "direction": "INBND",
-                        "protocol": "TCP",
-                        "source_ip_block": "10.0.0.0/8",
-                        "port_range": "443",
-                        "action": "ALLOW",
-                    }],
+                    "rules": [
+                        {
+                            "priority": 10,
+                            "direction": "INBND",
+                            "protocol": "TCP",
+                            "source_ip_block": "10.0.0.0/8",
+                            "port_range": "443",
+                            "action": "ALLOW",
+                        }
+                    ],
                 },
             },
             {
@@ -1973,15 +1990,17 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "unit": "bytes/sec",
                 "interval": "Min5",
                 "aggregation": "AVG",
-                "series": [{
-                    "resource_id": "lb-1",
-                    "resource_name": "lb-1",
-                    "dimensions": {},
-                    "points": [
-                        [1780272000000, 1048576],
-                        [1780272300000, 2097152],
-                    ],
-                }],
+                "series": [
+                    {
+                        "resource_id": "lb-1",
+                        "resource_name": "lb-1",
+                        "dimensions": {},
+                        "points": [
+                            [1780272000000, 1048576],
+                            [1780272300000, 2097152],
+                        ],
+                    }
+                ],
             },
             {
                 "category": "CLOUD_DB",
@@ -1991,15 +2010,17 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "unit": "%",
                 "interval": "Min5",
                 "aggregation": "AVG",
-                "series": [{
-                    "resource_id": "mysql-1",
-                    "resource_name": "mysql-1",
-                    "dimensions": {},
-                    "points": [
-                        [1780272000000, 25],
-                        [1780272300000, 50],
-                    ],
-                }],
+                "series": [
+                    {
+                        "resource_id": "mysql-1",
+                        "resource_name": "mysql-1",
+                        "dimensions": {},
+                        "points": [
+                            [1780272000000, 25],
+                            [1780272300000, 50],
+                        ],
+                    }
+                ],
             },
             {
                 "category": "KUBERNETES",
@@ -2009,15 +2030,17 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "unit": "count",
                 "interval": "Min5",
                 "aggregation": "AVG",
-                "series": [{
-                    "resource_id": "cluster-1",
-                    "resource_name": "cluster-1",
-                    "dimensions": {},
-                    "points": [
-                        [1780272000000, 2],
-                        [1780272300000, 3],
-                    ],
-                }],
+                "series": [
+                    {
+                        "resource_id": "cluster-1",
+                        "resource_name": "cluster-1",
+                        "dimensions": {},
+                        "points": [
+                            [1780272000000, 2],
+                            [1780272300000, 3],
+                        ],
+                    }
+                ],
             },
             {
                 "category": "NAS",
@@ -2027,15 +2050,17 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "unit": "%",
                 "interval": "Min5",
                 "aggregation": "AVG",
-                "series": [{
-                    "resource_id": "nas-1",
-                    "resource_name": "nas-1",
-                    "dimensions": {},
-                    "points": [
-                        [1780272000000, 40],
-                        [1780272300000, 45],
-                    ],
-                }],
+                "series": [
+                    {
+                        "resource_id": "nas-1",
+                        "resource_name": "nas-1",
+                        "dimensions": {},
+                        "points": [
+                            [1780272000000, 40],
+                            [1780272300000, 45],
+                        ],
+                    }
+                ],
             },
         ]
 
@@ -2071,25 +2096,31 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_cdb_chart_does_not_repeat_node_role_in_legend(self):
         report = self._sample_report()
-        report.infrastructure = [{
-            "category": "CLOUD_DB",
-            "resource_name": "postgres-service",
-        }]
-        report.infrastructure_metrics = [{
-            "category": "CLOUD_DB",
-            "product_name": "System/Cloud DB for PostgreSQL(VPC)",
-            "metric": "active_session_count",
-            "metric_label": "활성 세션 수",
-            "unit": "count",
-            "interval": "Min5",
-            "aggregation": "AVG",
-            "series": [{
-                "resource_id": "db-1",
-                "resource_name": "postgres-service · pg-node-1 (1001) · PRIMARY",
-                "dimensions": {"role": "PRIMARY"},
-                "points": [[1780272000000, 3]],
-            }],
-        }]
+        report.infrastructure = [
+            {
+                "category": "CLOUD_DB",
+                "resource_name": "postgres-service",
+            }
+        ]
+        report.infrastructure_metrics = [
+            {
+                "category": "CLOUD_DB",
+                "product_name": "System/Cloud DB for PostgreSQL(VPC)",
+                "metric": "active_session_count",
+                "metric_label": "활성 세션 수",
+                "unit": "count",
+                "interval": "Min5",
+                "aggregation": "AVG",
+                "series": [
+                    {
+                        "resource_id": "db-1",
+                        "resource_name": "postgres-service · pg-node-1 (1001) · PRIMARY",
+                        "dimensions": {"role": "PRIMARY"},
+                        "points": [[1780272000000, 3]],
+                    }
+                ],
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
         monitoring = html.split("<h2>주요 인프라 모니터링</h2>", 1)[1]
@@ -2144,23 +2175,27 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 },
             },
         ]
-        report.infrastructure_metrics = [{
-            "category": "LOAD_BALANCER",
-            "metric_scope": "TARGET_GROUP",
-            "resource_type": "TargetGroup",
-            "product_name": "System/Load Balancer Target Group(VPC)",
-            "metric": "available_host_count",
-            "metric_label": "Ready Target 수 (구간 최소)",
-            "unit": "count",
-            "interval": "Min5",
-            "aggregation": "MIN",
-            "series": [{
-                "resource_id": "tg-1",
-                "resource_name": "web-targets",
-                "dimensions": {"targetGroupNo": "tg-1"},
-                "points": [[1780272000000, 2]],
-            }],
-        }]
+        report.infrastructure_metrics = [
+            {
+                "category": "LOAD_BALANCER",
+                "metric_scope": "TARGET_GROUP",
+                "resource_type": "TargetGroup",
+                "product_name": "System/Load Balancer Target Group(VPC)",
+                "metric": "available_host_count",
+                "metric_label": "Ready Target 수 (구간 최소)",
+                "unit": "count",
+                "interval": "Min5",
+                "aggregation": "MIN",
+                "series": [
+                    {
+                        "resource_id": "tg-1",
+                        "resource_name": "web-targets",
+                        "dimensions": {"targetGroupNo": "tg-1"},
+                        "points": [[1780272000000, 2]],
+                    }
+                ],
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
 
@@ -2213,9 +2248,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "confirmed_total_amount": 0,
                 "expected_total_amount": 4321,
             },
-            "service_summary": [
-                {"service_name": "Server", "amount": 0, "row_count": 1}
-            ],
+            "service_summary": [{"service_name": "Server", "amount": 0, "row_count": 1}],
             "expected_by_service": [
                 {
                     "service_name": "Server",
@@ -2275,13 +2308,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_operational_summary_uses_only_report_period_cost(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "month",
-            "start_dt": "2026-08-01 00:00:00",
-            "end_dt": "2026-08-31 23:59:59",
-            "use_start_date": "20260801",
-            "use_end_date": "20260831",
-        })
+        report.period.update(
+            {
+                "period_type": "month",
+                "start_dt": "2026-08-01 00:00:00",
+                "end_dt": "2026-08-31 23:59:59",
+                "use_start_date": "20260801",
+                "use_end_date": "20260831",
+            }
+        )
         report.analysis = {
             "period_type": "MONTHLY",
             "overall_status": "NORMAL",
@@ -2346,18 +2381,14 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             html,
         )
         self.assertIn(
-            "대상 2026-08-01 ~ 2026-08-31 · 수집 "
-            "2026-08-01 ~ 2026-08-06",
+            "대상 2026-08-01 ~ 2026-08-31 · 수집 2026-08-01 ~ 2026-08-06",
             html,
         )
         self.assertIn(
-            "대상 2026-07-01 ~ 2026-07-31 · 수집 "
-            "2026-07-01 ~ 2026-07-06",
+            "대상 2026-07-01 ~ 2026-07-31 · 수집 2026-07-01 ~ 2026-07-06",
             html,
         )
-        comparison_section = html.split(
-            "<h2>비용 전기 비교</h2>", 1
-        )[1].split("</section>", 1)[0]
+        comparison_section = html.split("<h2>비용 전기 비교</h2>", 1)[1].split("</section>", 1)[0]
         self.assertNotIn("이벤트·변경·비용 비교", html)
         self.assertNotIn("Critical 이벤트", comparison_section)
         self.assertNotIn("미종료 이벤트", comparison_section)
@@ -2368,13 +2399,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_operational_analysis_displays_source_states(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "day",
-            "start_dt": "2026-08-12 00:00:00",
-            "end_dt": "2026-08-12 23:59:59",
-            "use_start_date": "20260812",
-            "use_end_date": "20260812",
-        })
+        report.period.update(
+            {
+                "period_type": "day",
+                "start_dt": "2026-08-12 00:00:00",
+                "end_dt": "2026-08-12 23:59:59",
+                "use_start_date": "20260812",
+                "use_end_date": "20260812",
+            }
+        )
         report.analysis = {
             "source_state": "CALCULATED",
             "period_type": "DAILY",
@@ -2388,16 +2421,18 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "data_quality": {
                 "overall_status": "PARTIAL",
                 "source_state": "CALCULATED",
-                "datasets": [{
-                    "label": "보안 이벤트",
-                    "status": "FAILED",
-                    "status_label": "수집 실패",
-                    "source_state": "COLLECTION_FAILED",
-                    "record_count": 0,
-                    "error_count": 1,
-                    "warning_count": 0,
-                    "reason": "API 호출 실패",
-                }],
+                "datasets": [
+                    {
+                        "label": "보안 이벤트",
+                        "status": "FAILED",
+                        "status_label": "수집 실패",
+                        "source_state": "COLLECTION_FAILED",
+                        "record_count": 0,
+                        "error_count": 1,
+                        "warning_count": 0,
+                        "reason": "API 호출 실패",
+                    }
+                ],
             },
             "key_findings": [
                 {
@@ -2419,15 +2454,17 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             ],
             "metrics": {
                 "source_state": "CALCULATED",
-                "summaries": [{
-                    "category": "SERVER",
-                    "resource_name": "web-1",
-                    "metric_label": "CPU 사용률",
-                    "source_state": "CALCULATED",
-                    "average": 10,
-                    "p95": 20,
-                    "maximum": 30,
-                }],
+                "summaries": [
+                    {
+                        "category": "SERVER",
+                        "resource_name": "web-1",
+                        "metric_label": "CPU 사용률",
+                        "source_state": "CALCULATED",
+                        "average": 10,
+                        "p95": 20,
+                        "maximum": 30,
+                    }
+                ],
             },
             "events": {
                 "status": "COLLECTED_EMPTY",
@@ -2439,11 +2476,13 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             },
             "availability": {
                 "source_state": "CALCULATED",
-                "items": [{
-                    "name": "homepage",
-                    "source_state": "OBSERVED",
-                    "availability_percent": 100,
-                }],
+                "items": [
+                    {
+                        "name": "homepage",
+                        "source_state": "OBSERVED",
+                        "availability_percent": 100,
+                    }
+                ],
             },
             "security": {
                 "source_state": "COLLECTION_FAILED",
@@ -2451,13 +2490,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             },
             "costs": {
                 "source_state": "CALCULATED",
-                "facts": [{
-                    "name": "period_estimate",
-                    "source_state": "CALCULATED",
-                    "period_start": "2026-08-12",
-                    "period_end": "2026-08-12",
-                    "total_amount": 100,
-                }],
+                "facts": [
+                    {
+                        "name": "period_estimate",
+                        "source_state": "CALCULATED",
+                        "period_start": "2026-08-12",
+                        "period_end": "2026-08-12",
+                        "total_amount": 100,
+                    }
+                ],
                 "comparison": {
                     "status": "UNAVAILABLE",
                     "source_state": "UNAVAILABLE",
@@ -2482,7 +2523,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertIn(
             '<li><details class="collection-status-item"><summary>'
             '<span class="collection-status-heading"><strong>보안 이벤트'
-            '</strong><span>수집 실패</span></span>',
+            "</strong><span>수집 실패</span></span>",
             html,
         )
         self.assertIn(
@@ -2492,8 +2533,7 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             html,
         )
         self.assertIn(
-            '</summary><p class="collection-status-reason">API 호출 실패'
-            '</p></details></li>',
+            '</summary><p class="collection-status-reason">API 호출 실패</p></details></li>',
             html,
         )
         self.assertIn("homepage", html)
@@ -2539,23 +2579,23 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "status": "AVAILABLE",
                 "source_state": "CALCULATED",
                 "overall_availability_percent": 100,
-                "items": [{
-                    "name": "homepage",
-                    "source_state": "OBSERVED",
-                    "availability_percent": 100,
-                    "total_count": 12,
-                    "success_count": 12,
-                    "error_count": 0,
-                }],
+                "items": [
+                    {
+                        "name": "homepage",
+                        "source_state": "OBSERVED",
+                        "availability_percent": 100,
+                        "total_count": 12,
+                        "success_count": 12,
+                        "error_count": 0,
+                    }
+                ],
             },
             "security": {},
             "costs": {"facts": []},
         }
 
         html = HtmlReportRenderer().render(report)
-        summary = html.split('<section class="daily-summary">', 1)[1].split(
-            "</section>", 1
-        )[0]
+        summary = html.split('<section class="daily-summary">', 1)[1].split("</section>", 1)[0]
 
         self.assertIn("정상 · 7/7", summary)
         self.assertIn("요청 데이터셋 7개 중 7개가 수집 완료", summary)
@@ -2644,9 +2684,9 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         }
 
         html = HtmlReportRenderer().render(report)
-        metric_section = html.split(
-            "<h2>90% 이상 지속 사용 자원</h2>", 1
-        )[1].split("</section>", 1)[0]
+        metric_section = html.split("<h2>90% 이상 지속 사용 자원</h2>", 1)[1].split(
+            "</section>", 1
+        )[0]
 
         self.assertIn("cpu-alert", metric_section)
         self.assertIn("nas-alert", metric_section)
@@ -2694,9 +2734,9 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         }
 
         html = HtmlReportRenderer().render(report)
-        metric_section = html.split(
-            "<h2>90% 이상 지속 사용 자원</h2>", 1
-        )[1].split("</section>", 1)[0]
+        metric_section = html.split("<h2>90% 이상 지속 사용 자원</h2>", 1)[1].split(
+            "</section>", 1
+        )[0]
 
         self.assertIn("상위 10건", metric_section)
         self.assertIn('<span class="count">11건</span>', metric_section)
@@ -2717,14 +2757,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "source_state": "CALCULATED",
                 "datasets": [],
             },
-            "key_findings": [{
-                "severity": "WARNING",
-                "category": "GOVERNANCE",
-                "title": "블록 스토리지가 암호화되지 않았습니다.",
-                "source_state": "CALCULATED",
-                "resource": {"name": "disk-1"},
-                "evidence": [],
-            }],
+            "key_findings": [
+                {
+                    "severity": "WARNING",
+                    "category": "GOVERNANCE",
+                    "title": "블록 스토리지가 암호화되지 않았습니다.",
+                    "source_state": "CALCULATED",
+                    "resource": {"name": "disk-1"},
+                    "evidence": [],
+                }
+            ],
             "metrics": {"summaries": []},
             "events": {},
             "changes": {},
@@ -2755,20 +2797,24 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "source_state": "CALCULATED",
                 "datasets": [],
             },
-            "key_findings": [{
-                "rule_id": "METRIC_CPU_SUSTAINED",
-                "severity": "WARNING",
-                "category": "PERFORMANCE",
-                "title": "web-1의 CPU 사용률 80% 초과가 지속되었습니다.",
-                "status": "OPEN",
-                "source_state": "CALCULATED",
-                "resource": {"name": "web-1"},
-                "evidence": [{
-                    "label": "임계치",
-                    "value": 80,
-                    "unit": "%",
-                }],
-            }],
+            "key_findings": [
+                {
+                    "rule_id": "METRIC_CPU_SUSTAINED",
+                    "severity": "WARNING",
+                    "category": "PERFORMANCE",
+                    "title": "web-1의 CPU 사용률 80% 초과가 지속되었습니다.",
+                    "status": "OPEN",
+                    "source_state": "CALCULATED",
+                    "resource": {"name": "web-1"},
+                    "evidence": [
+                        {
+                            "label": "임계치",
+                            "value": 80,
+                            "unit": "%",
+                        }
+                    ],
+                }
+            ],
             "metrics": {"summaries": []},
             "events": {},
             "changes": {},
@@ -2788,13 +2834,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_unavailable_daily_billing_uses_labeled_month_to_date_tables(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "day",
-            "start_dt": "2026-08-12 00:00:00",
-            "end_dt": "2026-08-12 23:59:59",
-            "is_closed_month": False,
-            "calculated_at": "2026-08-13T00:20:20+09:00",
-        })
+        report.period.update(
+            {
+                "period_type": "day",
+                "start_dt": "2026-08-12 00:00:00",
+                "end_dt": "2026-08-12 23:59:59",
+                "is_closed_month": False,
+                "calculated_at": "2026-08-13T00:20:20+09:00",
+            }
+        )
         report.billing = {
             "summary": {"expected_total_amount": 0},
             "period_estimate": {
@@ -2810,25 +2858,31 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             },
             "daily_usage_rows": [],
             "month_to_date_usage_rows": [{"usage": {}}],
-            "month_to_date_by_service": [{
-                "service_name": "Server",
-                "expected_amount": 4321,
-                "row_count": 2,
-            }],
-            "month_to_date_network_usage_summary": [{
-                "service_name": "Server",
-                "direction": "Outbound",
-                "name": "Internet Outbound",
-                "usage_gb": 12.5,
-                "row_count": 1,
-            }],
-            "month_to_date_usage_summary": [{
-                "service_name": "Server",
-                "item_name": "Network Outbound",
-                "usage_quantity": 12.5,
-                "unit_code": "GBYTE",
-                "row_count": 1,
-            }],
+            "month_to_date_by_service": [
+                {
+                    "service_name": "Server",
+                    "expected_amount": 4321,
+                    "row_count": 2,
+                }
+            ],
+            "month_to_date_network_usage_summary": [
+                {
+                    "service_name": "Server",
+                    "direction": "Outbound",
+                    "name": "Internet Outbound",
+                    "usage_gb": 12.5,
+                    "row_count": 1,
+                }
+            ],
+            "month_to_date_usage_summary": [
+                {
+                    "service_name": "Server",
+                    "item_name": "Network Outbound",
+                    "usage_quantity": 12.5,
+                    "unit_code": "GBYTE",
+                    "row_count": 1,
+                }
+            ],
         }
 
         html = HtmlReportRenderer().render(report)
@@ -2843,13 +2897,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_past_zero_usage_does_not_use_unrelated_month_to_date_data(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "day",
-            "start_dt": "2026-08-05 00:00:00",
-            "end_dt": "2026-08-05 23:59:59",
-            "is_closed_month": False,
-            "calculated_at": "2026-08-13T09:00:00+09:00",
-        })
+        report.period.update(
+            {
+                "period_type": "day",
+                "start_dt": "2026-08-05 00:00:00",
+                "end_dt": "2026-08-05 23:59:59",
+                "is_closed_month": False,
+                "calculated_at": "2026-08-13T09:00:00+09:00",
+            }
+        )
         report.billing = {
             "summary": {"expected_total_amount": 0},
             "period_estimate": {"status": "UNAVAILABLE"},
@@ -2861,18 +2917,22 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             },
             "daily_usage_rows": [],
             "month_to_date_usage_rows": [{"usage": {}}],
-            "month_to_date_by_service": [{
-                "service_name": "Server",
-                "expected_amount": 4321,
-                "row_count": 2,
-            }],
-            "month_to_date_usage_summary": [{
-                "service_name": "Server",
-                "item_name": "CPU",
-                "usage_quantity": 100,
-                "unit_code": "HOUR",
-                "row_count": 1,
-            }],
+            "month_to_date_by_service": [
+                {
+                    "service_name": "Server",
+                    "expected_amount": 4321,
+                    "row_count": 2,
+                }
+            ],
+            "month_to_date_usage_summary": [
+                {
+                    "service_name": "Server",
+                    "item_name": "CPU",
+                    "usage_quantity": 100,
+                    "unit_code": "HOUR",
+                    "row_count": 1,
+                }
+            ],
         }
 
         html = HtmlReportRenderer().render(report)
@@ -2911,13 +2971,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_daily_usage_error_does_not_use_month_to_date_fallback(self):
         report = self._sample_report()
-        report.period.update({
-            "period_type": "day",
-            "start_dt": "2026-08-12 00:00:00",
-            "end_dt": "2026-08-12 23:59:59",
-            "is_closed_month": False,
-            "calculated_at": "2026-08-13T00:20:20+09:00",
-        })
+        report.period.update(
+            {
+                "period_type": "day",
+                "start_dt": "2026-08-12 00:00:00",
+                "end_dt": "2026-08-12 23:59:59",
+                "is_closed_month": False,
+                "calculated_at": "2026-08-13T00:20:20+09:00",
+            }
+        )
         report.billing = {
             "summary": {"expected_total_amount": 0},
             "period_estimate": {"status": "UNAVAILABLE"},
@@ -2929,21 +2991,23 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             },
             "daily_usage_rows": [],
             "month_to_date_usage_rows": [{"usage": {}}],
-            "month_to_date_by_service": [{
-                "service_name": "Server",
-                "expected_amount": 4321,
-                "row_count": 2,
-            }],
+            "month_to_date_by_service": [
+                {
+                    "service_name": "Server",
+                    "expected_amount": 4321,
+                    "row_count": 2,
+                }
+            ],
         }
-        report.collection_errors = [{
-            "source": "daily_usage",
-            "api": "daily_usage",
-        }]
+        report.collection_errors = [
+            {
+                "source": "daily_usage",
+                "api": "daily_usage",
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
-        billing_display = HtmlReportRenderer()._prepare_display_data(
-            report
-        ).billing
+        billing_display = HtmlReportRenderer()._prepare_display_data(report).billing
 
         self.assertNotIn("월 누적 서비스별 예상 비용", html)
         self.assertIn("getContractUsageListByDaily 수집 오류", html)
@@ -2999,14 +3063,12 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         report = self._sample_report()
         metric = report.server_metrics[0]
         metric["data_fs_details"] = []
-        metric["raw_metrics"]["fs_usert"]["avg"] = [
-            metric["raw_metrics"]["fs_usert"]["avg"][0]
-        ]
+        metric["raw_metrics"]["fs_usert"]["avg"] = [metric["raw_metrics"]["fs_usert"]["avg"][0]]
 
         html = HtmlReportRenderer().render(report)
-        metric_charts = html.split(
-            '<section class="report-section metric-trends">', 1
-        )[1].split("</section>", 1)[0]
+        metric_charts = html.split('<section class="report-section metric-trends">', 1)[1].split(
+            "</section>", 1
+        )[0]
 
         self.assertIn(
             "OS Disk File System Utilization Average",
@@ -3111,19 +3173,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertNotIn("<img", html)
         self.assertNotIn("<script>alert", html)
         self.assertIn(
-            'data-chart-label="server&quot;&gt;&lt;img src=x '
-            'onerror=alert(1)&gt;"',
+            'data-chart-label="server&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
             html,
         )
         self.assertIn(
-            'data-chart-unit="%&quot;&gt;&lt;script&gt;alert(2)'
-            '&lt;/script&gt;"',
+            'data-chart-unit="%&quot;&gt;&lt;script&gt;alert(2)&lt;/script&gt;"',
             html,
         )
         self.assertIn('data-chart-points="[[58.0,0,12.345]]"', html)
         self.assertIn(
-            '<polyline points="58.00,228.37 58.00,228.37" '
-            'class="chart-hit-line"',
+            '<polyline points="58.00,228.37 58.00,228.37" class="chart-hit-line"',
             html,
         )
 
@@ -3171,22 +3230,34 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_event_details_use_full_width_rows_and_keep_values_safe(self):
         renderer = HtmlReportRenderer()
-        insight_html = renderer._event_table([{
-            "event_id": "event-1",
-            "start_time": 1781505000000,
-            "description": "<insight-detail>",
-        }])
-        activity_html = renderer._activity_table([{
-            "event_time": 1781505000000,
-            "product_data": {
-                "description": "<activity-detail>",
-                "accessToken": "must-not-render",
-            },
-        }])
-        diagnostic_html = renderer._diagnostic_table([{
-            "severity_label": "경고",
-            "message": "diagnostic-message",
-        }])
+        insight_html = renderer._event_table(
+            [
+                {
+                    "event_id": "event-1",
+                    "start_time": 1781505000000,
+                    "description": "<insight-detail>",
+                }
+            ]
+        )
+        activity_html = renderer._activity_table(
+            [
+                {
+                    "event_time": 1781505000000,
+                    "product_data": {
+                        "description": "<activity-detail>",
+                        "accessToken": "must-not-render",
+                    },
+                }
+            ]
+        )
+        diagnostic_html = renderer._diagnostic_table(
+            [
+                {
+                    "severity_label": "경고",
+                    "message": "diagnostic-message",
+                }
+            ]
+        )
         generic_html = renderer._table(
             [{"badge": "<strong>safe-renderer-html</strong>"}],
             (("badge", "표시", "html"),),
@@ -3209,11 +3280,11 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             insight_html.index('class="table-data-row"'),
             insight_html.index('class="table-detail-row"'),
         )
-        insight_data_row = insight_html.split(
-            '<tr class="table-data-row">', 1
-        )[1].split("</tr>", 1)[0]
+        insight_data_row = insight_html.split('<tr class="table-data-row">', 1)[1].split(
+            "</tr>", 1
+        )[0]
         self.assertNotIn("<details", insight_data_row)
-        self.assertNotIn("<th scope=\"col\">상세</th>", insight_html)
+        self.assertNotIn('<th scope="col">상세</th>', insight_html)
         self.assertIn("<summary>상세 정보</summary>", insight_html)
         self.assertIn("<summary>상세 정보</summary>", activity_html)
         self.assertNotIn("<summary>상세 1개</summary>", insight_html)
@@ -3235,10 +3306,12 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
     def test_customer_report_sections_follow_configured_order(self):
         report = self._sample_report()
-        report.billing["account_costs"] = [{
-            "display_name": "Member account",
-            "member_no": "member-1",
-        }]
+        report.billing["account_costs"] = [
+            {
+                "display_name": "Member account",
+                "member_no": "member-1",
+            }
+        ]
         report.report_options = {
             "schema_version": REPORT_OPTIONS_SCHEMA_VERSION,
             "sections": [
@@ -3307,10 +3380,12 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": [],
             "monitoring_categories": [],
         }
-        report.billing["account_costs"] = [{
-            "display_name": "Member account",
-            "member_no": "member-1",
-        }]
+        report.billing["account_costs"] = [
+            {
+                "display_name": "Member account",
+                "member_no": "member-1",
+            }
+        ]
         report.analysis = {
             "period_type": "MONTHLY",
             "data_quality": {"overall_status": "COMPLETE", "datasets": []},
@@ -3319,12 +3394,16 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "changes": {},
             "availability": {},
             "security": {},
-            "costs": {"facts": [{
-                "name": "period_estimate",
-                "period_start": "2026-06-01",
-                "period_end": "2026-06-30",
-                "total_amount": 12345,
-            }]},
+            "costs": {
+                "facts": [
+                    {
+                        "name": "period_estimate",
+                        "period_start": "2026-06-01",
+                        "period_end": "2026-06-30",
+                        "total_amount": 12345,
+                    }
+                ]
+            },
         }
 
         html = HtmlReportRenderer().render(report)
@@ -3340,24 +3419,28 @@ assert.strictEqual(all.classList.contains("is-active"), true);
             "resource_categories": [],
             "monitoring_categories": [],
         }
-        report.collection_warnings = [{
-            "collector": "InfrastructureCollector",
-            "stage": "collection",
-            "target_type": "cdb_postgresql",
-            "api": "get_cloud_postgresql_instance_list",
-            "status_code": 403,
-            "error_code": "2300",
-            "message": "권한이 없습니다.",
-        }]
-        report.collection_errors = [{
-            "collector": "ServerCollector",
-            "stage": "pagination",
-            "target_type": "server",
-            "target_id": "server-123",
-            "api": "get_server_instance_list",
-            "status_code": 500,
-            "message": "수집에 실패했습니다.",
-        }]
+        report.collection_warnings = [
+            {
+                "collector": "InfrastructureCollector",
+                "stage": "collection",
+                "target_type": "cdb_postgresql",
+                "api": "get_cloud_postgresql_instance_list",
+                "status_code": 403,
+                "error_code": "2300",
+                "message": "권한이 없습니다.",
+            }
+        ]
+        report.collection_errors = [
+            {
+                "collector": "ServerCollector",
+                "stage": "pagination",
+                "target_type": "server",
+                "target_id": "server-123",
+                "api": "get_server_instance_list",
+                "status_code": 500,
+                "message": "수집에 실패했습니다.",
+            }
+        ]
 
         html = HtmlReportRenderer().render(report)
         diagnostics = html.split(">수집 진단</span>", 1)[1].split(
@@ -3399,13 +3482,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertIn(">-</td>", diagnostics)
 
     def test_permission_cell_separates_provider_and_catalog_evidence(self):
-        row = normalize_collection_issue({
-            "target_type": "server",
-            "api": "get_server_instance_list",
-            "status_code": 400,
-            "error_code": "X00004",
-            "required_actions": ["View/getServerInstanceList"],
-        })
+        row = normalize_collection_issue(
+            {
+                "target_type": "server",
+                "api": "get_server_instance_list",
+                "status_code": 400,
+                "error_code": "X00004",
+                "required_actions": ["View/getServerInstanceList"],
+            }
+        )
 
         cell = HtmlReportRenderer._diagnostic_permission(row)
 
@@ -3415,13 +3500,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         self.assertIn("관리형 대안(공식 권한표 기준)", cell)
 
     def test_permission_cell_warns_instead_of_recommending_write_action(self):
-        row = normalize_collection_issue({
-            "target_type": "network_interface",
-            "api": "get_network_interface_instance_list",
-            "status_code": 400,
-            "error_code": "X00004",
-            "required_actions": ["Change/setSecondaryIP"],
-        })
+        row = normalize_collection_issue(
+            {
+                "target_type": "network_interface",
+                "api": "get_network_interface_instance_list",
+                "status_code": 400,
+                "error_code": "X00004",
+                "required_actions": ["Change/setSecondaryIP"],
+            }
+        )
 
         cell = HtmlReportRenderer._diagnostic_permission(row)
 
@@ -3461,10 +3548,12 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "total_amount": 100,
                 "amount_basis": "DAILY_RUN_RATE_PROJECTION",
             },
-            "service_summary": [{
-                "service_name": "<script>alert(1)</script>",
-                "amount": 100,
-            }],
+            "service_summary": [
+                {
+                    "service_name": "<script>alert(1)</script>",
+                    "amount": 100,
+                }
+            ],
             "expected_by_service": [
                 {"service_name": "Server", "expected_amount": 20},
                 {"service_name": "Object Storage", "expected_amount": 10},
@@ -3501,15 +3590,11 @@ assert.strictEqual(all.classList.contains("is-active"), true);
         )
         for fact in display.cost_facts:
             self.assertAlmostEqual(
-                sum(
-                    row["amount"]
-                    for row in fact["_service_breakdown"]
-                ),
+                sum(row["amount"] for row in fact["_service_breakdown"]),
                 fact["total_amount"],
             )
         month_end = next(
-            fact for fact in display.cost_facts
-            if fact["cost_type"] == "MONTH_END_PROJECTION"
+            fact for fact in display.cost_facts if fact["cost_type"] == "MONTH_END_PROJECTION"
         )
         self.assertEqual(
             [row["amount"] for row in month_end["_service_breakdown"]],
@@ -3518,20 +3603,26 @@ assert.strictEqual(all.classList.contains("is-active"), true);
 
         accrued_rows = renderer._billing_fact_breakdown(
             {
-                "target_service_summary": [{
-                    "service_name": "Server",
-                    "use_amount": 100000,
-                }],
-                "month_to_date_cost_summary": [{
-                    "service_name": "Server",
-                    "expected_amount": 38400,
-                    "calculation_status": "OK",
-                }],
-                "projected_cost_summary": [{
-                    "service_name": "Server",
-                    "expected_amount": 74400,
-                    "calculation_status": "OK",
-                }],
+                "target_service_summary": [
+                    {
+                        "service_name": "Server",
+                        "use_amount": 100000,
+                    }
+                ],
+                "month_to_date_cost_summary": [
+                    {
+                        "service_name": "Server",
+                        "expected_amount": 38400,
+                        "calculation_status": "OK",
+                    }
+                ],
+                "projected_cost_summary": [
+                    {
+                        "service_name": "Server",
+                        "expected_amount": 74400,
+                        "calculation_status": "OK",
+                    }
+                ],
             },
             {
                 "cost_type": "MONTH_END_PROJECTION",
@@ -3539,10 +3630,15 @@ assert.strictEqual(all.classList.contains("is-active"), true);
                 "amount_basis": "NCP_ACCRUED_PLUS_USAGE_FORECAST",
             },
         )
-        self.assertEqual(accrued_rows, [{
-            "service_name": "Server",
-            "amount": 136000.0,
-        }])
+        self.assertEqual(
+            accrued_rows,
+            [
+                {
+                    "service_name": "Server",
+                    "amount": 136000.0,
+                }
+            ],
+        )
         self.assertEqual(
             renderer._billing_fact_breakdown(
                 {},

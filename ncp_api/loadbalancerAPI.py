@@ -7,9 +7,9 @@ class LoadbalancerAPI(BaseNCPAPI):
     Load Balancer API 클래스
 
     """
+
     ENDPOINT_KEY = "loadbalancer"
-  
-    
+
     """
     ================================================================
     Load Balancer 관련 API
@@ -27,7 +27,7 @@ class LoadbalancerAPI(BaseNCPAPI):
         page_size: Optional[int] = None,
         sortlist_sorted_by: Optional[List[str]] = None,
         sortlist_sorting_order: Optional[List[str]] = None,
-        responseFormatType: str = 'json',
+        responseFormatType: str = "json",
         load_balancer_type_code: Optional[str] = None,
     ) -> Dict:
         """
@@ -49,40 +49,37 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Load Balancer 인스턴스 목록 응답
         """
-        params = {
-            'responseFormatType': responseFormatType
-        }
+        params = {"responseFormatType": responseFormatType}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if vpc_no is not None:
-            params['vpcNo'] = vpc_no
+            params["vpcNo"] = vpc_no
         if (
             load_balancer_code is not None
             and load_balancer_type_code is not None
             and load_balancer_code != load_balancer_type_code
         ):
             raise ValueError(
-                "load_balancer_code와 load_balancer_type_code에 "
-                "서로 다른 값을 지정할 수 없습니다."
+                "load_balancer_code와 load_balancer_type_code에 서로 다른 값을 지정할 수 없습니다."
             )
         selected_type_code = (
-            load_balancer_type_code
-            if load_balancer_type_code is not None
-            else load_balancer_code
+            load_balancer_type_code if load_balancer_type_code is not None else load_balancer_code
         )
         if selected_type_code is not None:
-            params['loadBalancerTypeCode'] = selected_type_code
+            params["loadBalancerTypeCode"] = selected_type_code
         if load_balancer_network_type_code is not None:
-            params['loadBalancerNetworkTypeCode'] = load_balancer_network_type_code
+            params["loadBalancerNetworkTypeCode"] = load_balancer_network_type_code
         if load_balancer_instance_no_list is not None:
-            for idx, load_balancer_instance_no in enumerate(load_balancer_instance_no_list, start=1):
-                params[f'loadBalancerInstanceNoList.{idx}'] = load_balancer_instance_no
+            for idx, load_balancer_instance_no in enumerate(
+                load_balancer_instance_no_list, start=1
+            ):
+                params[f"loadBalancerInstanceNoList.{idx}"] = load_balancer_instance_no
         if page_no is not None and page_size is None:
             raise ValueError("page_no를 지정할 때는 page_size도 지정해야 합니다.")
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if sortlist_sorted_by is not None and sortlist_sorting_order is not None:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
@@ -96,14 +93,13 @@ class LoadbalancerAPI(BaseNCPAPI):
             ):
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
 
-        return self.client.get('/getLoadBalancerInstanceList', params=params)
-
+        return self.client.get("/getLoadBalancerInstanceList", params=params)
 
     def get_load_balancer_instance_detail(
         self,
         load_balancer_instance_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: Optional[str] = 'json'
+        responseFormatType: Optional[str] = "json",
     ) -> Dict:
         """
         Load Balancer 인스턴스 상세 정보를 조회합니다.
@@ -117,22 +113,19 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Load Balancer 인스턴스 상세 정보 응답
         """
-        params = {
-            'loadBalancerInstanceNo': load_balancer_instance_no
-            
-        }
+        params = {"loadBalancerInstanceNo": load_balancer_instance_no}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/getLoadBalancerInstanceDetail', params=params)
+        return self.client.get("/getLoadBalancerInstanceDetail", params=params)
 
     def get_load_balancer_listener_list(
         self,
         load_balancer_instance_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
         """
         Load Balancer 리스너 목록을 조회합니다.
@@ -145,21 +138,19 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Load Balancer 리스너 목록 응답
         """
-        params = {
-            'loadBalancerInstanceNo': load_balancer_instance_no
-        }
+        params = {"loadBalancerInstanceNo": load_balancer_instance_no}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
+            params["responseFormatType"] = responseFormatType
 
-        return self.client.get('/getLoadBalancerListenerList', params=params)
+        return self.client.get("/getLoadBalancerListenerList", params=params)
 
     def get_load_balancer_rule_list(
         self,
         load_balancer_listener_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
         """
         Load Balancer 규칙 목록을 조회합니다.
@@ -172,18 +163,18 @@ class LoadbalancerAPI(BaseNCPAPI):
             Dict: Load Balancer 규칙 목록 응답
         """
         params = {
-            'loadBalancerListenerNo': load_balancer_listener_no,
-            'responseFormatType': responseFormatType
+            "loadBalancerListenerNo": load_balancer_listener_no,
+            "responseFormatType": responseFormatType,
         }
         if region_code is not None:
-            params['regionCode'] = region_code
-        return self.client.get('/getLoadBalancerRuleList', params=params)
+            params["regionCode"] = region_code
+        return self.client.get("/getLoadBalancerRuleList", params=params)
 
     def get_load_balancer_listener_certificate_list(
         self,
         load_balancer_listener_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
         """
         Load Balancer 리스너 인증서 목록을 조회합니다.
@@ -195,14 +186,12 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Load Balancer 리스너 인증서 목록 응답
         """
-        params = {
-            'loadBalancerListenerNo': load_balancer_listener_no
-        }
+        params = {"loadBalancerListenerNo": load_balancer_listener_no}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        return self.client.get('/getLoadBalancerListenerCertificateList', params=params)
+            params["responseFormatType"] = responseFormatType
+        return self.client.get("/getLoadBalancerListenerCertificateList", params=params)
 
     """
     ================================================================
@@ -220,7 +209,7 @@ class LoadbalancerAPI(BaseNCPAPI):
         page_size: Optional[int] = None,
         sortlist_sorted_by: Optional[List[str]] = None,
         sortlist_sorting_order: Optional[List[str]] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
         """
         Target Group 목록을 조회합니다.
@@ -234,24 +223,22 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Target Group 목록 응답
         """
-        params = {
-            'responseFormatType': responseFormatType
-        }
+        params = {"responseFormatType": responseFormatType}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if vpc_no is not None:
-            params['vpcNo'] = vpc_no
+            params["vpcNo"] = vpc_no
         if target_type_code is not None:
-            params['targetTypeCode'] = target_type_code
+            params["targetTypeCode"] = target_type_code
         if target_group_no_list is not None:
             for idx, target_group_no in enumerate(target_group_no_list, start=1):
-                params[f'targetGroupNoList.{idx}'] = target_group_no
+                params[f"targetGroupNoList.{idx}"] = target_group_no
         if page_no is not None and page_size is None:
             raise ValueError("page_no를 지정할 때는 page_size도 지정해야 합니다.")
         if page_no is not None:
-            params['pageNo'] = page_no
+            params["pageNo"] = page_no
         if page_size is not None:
-            params['pageSize'] = page_size
+            params["pageSize"] = page_size
         if sortlist_sorted_by is not None and sortlist_sorting_order is not None:
             if len(sortlist_sorted_by) != len(sortlist_sorting_order):
                 raise ValueError("sortlist_sorted_by와 sortlist_sorting_order의 길이가 다릅니다.")
@@ -264,14 +251,14 @@ class LoadbalancerAPI(BaseNCPAPI):
                 start=1,
             ):
                 params[f"sortList.{idx}.sortingOrder"] = sorting_order
-        
-        return self.client.get('/getTargetGroupList', params=params)
+
+        return self.client.get("/getTargetGroupList", params=params)
 
     def get_target_group_detail(
         self,
         target_group_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
         """
         Target Group 상세 정보를 조회합니다.
@@ -283,22 +270,20 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Target Group 상세 정보 응답
         """
-        params = {
-            'targetGroupNo': target_group_no
-        }
+        params = {"targetGroupNo": target_group_no}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        return self.client.get('/getTargetGroupDetail', params=params)
+            params["responseFormatType"] = responseFormatType
+        return self.client.get("/getTargetGroupDetail", params=params)
 
     def get_target_list(
         self,
         target_group_no: str,
         region_code: Optional[str] = None,
-        responseFormatType: str = 'json'
+        responseFormatType: str = "json",
     ) -> Dict:
-        """ 
+        """
         Target Group 목록을 조회합니다.
 
         args:
@@ -308,12 +293,9 @@ class LoadbalancerAPI(BaseNCPAPI):
         Returns:
             Dict: Target Group 목록 응답
         """
-        params = {
-            'targetGroupNo': target_group_no
-            
-        }
+        params = {"targetGroupNo": target_group_no}
         if region_code is not None:
-            params['regionCode'] = region_code
+            params["regionCode"] = region_code
         if responseFormatType is not None:
-            params['responseFormatType'] = responseFormatType
-        return self.client.get('/getTargetList', params=params)
+            params["responseFormatType"] = responseFormatType
+        return self.client.get("/getTargetList", params=params)

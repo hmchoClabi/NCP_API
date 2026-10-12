@@ -85,10 +85,7 @@ def _platform_role_environment_scopes(
     bindings = user.get("platform_role_bindings")
     if bindings is None:
         return None
-    relevant = [
-        item for item in bindings
-        if item.get("role") in role_names
-    ]
+    relevant = [item for item in bindings if item.get("role") in role_names]
     if any(item.get("environment_scope") is None for item in relevant):
         return None
     return {
@@ -115,9 +112,7 @@ def _can_access_tenant(
         if scopes is None:
             return True
         return environment is not None and environment in scopes
-    return tenant_id in {
-        str(item["tenant_id"]) for item in user.get("memberships", [])
-    }
+    return tenant_id in {str(item["tenant_id"]) for item in user.get("memberships", [])}
 
 
 def _can_manage_tenant(
@@ -131,7 +126,6 @@ def _can_manage_tenant(
             return True
         return environment is not None and environment in scopes
     return any(
-        str(item["tenant_id"]) == tenant_id
-        and item.get("role") == "CUSTOMER_ADMIN"
+        str(item["tenant_id"]) == tenant_id and item.get("role") == "CUSTOMER_ADMIN"
         for item in user.get("memberships", [])
     )

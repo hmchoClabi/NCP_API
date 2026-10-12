@@ -55,10 +55,7 @@ CATEGORY_LABELS = {
     "IPSEC_VPN": "IPsec VPN",
     "CLOUD_CONNECT": "Cloud Connect",
 }
-CATEGORY_ORDER = {
-    category: index
-    for index, category in enumerate(CATEGORY_LABELS)
-}
+CATEGORY_ORDER = {category: index for index, category in enumerate(CATEGORY_LABELS)}
 CATEGORY_ALIASES = {
     **{category: category for category in CATEGORY_LABELS},
     "CDB": "CLOUD_DB",
@@ -107,9 +104,7 @@ _EXCLUDED_RESOURCE_MARKERS = (
 _RESOURCE_MANAGER_PRODUCTS = {
     "SERVER": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
     "BLOCK_STORAGE": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
-    "LOAD_BALANCER": frozenset(
-        {"LOADBALANCER", "VPCLOADBALANCER", "VLOADBALANCER"}
-    ),
+    "LOAD_BALANCER": frozenset({"LOADBALANCER", "VPCLOADBALANCER", "VLOADBALANCER"}),
     "TARGET_GROUP": frozenset(),
     "NAS": frozenset({"NAS", "VPCNAS", "VNAS"}),
     "CLOUD_DB": frozenset(
@@ -147,9 +142,7 @@ _RESOURCE_MANAGER_PRODUCTS = {
     "VPC": frozenset({"VPC"}),
     "SUBNET": frozenset({"VPC"}),
     "ROUTE_TABLE": frozenset({"VPC"}),
-    "ACCESS_CONTROL_GROUP": frozenset(
-        {"SERVER", "VPCSERVER", "VSERVER"}
-    ),
+    "ACCESS_CONTROL_GROUP": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
     "NETWORK_ACL": frozenset({"VPC"}),
     "NAT_GATEWAY": frozenset({"VPC"}),
     "PUBLIC_IP": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
@@ -161,9 +154,7 @@ _RESOURCE_MANAGER_PRODUCTS = {
     "GLOBAL_TRAFFIC_MANAGER": frozenset({"GLOBALTRAFFICMANAGER"}),
     "API_GATEWAY": frozenset({"APIGATEWAY"}),
     "CERTIFICATE": frozenset({"CERTIFICATEMANAGER"}),
-    "BLOCK_STORAGE_SNAPSHOT": frozenset(
-        {"SERVER", "VPCSERVER", "VSERVER"}
-    ),
+    "BLOCK_STORAGE_SNAPSHOT": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
     "SERVER_IMAGE": frozenset({"SERVER", "VPCSERVER", "VSERVER"}),
     "BACKUP": frozenset({"BACKUP", "VPCBACKUP"}),
     "ARCHIVE_STORAGE": frozenset({"ARCHIVESTORAGE"}),
@@ -172,26 +163,16 @@ _RESOURCE_MANAGER_PRODUCTS = {
     "CLOUD_HADOOP": frozenset({"CLOUDHADOOP", "VPCCLOUDHADOOP"}),
     "DATA_STREAM": frozenset({"DATASTREAM", "VPCDATASTREAM"}),
     "CLOUD_FUNCTIONS": frozenset({"CLOUDFUNCTIONS", "VPCCLOUDFUNCTIONS"}),
-    "SECURITY_SERVICE": frozenset(
-        {"SECURITYMONITORING", "VPCSECURITYMONITORING"}
-    ),
+    "SECURITY_SERVICE": frozenset({"SECURITYMONITORING", "VPCSECURITYMONITORING"}),
     "IPSEC_VPN": frozenset({"IPSECVPN", "VPCIPSECVPN"}),
     "CLOUD_CONNECT": frozenset({"CLOUDCONNECT", "VPCCLOUDCONNECT"}),
 }
 _RESOURCE_MANAGER_TYPES = {
-    "SERVER": frozenset(
-        {"SERVER", "SERVERINSTANCE", "VSERVER", "VSERVERINSTANCE"}
-    ),
-    "BLOCK_STORAGE": frozenset(
-        {"BLOCKSTORAGE", "BLOCKSTORAGEINSTANCE", "STORAGE"}
-    ),
-    "LOAD_BALANCER": frozenset(
-        {"INSTANCE", "LOADBALANCER", "LOADBALANCERINSTANCE"}
-    ),
+    "SERVER": frozenset({"SERVER", "SERVERINSTANCE", "VSERVER", "VSERVERINSTANCE"}),
+    "BLOCK_STORAGE": frozenset({"BLOCKSTORAGE", "BLOCKSTORAGEINSTANCE", "STORAGE"}),
+    "LOAD_BALANCER": frozenset({"INSTANCE", "LOADBALANCER", "LOADBALANCERINSTANCE"}),
     "TARGET_GROUP": frozenset(),
-    "NAS": frozenset(
-        {"NAS", "NASVOLUME", "NASVOLUMEINSTANCE", "VOLUME"}
-    ),
+    "NAS": frozenset({"NAS", "NASVOLUME", "NASVOLUMEINSTANCE", "VOLUME"}),
     "CLOUD_DB": frozenset(
         {
             "CLOUDCACHEINSTANCE",
@@ -203,16 +184,12 @@ _RESOURCE_MANAGER_TYPES = {
             "SERVICE",
         }
     ),
-    "KUBERNETES": frozenset(
-        {"CLUSTER", "KUBERNETESCLUSTER", "NKSCLUSTER"}
-    ),
+    "KUBERNETES": frozenset({"CLUSTER", "KUBERNETESCLUSTER", "NKSCLUSTER"}),
     "OBJECT_STORAGE": frozenset({"BUCKET", "OBJECTSTORAGEBUCKET"}),
     "VPC": frozenset({"VPC"}),
     "SUBNET": frozenset({"SUBNET"}),
     "ROUTE_TABLE": frozenset({"ROUTETABLE"}),
-    "ACCESS_CONTROL_GROUP": frozenset(
-        {"ACCESSCONTROLGROUP", "ACG"}
-    ),
+    "ACCESS_CONTROL_GROUP": frozenset({"ACCESSCONTROLGROUP", "ACG"}),
     "NETWORK_ACL": frozenset({"NETWORKACL"}),
     "NAT_GATEWAY": frozenset({"NATGATEWAY"}),
     "PUBLIC_IP": frozenset({"PUBLICIP"}),

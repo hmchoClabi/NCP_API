@@ -22,9 +22,7 @@ from .support import field, mapping, normalize_period_type
 
 
 _EXCLUDED_CATEGORIES = frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
-_KNOWN_INVENTORY_CATEGORIES = frozenset(RESOURCE_CATEGORY_LABELS) | {
-    "TARGET_GROUP"
-}
+_KNOWN_INVENTORY_CATEGORIES = frozenset(RESOURCE_CATEGORY_LABELS) | {"TARGET_GROUP"}
 _KST = ZoneInfo("Asia/Seoul")
 _COMPLETE_SNAPSHOT_STATES = {
     "COMPLETE_FOR_SELECTED_SCOPE",
@@ -106,9 +104,7 @@ _SPEC_FIELDS: dict[
             ("block_storage_size_gb",),
         ),
     ),
-    "GLOBAL_DNS": (
-        ("dnssec_enabled", "DNSSEC", ("dnssec_enabled",)),
-    ),
+    "GLOBAL_DNS": (("dnssec_enabled", "DNSSEC", ("dnssec_enabled",)),),
 }
 
 _SPEC_VALUE_KINDS = {
@@ -192,11 +188,7 @@ def analyze_resource_changes(
 
     current_schema = _schema_version(report)
     baseline_schema = _schema_version(baseline)
-    if not (
-        current_schema
-        == baseline_schema
-        == ReportResult.SCHEMA_VERSION
-    ):
+    if not (current_schema == baseline_schema == ReportResult.SCHEMA_VERSION):
         return _empty_result(
             "UNAVAILABLE",
             "SCHEMA_MISMATCH",
@@ -281,19 +273,23 @@ def analyze_resource_changes(
             current_resources[identity],
         )
         if changed_fields:
-            items.append(_change_item(
-                "SPEC_CHANGED",
-                current_resources[identity],
-                changed_fields=changed_fields,
-            ))
+            items.append(
+                _change_item(
+                    "SPEC_CHANGED",
+                    current_resources[identity],
+                    changed_fields=changed_fields,
+                )
+            )
 
-    items.sort(key=lambda item: (
-        _CHANGE_ORDER[item["change_type"]],
-        item["category"],
-        str(item.get("resource_name") or "").casefold(),
-        item["platform"],
-        item["resource_id"],
-    ))
+    items.sort(
+        key=lambda item: (
+            _CHANGE_ORDER[item["change_type"]],
+            item["category"],
+            str(item.get("resource_name") or "").casefold(),
+            item["platform"],
+            item["resource_id"],
+        )
+    )
     return {
         "status": "AVAILABLE",
         "source_state": CALCULATED,
@@ -306,18 +302,10 @@ def analyze_resource_changes(
         "baseline_period_end": baseline_period[1].isoformat(),
         "lifecycle_compared_categories": sorted(comparable_scope),
         "spec_compared_categories": sorted(spec_scope),
-        "lifecycle_only_categories": sorted(
-            comparable_scope - spec_scope
-        ),
-        "created_count": sum(
-            item["change_type"] == "CREATED" for item in items
-        ),
-        "removed_count": sum(
-            item["change_type"] == "REMOVED" for item in items
-        ),
-        "spec_changed_count": sum(
-            item["change_type"] == "SPEC_CHANGED" for item in items
-        ),
+        "lifecycle_only_categories": sorted(comparable_scope - spec_scope),
+        "created_count": sum(item["change_type"] == "CREATED" for item in items),
+        "removed_count": sum(item["change_type"] == "REMOVED" for item in items),
+        "spec_changed_count": sum(item["change_type"] == "SPEC_CHANGED" for item in items),
         "items": items,
     }
 
@@ -329,26 +317,31 @@ def _monthly_period(report: Any) -> tuple[date, date] | None:
     start_dt = _kst_datetime(period.get("start_dt"))
     end_dt = _kst_datetime(period.get("end_dt"))
     start_boundary = (
-        start_dt.hour,
-        start_dt.minute,
-        start_dt.second,
-        start_dt.microsecond,
-    ) if start_dt is not None else None
+        (
+            start_dt.hour,
+            start_dt.minute,
+            start_dt.second,
+            start_dt.microsecond,
+        )
+        if start_dt is not None
+        else None
+    )
     end_boundary = (
-        end_dt.hour,
-        end_dt.minute,
-        end_dt.second,
-        end_dt.microsecond,
-    ) if end_dt is not None else None
+        (
+            end_dt.hour,
+            end_dt.minute,
+            end_dt.second,
+            end_dt.microsecond,
+        )
+        if end_dt is not None
+        else None
+    )
     if (
         start_dt is None
         or end_dt is None
         or start_boundary != (0, 0, 0, 0)
         or end_boundary != (23, 59, 59, 0)
-        or (
-            "is_full_month" in period
-            and period.get("is_full_month") is not True
-        )
+        or ("is_full_month" in period and period.get("is_full_month") is not True)
     ):
         return None
     start = start_dt.date()
@@ -383,8 +376,7 @@ def _options(report: Any) -> dict[str, Any] | None:
     raw_options = field(report, "report_options", None)
     if (
         not isinstance(raw_options, Mapping)
-        or str(raw_options.get("schema_version") or "").strip()
-        != REPORT_OPTIONS_SCHEMA_VERSION
+        or str(raw_options.get("schema_version") or "").strip() != REPORT_OPTIONS_SCHEMA_VERSION
     ):
         return None
     try:
@@ -397,8 +389,7 @@ def _options(report: Any) -> dict[str, Any] | None:
     for key in ("sections", "resource_categories", "monitoring_categories"):
         raw_values = raw_options.get(key)
         if not isinstance(raw_values, (list, tuple, set)) or any(
-            not isinstance(value, str) or not value.strip()
-            for value in raw_values
+            not isinstance(value, str) or not value.strip() for value in raw_values
         ):
             return None
         if {value.strip() for value in raw_values} != set(normalized[key]):
@@ -407,10 +398,7 @@ def _options(report: Any) -> dict[str, Any] | None:
 
 
 def _schema_version(report: Any) -> str:
-    return str(
-        field(report, "schema_version", None)
-        or field(report, "SCHEMA_VERSION", "")
-    ).strip()
+    return str(field(report, "schema_version", None) or field(report, "SCHEMA_VERSION", "")).strip()
 
 
 def _complete_snapshot(
@@ -435,11 +423,8 @@ def _complete_snapshot(
     except (TypeError, ValueError, OverflowError):
         return False
     return (
-        str(infrastructure.get("time_basis") or "").upper()
-        == "REPORT_PERIOD"
-        and str(
-            infrastructure.get("inventory_completeness") or ""
-        ).upper()
+        str(infrastructure.get("time_basis") or "").upper() == "REPORT_PERIOD"
+        and str(infrastructure.get("inventory_completeness") or "").upper()
         in _COMPLETE_SNAPSHOT_STATES
         and issue_count == 0
         and selected_scope <= collected_categories
@@ -493,17 +478,11 @@ def _change_item(
         "change_type": change_type,
         "category": category,
         "category_label": (
-            resource.get("category_label")
-            or RESOURCE_CATEGORY_LABELS.get(category)
-            or category
+            resource.get("category_label") or RESOURCE_CATEGORY_LABELS.get(category) or category
         ),
         "platform": str(resource.get("platform") or "").strip().upper(),
         "resource_id": str(resource.get("resource_id") or "").strip(),
-        "resource_name": (
-            resource.get("resource_name")
-            or resource.get("resource_id")
-            or "-"
-        ),
+        "resource_name": (resource.get("resource_name") or resource.get("resource_id") or "-"),
         "changed_fields": changed_fields or [],
     }
 
@@ -527,12 +506,14 @@ def _changed_fields(
             before_value,
         ) == _canonical_spec_value(category, name, after_value):
             continue
-        result.append({
-            "field": name,
-            "label": label,
-            "before": _public_value(before_value),
-            "after": _public_value(after_value),
-        })
+        result.append(
+            {
+                "field": name,
+                "label": label,
+                "before": _public_value(before_value),
+                "after": _public_value(after_value),
+            }
+        )
     return result
 
 
@@ -556,11 +537,7 @@ def _canonical_spec_value(category: str, name: str, value: Any) -> Any:
             number = Decimal(str(value).strip())
         except (InvalidOperation, ValueError):
             return _canonical(value)
-        return (
-            ("number", number.normalize())
-            if number.is_finite()
-            else _canonical(value)
-        )
+        return ("number", number.normalize()) if number.is_finite() else _canonical(value)
     if kind == "boolean":
         if isinstance(value, bool):
             return ("bool", value)
@@ -585,25 +562,26 @@ def _canonical(value: Any, *, casefold_text: bool = False) -> Any:
     if isinstance(value, Mapping):
         return (
             "mapping",
-            tuple(sorted(
-                (
-                    str(key),
-                    _canonical(item, casefold_text=casefold_text),
+            tuple(
+                sorted(
+                    (
+                        str(key),
+                        _canonical(item, casefold_text=casefold_text),
+                    )
+                    for key, item in value.items()
                 )
-                for key, item in value.items()
-            )),
+            ),
         )
     if isinstance(value, (list, tuple, set, frozenset)):
-        items = [
-            _canonical(item, casefold_text=casefold_text)
-            for item in value
-        ]
+        items = [_canonical(item, casefold_text=casefold_text) for item in value]
         return (
             "collection",
-            tuple(sorted(
-                items,
-                key=lambda item: json.dumps(item, default=str),
-            )),
+            tuple(
+                sorted(
+                    items,
+                    key=lambda item: json.dumps(item, default=str),
+                )
+            ),
         )
     text = str(value).strip()
     return ("text", text.casefold() if casefold_text else text)
@@ -611,10 +589,7 @@ def _canonical(value: Any, *, casefold_text: bool = False) -> Any:
 
 def _public_value(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {
-            str(key): _public_value(item)
-            for key, item in value.items()
-        }
+        return {str(key): _public_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_public_value(item) for item in value]
     if isinstance(value, (set, frozenset)):

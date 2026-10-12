@@ -1,6 +1,5 @@
 """독립형 HTML 보고서의 정적 스타일 정의."""
 
-
 REPORT_DISPLAY_STYLES = """
 .chart-card, .chart, .chart-legend { min-width: 0; }
 .chart-legend-item { max-width: 100%; min-width: 0; text-align: left; }

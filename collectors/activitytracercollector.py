@@ -122,10 +122,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
                     page_no=page,
                 )
                 break
-            fingerprint = tuple(
-                self._event_identity(event)
-                for event in events
-            )
+            fingerprint = tuple(self._event_identity(event) for event in events)
 
             if events and fingerprint == previous_fingerprint:
                 self._record_error(
@@ -166,8 +163,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
                     api="get_activity_list",
                     page_no=page,
                     message=(
-                        "추가 페이지 표시가 있지만 현재 페이지가 비어 있어 "
-                        "수집을 중단했습니다."
+                        "추가 페이지 표시가 있지만 현재 페이지가 비어 있어 수집을 중단했습니다."
                     ),
                 )
                 break
@@ -181,10 +177,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
                 stage="pagination_guard",
                 api="get_activity_list",
                 page_no=self.MAX_PAGES - 1,
-                message=(
-                    f"최대 페이지 수({self.MAX_PAGES})에 도달해 "
-                    "수집을 중단했습니다."
-                ),
+                message=(f"최대 페이지 수({self.MAX_PAGES})에 도달해 수집을 중단했습니다."),
             )
 
         return all_events
@@ -194,10 +187,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
         response: Any,
     ) -> List[Dict[str, Any]]:
         if isinstance(response, list):
-            return [
-                item for item in response
-                if isinstance(item, dict)
-            ]
+            return [item for item in response if isinstance(item, dict)]
 
         if not isinstance(response, dict):
             return []
@@ -216,10 +206,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
         if not isinstance(items, list):
             return []
 
-        return [
-            item for item in items
-            if isinstance(item, dict)
-        ]
+        return [item for item in items if isinstance(item, dict)]
 
     def _has_next_page(
         self,
@@ -244,11 +231,7 @@ class ActivityTracerEventCollector(_EventCollectorBase):
         return bool(has_more)
 
     def _event_identity(self, event: Dict[str, Any]) -> str:
-        event_id = (
-            event.get("historyId")
-            or event.get("eventId")
-            or event.get("id")
-        )
+        event_id = event.get("historyId") or event.get("eventId") or event.get("id")
 
         if event_id is not None and str(event_id).strip():
             return f"event:{event_id}"
