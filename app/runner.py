@@ -2116,11 +2116,7 @@ class ReportRunner:
         infrastructure_errors = resource_result.infrastructure_errors
         infrastructure_warnings = resource_result.infrastructure_warnings
 
-        infrastructure_data = [
-            item
-            for item in infrastructure_collected_data
-            if str(item.get("category") or "").upper() in selected_resource_categories
-        ]
+        # D1 참조: 범주 선택은 표시에만 적용하고 수집·분석·저장은 원본 유지
         report_server_data = (
             server_data
             if (
