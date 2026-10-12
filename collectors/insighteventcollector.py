@@ -2,10 +2,11 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from ._event_collection_support import _EventCollectorBase
 from normalizers.insighteventnormalizer import InsightEventNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
+
+from ._event_collection_support import _EventCollectorBase
 
 logger = logging.getLogger(__name__)
 

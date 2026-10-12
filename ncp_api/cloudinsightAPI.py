@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -37,7 +38,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_fea/real/cw/api/chart/dashboard", params=params)
+        return self.client.get("/cw_fea/real/cw/api/chart/dashboard", params=params)
 
     def get_dashboard_widget_list(self, dashboard_id: str) -> Dict:
         """
@@ -141,7 +142,7 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body["onlyFetchUnCloseEvent"] = only_fetch_un_close_event
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/event/search",
+            "/cw_fea/real/cw/api/event/search",
             json_data=json_body,
             retry_safe=True,
         )
@@ -191,7 +192,7 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body["onlyFetchUnCloseEvent"] = only_fetch_un_close_event
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/event/searchById",
+            "/cw_fea/real/cw/api/event/searchById",
             json_data=json_body,
             retry_safe=True,
         )
@@ -214,7 +215,7 @@ class CloudInsightAPI(BaseNCPAPI):
         json_body = {"startTime": start_time, "endTime": end_time}
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/event/searchEventCountConsole",
+            "/cw_fea/real/cw/api/event/searchEventCountConsole",
             json_data=json_body,
             retry_safe=True,
         )
@@ -352,7 +353,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_fea/real/cw/api/rule/notify/groups", params=params)
+        return self.client.get("/cw_fea/real/cw/api/rule/notify/groups", params=params)
 
     def get_rule_group(self, prod_key: str, id: str) -> Dict:
         """
@@ -442,7 +443,7 @@ class CloudInsightAPI(BaseNCPAPI):
         params = {"prodKey": prod_key}
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/rule/group/metric/group/related",
+            "/cw_fea/real/cw/api/rule/group/metric/group/related",
             json_data=metric_group_ids,
             params=params,
             retry_safe=True,
@@ -492,7 +493,7 @@ class CloudInsightAPI(BaseNCPAPI):
         params = {"prodKey": prod_key}
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/rule/group/monitor/group/related",
+            "/cw_fea/real/cw/api/rule/group/monitor/group/related",
             json_data=monitor_group_ids,
             params=params,
             retry_safe=True,
@@ -551,7 +552,7 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body["search"] = search
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/rule/group/ruleGrp/query",
+            "/cw_fea/real/cw/api/rule/group/ruleGrp/query",
             json_data=json_body,
             retry_safe=True,
         )
@@ -602,7 +603,7 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body["dimensionsSelectedList"] = dimensions_selected_list
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/rule/group/metric/search",
+            "/cw_fea/real/cw/api/rule/group/metric/search",
             json_data=json_body,
             retry_safe=True,
         )
@@ -629,7 +630,7 @@ class CloudInsightAPI(BaseNCPAPI):
         json_body = {"prodKey": prod_key, "servers": servers}
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/schema/extended/status",
+            "/cw_fea/real/cw/api/schema/extended/status",
             json_data=json_body,
             retry_safe=True,
         )
@@ -654,7 +655,7 @@ class CloudInsightAPI(BaseNCPAPI):
         if cw_key is not None:
             params["cw_key"] = cw_key
 
-        return self.client.get(f"/cw_fea/real/cw/api/schema", params=params)
+        return self.client.get("/cw_fea/real/cw/api/schema", params=params)
 
     def get_system_schema_key_list(self) -> Dict:
         """
@@ -670,7 +671,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_fea/real/cw/api/schema/system/list", params=params)
+        return self.client.get("/cw_fea/real/cw/api/schema/system/list", params=params)
 
     """
     ================================================================
@@ -703,7 +704,7 @@ class CloudInsightAPI(BaseNCPAPI):
         if query is not None:
             params["query"] = query
 
-        return self.client.get(f"/cw_fea/real/cw/api/custom/resource/list", params=params)
+        return self.client.get("/cw_fea/real/cw/api/custom/resource/list", params=params)
 
     def get_custom_resource(self, resource_id: str) -> Dict:
         """
@@ -812,7 +813,7 @@ class CloudInsightAPI(BaseNCPAPI):
             params["resourceId"] = resource_id
             params["productKey"] = product_key
 
-        return self.client.get(f"/cw_fea/real/cw/api/planned-maintenances", params=params)
+        return self.client.get("/cw_fea/real/cw/api/planned-maintenances", params=params)
 
     def get_planned_maintenance_detail_by_id(self, id: str) -> Dict:
         """
@@ -860,7 +861,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_server/real/api/plugin/file", params=params)
+        return self.client.get("/cw_server/real/api/plugin/file", params=params)
 
     def get_all_port_plugin(self) -> Dict:
         """
@@ -878,7 +879,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_server/real/api/plugin/port", params=params)
+        return self.client.get("/cw_server/real/api/plugin/port", params=params)
 
     def get_all_process_plugin(self) -> Dict:
         """
@@ -896,7 +897,7 @@ class CloudInsightAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/cw_server/real/api/plugin/process", params=params)
+        return self.client.get("/cw_server/real/api/plugin/process", params=params)
 
     def get_file_plugin(self, instance_no: str) -> Dict:
         """
@@ -988,7 +989,7 @@ class CloudInsightAPI(BaseNCPAPI):
             params["prod"] = prod
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/servers/top",
+            "/cw_fea/real/cw/api/servers/top",
             params=params,
             retry_safe=True,
         )
@@ -1050,7 +1051,7 @@ class CloudInsightAPI(BaseNCPAPI):
             json_body["queryAggregation"] = query_aggregation
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/data/query",
+            "/cw_fea/real/cw/api/data/query",
             json_data=json_body,
             retry_safe=True,
         )
@@ -1088,7 +1089,7 @@ class CloudInsightAPI(BaseNCPAPI):
         }
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/data/query/multiple",
+            "/cw_fea/real/cw/api/data/query/multiple",
             json_data=json_body,
             retry_safe=True,
         )
@@ -1139,7 +1140,7 @@ class CloudInsightAPI(BaseNCPAPI):
         }
 
         return self.client.post(
-            f"/cw_fea/real/cw/api/data/chart/preview",
+            "/cw_fea/real/cw/api/data/chart/preview",
             json_data=json_body,
             retry_safe=True,
         )

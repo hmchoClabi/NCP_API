@@ -1,12 +1,11 @@
 import re
-from hashlib import sha256
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Any, Dict
 
 from app.report_branding import normalize_customer_logo_data_uri
 from app.report_options import ReportOptions
 from config.endpoints import build_api_endpoints
-
 
 CUSTOMER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 

@@ -17,7 +17,6 @@ from webapp.jobs import ReportJobRepository
 from webapp.repository import PortalRepository
 from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
-
 LOGGER = logging.getLogger(__name__)
 
 

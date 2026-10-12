@@ -9,7 +9,6 @@ from .models import Finding
 from .provenance import CALCULATED, dataset_source_state
 from .support import field, flatten_records, mapping, records
 
-
 DATASETS = (
     ("infrastructure", "인프라 자원", "infrastructure_inventory"),
     ("monitoring", "모니터링 지표", "monitoring"),

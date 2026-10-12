@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from app.customer import CustomerProfile
 from app.report_options import ReportOptions
 from app.report_pipeline import (
-    ObservabilityResult,
     ResourceCollectionResult,
     build_collection_plan,
 )

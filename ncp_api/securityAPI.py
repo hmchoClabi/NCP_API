@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -78,7 +79,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body["malwareType"] = malwareType
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getAVList",
+            "/vsecuritymonitoring/v1/getAVList",
             json_data=json_body,
             retry_safe=True,
         )
@@ -148,7 +149,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getDDoSList",
+            "/vsecuritymonitoring/v1/getDDoSList",
             json_data=json_body,
             retry_safe=True,
         )
@@ -173,7 +174,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         json_body = {"ticketId": ticketId}
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getDDoSEventDetail",
+            "/vsecuritymonitoring/v1/getDDoSEventDetail",
             json_data=json_body,
             retry_safe=True,
         )
@@ -227,7 +228,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getIDSList",
+            "/vsecuritymonitoring/v1/getIDSList",
             json_data=json_body,
             retry_safe=True,
         )
@@ -252,7 +253,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
         json_body = {"ticketId": ticketId}
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getIDSEventDetail",
+            "/vsecuritymonitoring/v1/getIDSEventDetail",
             json_data=json_body,
             retry_safe=True,
         )
@@ -337,7 +338,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body["protocol"] = protocol
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getIPSList",
+            "/vsecuritymonitoring/v1/getIPSList",
             json_data=json_body,
             retry_safe=True,
         )
@@ -418,7 +419,7 @@ class SecurityMonitoringAPI(BaseNCPAPI):
             json_body["targetIp"] = targetIp
 
         return self.client.post(
-            f"/vsecuritymonitoring/v1/getWAFList",
+            "/vsecuritymonitoring/v1/getWAFList",
             json_data=json_body,
             retry_safe=True,
         )

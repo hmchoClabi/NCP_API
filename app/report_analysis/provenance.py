@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Final
 
-
 OBSERVED: Final = "OBSERVED"
 CALCULATED: Final = "CALCULATED"
 INFERRED: Final = "INFERRED"

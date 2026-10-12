@@ -9,7 +9,6 @@ import threading
 from database.config import DatabaseSettings
 from webapp.jobs import ReportJobRepository
 
-
 LOGGER = logging.getLogger(__name__)
 
 

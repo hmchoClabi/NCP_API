@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -41,4 +42,4 @@ class CertificateMgrAPI(BaseNCPAPI):
         if instanceNo is not None:
             params["instanceNo"] = instanceNo
 
-        return self.client.get(f"/api/v1/certificates", params=params)
+        return self.client.get("/api/v1/certificates", params=params)

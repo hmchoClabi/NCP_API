@@ -4,6 +4,7 @@ Kubernetes 환경 제어 및 관리 기능에 대한 API를 RESTful 형태로 �
 """
 
 from typing import Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -33,7 +34,7 @@ class KubernetesAPI(BaseNCPAPI):
             Dict: NKS 클러스터 목록 응답 데이터
         """
         params = {}
-        return self.client.get(f"/clusters", params=params)
+        return self.client.get("/clusters", params=params)
 
     def get_nks_cluster_detail(self, uuid: str) -> Dict:
         """
@@ -153,7 +154,7 @@ class KubernetesAPI(BaseNCPAPI):
             params["hypervisorCode"] = hypervisor_code
         if is_regional_support is not None:
             params["isRegionalSupport"] = is_regional_support
-        return self.client.get(f"/option/version", params=params)
+        return self.client.get("/option/version", params=params)
 
     def get_nks_cluster_server_image(self, hypervisor_code: Optional[str] = None) -> Dict:
         """
@@ -167,7 +168,7 @@ class KubernetesAPI(BaseNCPAPI):
         params = {}
         if hypervisor_code is not None:
             params["hypervisorCode"] = hypervisor_code
-        return self.client.get(f"/option/server-image", params=params)
+        return self.client.get("/option/server-image", params=params)
 
     def get_nks_cluster_server_spec(
         self, software_code: str, zone_code: Optional[str] = None, zone_no: Optional[str] = None
@@ -189,4 +190,4 @@ class KubernetesAPI(BaseNCPAPI):
             params["zoneNo"] = zone_no
         if zone_code is not None:
             params["zoneCode"] = zone_code
-        return self.client.get(f"/option/server-product-code", params=params)
+        return self.client.get("/option/server-product-code", params=params)

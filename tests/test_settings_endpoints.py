@@ -3,11 +3,11 @@ import os
 import unittest
 from unittest.mock import patch
 
+import config.settings as settings
 from config.endpoints import (
     build_api_endpoints,
     get_kubernetes_endpoint,
 )
-import config.settings as settings
 
 
 class EndpointTests(unittest.TestCase):

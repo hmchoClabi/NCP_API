@@ -20,7 +20,6 @@ from app.report_options import (
 from .provenance import CALCULATED, UNAVAILABLE
 from .support import field, mapping, normalize_period_type
 
-
 _EXCLUDED_CATEGORIES = frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
 _KNOWN_INVENTORY_CATEGORIES = frozenset(RESOURCE_CATEGORY_LABELS) | {"TARGET_GROUP"}
 _KST = ZoneInfo("Asia/Seoul")

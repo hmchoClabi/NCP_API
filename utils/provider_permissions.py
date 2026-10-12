@@ -6,7 +6,6 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-
 _ACTION_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_-])(?:View|Change)/[A-Za-z][A-Za-z0-9_-]{0,99}"
     r"(?![A-Za-z0-9_-])"
@@ -83,7 +82,7 @@ def _response_payload(response: Any) -> Any:
 
 def _is_error_response(response: Any, payload: Mapping[Any, Any]) -> bool:
     try:
-        if int(getattr(response, "status_code")) >= 400:
+        if int(response.status_code) >= 400:
             return True
     except (AttributeError, TypeError, ValueError):
         pass

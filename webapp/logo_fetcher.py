@@ -19,7 +19,6 @@ from app.report_branding import (
     validate_customer_logo,
 )
 
-
 CUSTOMER_LOGO_FETCH_TIMEOUT_SECONDS = 8.0
 CUSTOMER_LOGO_CONNECT_TIMEOUT_SECONDS = 3.0
 CUSTOMER_LOGO_DNS_TIMEOUT_SECONDS = 2.0

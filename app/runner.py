@@ -1,19 +1,33 @@
+import calendar
+import json
+import logging
+import os
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
 from app.apifactory import APIFactory
 from app.collection_diagnostics import normalize_collection_issue
 from app.customer import CustomerProfile
-from app.renderers import HtmlReportRenderer
 from app.network_configuration import (
     build_generation_snapshot,
     configuration_records,
     replace_configuration_records,
     snapshot_categories,
 )
-from app.report_models import ReportResult
+from app.renderers import HtmlReportRenderer
 from app.report_analysis import analyze_report
 from app.report_analysis.quality import monitoring_observation_count
+from app.report_models import ReportResult
 from app.report_options import (
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     ReportOptions,
+)
+from app.report_period import (
+    build_snapshot_eligibility_window,
+    normalize_period_bounds,
+    snapshot_window_metadata,
 )
 from app.report_pipeline import (
     NetworkConfigurationResult,
@@ -23,20 +37,15 @@ from app.report_pipeline import (
     SnapshotDecision,
     build_collection_plan,
 )
-from app.report_period import (
-    build_snapshot_eligibility_window,
-    normalize_period_bounds,
-    snapshot_window_metadata,
-)
 from collectors import (
-    ServerCollector,
-    InsightMetricCollector,
     ActivityTracerEventCollector,
     BillingCollector,
     InfrastructureCollector,
     InfrastructureMetricCollector,
+    InsightMetricCollector,
     OrganizationCollector,
     SecurityMonitoringCollector,
+    ServerCollector,
     WMSCollector,
 )
 from collectors.insighteventcollector import InsightEventCollector
@@ -44,15 +53,6 @@ from normalizers.billingnormalizer import BillingNormalizer
 from utils.common_rest import safe_exception_message
 from utils.data_utils import get_unix_time_stamp, parse_iso_week
 from utils.event_sort import event_timestamp_millis, sort_event_records
-
-import json
-import calendar
-import logging
-import os
-from pathlib import Path
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
-from zoneinfo import ZoneInfo
 
 
 class ReportRunner:

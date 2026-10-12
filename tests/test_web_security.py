@@ -41,7 +41,7 @@ class WebSecurityTests(unittest.TestCase):
             self.assertEqual(plaintext["access_key"], "ACCESS-1234")
             self.assertEqual(plaintext["secret_key"], "SECRET-5678")
             self.assertNotIn(b"SECRET-5678", encrypted.ciphertext)
-            with self.assertRaises(Exception):
+            with self.assertRaises(Exception):  # noqa: B017 - 기존 계정 바인딩 불일치 시 복호화 거부 검증을 유지합니다.
                 cipher.decrypt(
                     "another-account",
                     encrypted.encrypted_dek,

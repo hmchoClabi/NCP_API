@@ -11,8 +11,8 @@ from webapp import artifact_cleanup
 from webapp.repository import (
     PortalRepository,
     ReportCleanupProtectedError,
-    _artifact_storage_usage,
     _artifact_fingerprint,
+    _artifact_storage_usage,
     _build_dashboard_review,
     _local_report_artifact_paths,
     _preserved_legacy_analysis_policies,

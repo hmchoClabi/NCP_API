@@ -2,8 +2,8 @@ import logging
 
 from config.endpoints import build_api_endpoints
 from utils.common_rest import NCPBaseClient
-from utils.credentials import NCPCredentials
 from utils.credential_provider import get_default_credentials
+from utils.credentials import NCPCredentials
 
 logger = logging.getLogger(__name__)
 

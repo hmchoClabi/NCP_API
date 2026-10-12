@@ -21,8 +21,8 @@ from flask import (
     url_for,
 )
 
-from webapp.presentation import format_kst
 from app.renderers.html_styles import REPORT_DISPLAY_STYLES
+from webapp.presentation import format_kst
 from webapp.repository import _artifact_fingerprint, _local_report_artifact_paths
 from webapp.route_access import (
     _account_return,

@@ -18,7 +18,6 @@ from .support import (
     rounded,
 )
 
-
 FACT_NAMES = (
     "invoice_summary",
     "period_estimate",

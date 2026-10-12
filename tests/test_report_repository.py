@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.report_models import ReportResult
 from database.config import DatabaseSettings
 from database.report_repository import PostgresReportRepository
-from app.report_models import ReportResult
 
 
 class RecordingCursor:

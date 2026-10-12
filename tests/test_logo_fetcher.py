@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from webapp.logo_fetcher import fetch_customer_logo_from_url
 
-
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
@@ -110,10 +109,10 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
                 connected = []
 
                 def resolver(*_args, **_kwargs):
-                    return [_dns_result(ip) for ip in ips]
+                    return [_dns_result(ip) for ip in ips]  # noqa: B023 - 현재 반복 안에서 동기 호출됩니다.
 
                 def factory(*args):
-                    connected.append(args)
+                    connected.append(args)  # noqa: B023 - 현재 반복의 연결 시도만 기록합니다.
                     raise AssertionError("차단 주소에 연결하면 안 됩니다.")
 
                 with self.assertRaisesRegex(ValueError, "내부망·루프백·링크 로컬"):
@@ -218,7 +217,7 @@ class CustomerLogoUrlFetcherTests(unittest.TestCase):
                     fetch_customer_logo_from_url(
                         "https://logo.example.com/logo.png",
                         resolver=resolver,
-                        connection_factory=lambda *_args: _FakeConnection(response),
+                        connection_factory=lambda *_args: _FakeConnection(response),  # noqa: B023 - 현재 반복의 응답으로 동기 연결을 생성합니다.
                     )
 
     def test_declared_or_streamed_oversize_image_is_rejected(self):

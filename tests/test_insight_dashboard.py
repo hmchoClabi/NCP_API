@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from webapp.insight_dashboard import summarize_insight_alarms
 
-
 KST = timezone(timedelta(hours=9))
 TODAY = datetime(2026, 9, 21, tzinfo=KST)
 

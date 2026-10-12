@@ -7,7 +7,6 @@ from typing import Mapping, Optional
 
 from dotenv import dotenv_values
 
-
 ROLE_USERS = {
     "msp": ("ncp_msp_app", "DB_MSP_APP_PASSWORD"),
     "control": ("ncp_control_app", "DB_CONTROL_APP_PASSWORD"),

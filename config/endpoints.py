@@ -1,6 +1,5 @@
 from typing import Dict
 
-
 SUPPORTED_REGIONS = {
     "gov": frozenset({"KR", "KRS"}),
     "public": frozenset({"KR", "SGN", "JPN"}),

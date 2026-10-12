@@ -7,7 +7,6 @@ from typing import Any, Callable
 
 from flask import abort, g, redirect, url_for
 
-
 MSP_ROLES = {"MSP_ADMIN", "MSP_OPERATOR", "SYSTEM_ADMIN"}
 NCP_ENVIRONMENTS = {"public", "gov"}
 

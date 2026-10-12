@@ -13,7 +13,6 @@ from typing import Any, Mapping
 from app.ncp_permission_hints import permission_diagnostic_fields
 from app.report_options import RESOURCE_CATEGORY_LABELS
 
-
 _TARGET_TYPE_LABELS = {
     "server": "Server",
     "network_interface": "Server (Network Interface)",

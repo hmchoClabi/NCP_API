@@ -2,8 +2,8 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from config.endpoints import build_api_endpoints
 
+from config.endpoints import build_api_endpoints
 
 # ============================================================
 # .env 로드

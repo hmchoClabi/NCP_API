@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -77,7 +78,7 @@ class CloudActivityTracerAPI(BaseNCPAPI):
             json_body["size"] = size
 
         return self.client.post(
-            f"/api/v1/activities",
+            "/api/v1/activities",
             json_data=json_body,
             retry_safe=True,
         )

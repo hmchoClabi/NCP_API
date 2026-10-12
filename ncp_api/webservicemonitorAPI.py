@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -27,7 +28,7 @@ class WebServiceMonitorAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/api/v1/scenarios", params=params)
+        return self.client.get("/api/v1/scenarios", params=params)
 
     def get_wms_monitor_result(
         self,

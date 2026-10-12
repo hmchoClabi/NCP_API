@@ -11,8 +11,8 @@ import pytest
 
 from app.report_branding import validate_customer_logo
 from database.config import DatabaseSettings
-from webapp.repository import PortalRepository
 from webapp.jobs import ReportJobRepository
+from webapp.repository import PortalRepository
 from webapp.security import (
     CredentialCipher,
     LocalKeyEncryptionProvider,
@@ -150,7 +150,7 @@ class PortalIntegrationTests(unittest.TestCase):
             self.repository.set_msp_user_enabled(admin_id, admin_id, False)
 
     def test_msp_and_customer_user_deletion_revokes_access_and_reuses_email(self):
-        tenant_id = self.repository.create_tenant(
+        tenant_id = self.repository.create_tenant(  # noqa: F841 - 테넌트 생성의 설정 동작을 유지합니다.
             self.TENANT_CODE, "Portal Integration", "public", "KR"
         )
         admin_id = self.repository.bootstrap_msp_admin(

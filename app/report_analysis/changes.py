@@ -9,7 +9,6 @@ from .models import Finding
 from .provenance import CALCULATED, OBSERVED, UNAVAILABLE
 from .support import field, flatten_records
 
-
 _SUCCESS_RESULTS = {"SUCCESS", "SUCCEEDED", "OK", "성공", "완료"}
 _FAILURE_RESULTS = {
     "FAIL",

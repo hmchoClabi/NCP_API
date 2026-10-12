@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 

@@ -1,22 +1,22 @@
 import base64
-from hashlib import sha256
 import io
 import os
-from pathlib import Path
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from hashlib import sha256
+from pathlib import Path
 from unittest.mock import patch
 
 from app.report_branding import validate_customer_logo
 from webapp.app import CSRF_COOKIE, SESSION_COOKIE, create_app
+from webapp.insight_dashboard import summarize_insight_alarms
 from webapp.route_access import (
     _can_access_tenant,
     _can_manage_tenant,
     _msp_environment_scopes,
 )
 from webapp.security import token_hash
-from webapp.insight_dashboard import summarize_insight_alarms
 
 
 class FakePortalRepository:

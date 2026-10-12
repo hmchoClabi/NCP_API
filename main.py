@@ -6,28 +6,26 @@ import argparse
 import logging
 import os
 import sys
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Sequence
-from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
 
 from app.apifactory import APIFactory
 from app.customer import CustomerProfile, customer_id_from_name
 from app.mailers import SMTPConfig, SMTPMailer, parse_recipients
 from app.renderers import HtmlReportRenderer
 from app.report_models import ReportResult
-from database import build_report_repository_from_env
 from app.runner import ReportRunner
-
 from config.settings import (
+    LOG_FILE,
+    LOG_LEVEL,
     NCP_ACCESS_KEY,
     NCP_API_TYPE,
     NCP_REGION,
     NCP_SECRET_KEY,
-    LOG_LEVEL,
-    LOG_FILE,
 )
+from database import build_report_repository_from_env
 from utils.credential_provider import EnvironmentCredentialProvider
 from utils.credentials import NCPCredentials
 from utils.data_utils import parse_iso_week

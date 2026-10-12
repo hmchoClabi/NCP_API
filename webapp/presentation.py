@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, g
 
-
 KST = ZoneInfo("Asia/Seoul")
 
 

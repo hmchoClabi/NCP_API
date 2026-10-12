@@ -12,7 +12,6 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-
 PASSWORD_HASHER = PasswordHasher()
 
 

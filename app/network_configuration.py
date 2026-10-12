@@ -7,7 +7,6 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from app.report_options import NETWORK_CONFIGURATION_CATEGORY_OPTIONS
 
-
 NETWORK_CONFIGURATION_CATEGORIES = frozenset(NETWORK_CONFIGURATION_CATEGORY_OPTIONS)
 
 

@@ -9,12 +9,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import requests
 from dateutil.relativedelta import relativedelta
 
-from . import _infrastructure_metric_catalog as metric_catalog
-from ._collection_support import query_time_windows
 from utils.common_rest import safe_exception_message
 from utils.provider_permissions import extract_provider_code
 from utils.response_validation import validate_collection_response
 
+from . import _infrastructure_metric_catalog as metric_catalog
+from ._collection_support import query_time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -1265,7 +1265,7 @@ class InfrastructureMetricCollector:
             ].append(record)
 
         for (_, interval, _), group_records in grouped.items():
-            for chunk in batched(group_records, self.MAX_QUERY_SIZE):
+            for chunk in batched(group_records, self.MAX_QUERY_SIZE, strict=False):
                 for window_start, window_end in query_time_windows(
                     start_time=start_time,
                     end_time=end_time,

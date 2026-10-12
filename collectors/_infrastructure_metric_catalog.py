@@ -6,7 +6,6 @@
 
 from zoneinfo import ZoneInfo
 
-
 MAX_QUERY_SIZE = 20
 MAX_SERIES = 200
 MAX_DISCOVERY_TARGETS = 50

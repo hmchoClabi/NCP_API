@@ -27,7 +27,6 @@ from webapp.route_access import (
 )
 from webapp.security import CredentialCipher, LocalKeyEncryptionProvider
 
-
 CUSTOMER_DETAIL_RECENT_LIMIT = 10
 DATA_CLEANUP_CONFIRM_PHRASE = "선택 보고서 삭제"
 DATA_CLEANUP_MAX_SELECTION = 500

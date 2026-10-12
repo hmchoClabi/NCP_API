@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from utils.event_sort import event_timestamp_millis
+
 from .models import Finding
 from .provenance import OBSERVED, calculated_source_state
 from .support import field, mapping, records
-from utils.event_sort import event_timestamp_millis
 
 
 def analyze_security(report: Any) -> tuple[dict[str, Any], list[Finding]]:

@@ -3,11 +3,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import requests
 
-from ._collection_support import item_identity
 from normalizers.servernormalizer import ServerNormalizer
 from utils.common_rest import safe_exception_message
 from utils.provider_permissions import extract_provider_code
 from utils.response_validation import validate_collection_response
+
+from ._collection_support import item_identity
 
 logger = logging.getLogger(__name__)
 

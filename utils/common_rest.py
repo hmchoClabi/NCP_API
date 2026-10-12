@@ -14,9 +14,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
+from config.settings import API_RETRY_COUNT, API_TIMEOUT
 from ncp_api.auth import NCPAuth
-from config.settings import API_TIMEOUT, API_RETRY_COUNT
-
 
 logger = logging.getLogger(__name__)
 

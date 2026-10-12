@@ -16,10 +16,6 @@ from uuid import UUID, uuid4
 
 from psycopg.rows import dict_row
 
-from database.config import DatabaseSettings
-from webapp.security import CredentialCipher, hash_password, token_hash
-from webapp.insight_dashboard import summarize_insight_alarms
-from utils.credentials import NCPCredentials
 from app.customer import CustomerProfile
 from app.network_configuration import replace_configuration_records
 from app.report_branding import CustomerLogo, validate_customer_logo
@@ -27,7 +23,10 @@ from app.report_options import (
     normalize_report_options,
     validate_report_options,
 )
-
+from database.config import DatabaseSettings
+from utils.credentials import NCPCredentials
+from webapp.insight_dashboard import summarize_insight_alarms
+from webapp.security import CredentialCipher, hash_password, token_hash
 
 _ANONYMIZED_VALUE = "[익명화됨]"
 REPORT_RETENTION_TYPES = ("DAILY", "WEEKLY", "MONTHLY")

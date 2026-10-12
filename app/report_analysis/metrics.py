@@ -26,7 +26,6 @@ from .support import (
     rounded,
 )
 
-
 DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
     "CPU": {
         "warning": UTILIZATION_ALERT_MIN_PERCENT,

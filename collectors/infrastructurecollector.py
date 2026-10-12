@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 import requests
 
-from ._collection_support import item_identity
 from normalizers.infrastructurenormalizer import InfrastructureNormalizer
 from utils.provider_permissions import (
     extract_provider_code,
@@ -15,6 +14,7 @@ from utils.provider_permissions import (
 )
 from utils.response_validation import validate_collection_response
 
+from ._collection_support import item_identity
 
 logger = logging.getLogger(__name__)
 
@@ -964,7 +964,7 @@ class InfrastructureCollector:
             return result
         try:
             api = self.api_factory.get("loadbalancer")
-            method = getattr(api, "get_target_list")
+            method = api.get_target_list
         except Exception as exc:
             self._record_issue(
                 stage="initialization",

@@ -5,9 +5,9 @@ from typing import Protocol
 from app.customer import CustomerProfile
 from config.settings import (
     NCP_ACCESS_KEY,
-    NCP_SECRET_KEY,
     NCP_API_TYPE,
     NCP_REGION,
+    NCP_SECRET_KEY,
 )
 from utils.credentials import NCPCredentials
 

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Callable
 
-
 MAX_CUSTOMER_LOGO_BYTES = 512 * 1024
 MAX_CUSTOMER_LOGO_DIMENSION = 4096
 MAX_CUSTOMER_LOGO_PIXELS = 8_000_000

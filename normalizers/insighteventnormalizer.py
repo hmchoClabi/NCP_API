@@ -2,8 +2,9 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
-from ._event_normalizer_support import _EventNormalizerBase
 from utils.event_sort import event_timestamp_millis
+
+from ._event_normalizer_support import _EventNormalizerBase
 
 
 class InsightEventNormalizer(_EventNormalizerBase):

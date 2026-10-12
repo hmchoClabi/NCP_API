@@ -5,7 +5,6 @@ from __future__ import annotations
 import numbers
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
-
 # 금액을 계산하지 않고, 공급자 응답에서 확인된 과금 관련 규모만 표시한다.
 # 여러 키를 둔 항목은 서비스 API별 필드명 차이와 이전 스냅샷을 함께 지원한다.
 _SIZE_DIMENSIONS: dict[

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 CHART = ROOT / "deploy" / "helm" / "ncp-report"
 

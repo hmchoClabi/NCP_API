@@ -8,7 +8,6 @@ from .models import Finding
 from .provenance import CALCULATED, OBSERVED, UNAVAILABLE
 from .support import field, records, timestamp_millis
 
-
 _CRITICAL_LEVELS = {"CRITICAL", "FATAL", "EMERGENCY", "DANGER", "ERROR"}
 _WARNING_LEVELS = {"WARNING", "WARN", "CAUTION"}
 

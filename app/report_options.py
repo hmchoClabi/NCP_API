@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Mapping
 
-
 REPORT_OPTIONS_SCHEMA_VERSION = "1.4"
 UTILIZATION_ALERT_MIN_PERCENT = 90.0
 UTILIZATION_ALERT_MAX_PERCENT = 100.0

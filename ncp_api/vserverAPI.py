@@ -5,6 +5,7 @@
 """
 
 from typing import Dict, List, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -188,6 +189,7 @@ class VserverAPI(BaseNCPAPI):
             zip(
                 root_password_server_instance_list_server_instance_no_list,
                 root_password_server_instance_list_private_key_list,
+                strict=False,
             ),
             start=1,
         ):

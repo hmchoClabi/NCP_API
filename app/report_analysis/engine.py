@@ -17,7 +17,6 @@ from .resources import analyze_resource_changes
 from .security import analyze_security
 from .support import field, mapping, normalize_period_type
 
-
 ANALYSIS_VERSION = "1.3"
 
 _STATUS_LABELS = {

@@ -28,7 +28,6 @@ from webapp.route_access import (
     _msp_required,
 )
 
-
 SESSION_COOKIE = "ncp_report_session"
 CSRF_COOKIE = "ncp_report_csrf"
 

@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+
 from ncp_api.base import BaseNCPAPI
 
 
@@ -45,7 +46,7 @@ class SubAccountAPI(BaseNCPAPI):
         if size is not None:
             params["size"] = size
 
-        return self.client.get(f"/api/v1/sub-accounts", params=params)
+        return self.client.get("/api/v1/sub-accounts", params=params)
 
     def get_subaccount_detail(self, subaccount_id: str) -> Dict:
         """
@@ -87,7 +88,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/api/v1/login-alias", params=params)
+        return self.client.get("/api/v1/login-alias", params=params)
 
     def get_session_timeout(self) -> Dict:
         """
@@ -101,7 +102,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/api/v1/tenant-settings/sub-account-session-policy", params=params)
+        return self.client.get("/api/v1/tenant-settings/sub-account-session-policy", params=params)
 
     def get_account_password_policy(self) -> Dict:
         """
@@ -115,9 +116,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(
-            f"/api/v1/tenant-settings/sub-account-password-policy", params=params
-        )
+        return self.client.get("/api/v1/tenant-settings/sub-account-password-policy", params=params)
 
     def get_account_idle_disable_policy(self) -> Dict:
         """
@@ -132,7 +131,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {}
 
-        return self.client.get(f"/api/v1/tenant-settings/idle-disable-settings", params=params)
+        return self.client.get("/api/v1/tenant-settings/idle-disable-settings", params=params)
 
     def get_account_last_access(self, sub_account_id: str) -> Dict:
         """
@@ -248,7 +247,7 @@ class SubAccountAPI(BaseNCPAPI):
         """
         params = {"subAccountNo": ",".join(map(str, sub_account_no))}
 
-        return self.client.get(f"/api/v1/sub-accounts-with-no", params=params)
+        return self.client.get("/api/v1/sub-accounts-with-no", params=params)
 
     """
     ================================================================
@@ -280,7 +279,7 @@ class SubAccountAPI(BaseNCPAPI):
         if size is not None:
             params["size"] = size
 
-        return self.client.get(f"/api/v1/groups", params=params)
+        return self.client.get("/api/v1/groups", params=params)
 
     def get_account_group_detail(self, group_id: str) -> Dict:
         """
@@ -358,7 +357,7 @@ class SubAccountAPI(BaseNCPAPI):
         if type is not None:
             params["type"] = type
 
-        return self.client.get(f"/api/v1/policies", params=params)
+        return self.client.get("/api/v1/policies", params=params)
 
     def get_account_policy_detail(
         self, policy_id: str, with_permissions: Optional[bool] = None
@@ -447,7 +446,7 @@ class SubAccountAPI(BaseNCPAPI):
             json_body["description"] = description
 
         return self.client.post(
-            f"/api/v1/policy/validation",
+            "/api/v1/policy/validation",
             json_data=json_body,
             retry_safe=True,
         )
@@ -522,7 +521,7 @@ class SubAccountAPI(BaseNCPAPI):
         if search_word is not None:
             params["searchWord"] = search_word
 
-        return self.client.get(f"/api/v1/roles", params=params)
+        return self.client.get("/api/v1/roles", params=params)
 
     def get_role_detail(self, role_no: str) -> Dict:
         """
@@ -586,7 +585,7 @@ class SubAccountAPI(BaseNCPAPI):
         if search_word is not None:
             params["searchWord"] = search_word
 
-        return self.client.get(f"/api/v1/switchable-roles", params=params)
+        return self.client.get("/api/v1/switchable-roles", params=params)
 
     # 기존 오탈자 이름은 호환성을 위해 유지하고 올바른 별칭을 제공합니다.
     get_account_access_rule = get_account_accees_rule

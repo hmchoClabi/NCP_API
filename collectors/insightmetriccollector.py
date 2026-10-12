@@ -7,10 +7,11 @@ from zoneinfo import ZoneInfo
 
 from dateutil.relativedelta import relativedelta
 
-from ._collection_support import query_time_windows
 from normalizers.insightmetricnormalizer import InsightMetricNormalizer
 from utils.common_rest import safe_exception_message
 from utils.response_validation import validate_collection_response
+
+from ._collection_support import query_time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +302,7 @@ class InsightMetricCollector:
             queries_by_stat[query["stat_name"]].append(query["payload"])
 
         for stat_name, payloads in queries_by_stat.items():
-            for chunk in batched(payloads, self.MAX_QUERY_SIZE):
+            for chunk in batched(payloads, self.MAX_QUERY_SIZE, strict=False):
                 interval = str(chunk[0].get("interval") or "Min5")
                 time_windows = query_time_windows(
                     start_time=start_time,

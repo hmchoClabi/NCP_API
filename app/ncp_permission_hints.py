@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
-
 _ACTION_PATTERN = re.compile(r"(?:View|Change)/[A-Za-z][A-Za-z0-9_-]{0,99}")
 _MAX_PROVIDER_ACTIONS = 20
 _PERMISSION_ERROR_CODES = frozenset(

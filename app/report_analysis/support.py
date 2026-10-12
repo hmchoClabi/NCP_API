@@ -12,7 +12,6 @@ from typing import Any, Optional
 
 from utils.event_sort import event_timestamp_millis
 
-
 INTERVAL_SECONDS = {
     "Min1": 60,
     "Min5": 5 * 60,
@@ -100,7 +99,7 @@ def interval_seconds(value: Any) -> Optional[int]:
 def infer_interval_seconds(points: list[tuple[int, float]]) -> Optional[int]:
     gaps = [
         (current[0] - previous[0]) / 1000
-        for previous, current in zip(points, points[1:])
+        for previous, current in zip(points, points[1:], strict=False)
         if current[0] > previous[0]
     ]
     if not gaps:

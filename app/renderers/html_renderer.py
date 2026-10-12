@@ -24,7 +24,6 @@ from app.renderers.infrastructure_presenter import (
     resource_size_summary,
     server_spec_summary,
 )
-from app.report_branding import normalize_customer_logo_data_uri
 from app.report_analysis.changes import (
     group_activity_events,
     summarize_activity_events,
@@ -38,15 +37,15 @@ from app.report_analysis.provenance import (
     historical_source_state,
 )
 from app.report_analysis.support import date_value
+from app.report_branding import normalize_customer_logo_data_uri
+from app.report_models import ReportResult
 from app.report_options import (
     MONITORING_CATEGORY_OPTIONS,
     NETWORK_CONFIGURATION_CATEGORY_OPTIONS,
     RESOURCE_CATEGORY_LABELS,
     UTILIZATION_ALERT_MIN_PERCENT,
 )
-from app.report_models import ReportResult
 from utils.event_sort import event_timestamp_millis, sort_event_records
-
 
 REPORT_INTERACTION_SCRIPT = r"""(() => {
   const buttonForSeries = (series) => Array.from(
