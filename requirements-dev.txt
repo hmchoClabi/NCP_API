@@ -1,6 +1,6 @@
 -r requirements.txt
 pytest>=9.0.0,<10
-ruff
+ruff==0.16.10
 pytest-cov
 pip-audit
 pre-commit
