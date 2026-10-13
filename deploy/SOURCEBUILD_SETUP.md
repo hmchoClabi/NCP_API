@@ -32,8 +32,7 @@ Create a SourceBuild project with these basic and environment settings:
 Command before build:
 
 ```sh
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+python -m pip install --require-hashes -r requirements-dev.txt
 ```
 
 Command during build:

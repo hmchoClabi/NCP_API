@@ -1,7 +1,34 @@
+import re
 from pathlib import Path
+
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parent.parent
 CHART = ROOT / "deploy" / "helm" / "ncp-report"
+
+
+def _locked_requirements(path: Path) -> list[Requirement]:
+    requirements = []
+    record = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        record += " " + line.removesuffix("\\").strip()
+        if line.endswith("\\"):
+            continue
+        requirement_text, *hashes = record.split(" --hash=sha256:")
+        requirement = Requirement(requirement_text.strip())
+        assert requirement.url is None
+        assert len(requirement.specifier) == 1
+        assert next(iter(requirement.specifier)).operator == "=="
+        assert hashes and all(re.fullmatch(r"[0-9a-f]{64}", value.strip()) for value in hashes)
+        requirements.append(requirement)
+        record = ""
+    assert not record, f"Unfinished requirement in {path.name}"
+    return requirements
 
 
 def test_kubernetes_deployment_assets_exist():
@@ -476,17 +503,47 @@ def test_web_receives_deployed_image_tag_and_source_revision():
 
 
 def test_sourcebuild_test_dependencies_are_separate_from_runtime():
-    runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    build_requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    runtime_requirements = _locked_requirements(ROOT / "requirements.txt")
+    build_requirements = _locked_requirements(ROOT / "requirements-dev.txt")
+    build_input = (ROOT / "requirements-dev.in").read_text(encoding="utf-8")
     setup = (ROOT / "deploy" / "SOURCEBUILD_SETUP.md").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
-    assert "pytest" not in runtime_requirements.lower()
-    assert "-r requirements.txt" in build_requirements
-    assert "pytest" in build_requirements.lower()
-    assert "requirements-dev.txt" in setup
+    assert "pytest" not in {canonicalize_name(item.name) for item in runtime_requirements}
+    assert "-r requirements.txt" in build_input.splitlines()
+    assert "pytest" in {canonicalize_name(item.name) for item in build_requirements}
+    assert "pip install --require-hashes -r requirements-dev.txt" in setup
     assert "tests/" in dockerignore.splitlines()
     assert "deploy/private/" in dockerignore.splitlines()
+
+    policies = [
+        Requirement(line)
+        for name in ("requirements.in", "requirements-dev.in")
+        for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith(("#", "-"))
+    ]
+    for system, platform, machine in (("Windows", "win32", "AMD64"), ("Linux", "linux", "x86_64")):
+        environment = default_environment() | {
+            "platform_system": system,
+            "sys_platform": platform,
+            "os_name": "nt" if platform == "win32" else "posix",
+            "platform_machine": machine,
+            "python_version": "3.13",
+            "python_full_version": "3.13.14",
+            "implementation_name": "cpython",
+            "platform_python_implementation": "CPython",
+        }
+        locks = [
+            {
+                canonicalize_name(item.name): next(iter(item.specifier)).version
+                for item in items
+                if item.marker is None or item.marker.evaluate(environment)
+            }
+            for items in (runtime_requirements, build_requirements)
+        ]
+        assert locks[0].items() <= locks[1].items()
+        for policy in policies:
+            assert locks[1][canonicalize_name(policy.name)] in policy.specifier
 
 
 def test_normal_release_does_not_build_images_locally():
