@@ -58,6 +58,15 @@ Docker image build settings:
 | Image tag | `build-#` |
 | Set latest tag | Enabled |
 
+`Dockerfile.runtime` accepts the `GIT_SHA` and `APP_VERSION` build arguments
+for the OCI revision/version labels and the image's `APP_VERSION` default.
+Use the full source commit SHA and the actual image tag when the reviewed
+SourceBuild configuration provides a way to pass these arguments. Console
+configuration is not stored in this repository and has not been verified.
+Without arguments, the defaults are an empty revision and `local`; they do
+not identify a production build. The existing Helm environment overrides
+remain unchanged.
+
 Upload settings:
 
 | Field | Value |
