@@ -54,7 +54,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.runtime
     image: ncp-report:${IMAGE_TAG:-local}
     container_name: ncp-report-web
     restart: unless-stopped

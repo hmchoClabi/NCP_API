@@ -58,13 +58,21 @@ Docker image build settings:
 | Image tag | `build-#` |
 | Set latest tag | Enabled |
 
-`Dockerfile.runtime` accepts the `GIT_SHA` and `APP_VERSION` build arguments
-for the OCI revision/version labels and the image's `APP_VERSION` default.
-Use the full source commit SHA and the actual image tag when the reviewed
-SourceBuild configuration provides a way to pass these arguments. Console
-configuration is not stored in this repository and has not been verified.
-Without arguments, the defaults are an empty revision and `local`; they do
-not identify a production build. The existing Helm environment overrides
+The user confirmed both SourceBuild projects in the console on 2026-10-13:
+they use `Dockerfile.runtime` / `Dockerfile.migration`, with no root Dockerfile
+references, build-argument fields, or environment variables. Consequently,
+SourceBuild does not supply `GIT_SHA` or `APP_VERSION`: the OCI revision label
+remains empty and the OCI version label remains `local`. The application's
+actual version display follows the Helm-injected `APP_VERSION` (the runtime
+image tag), which overrides the image's `local` environment default.
+Populating the OCI labels is a T00A A-5 follow-up; these default labels must
+not be treated as production release identifiers.
+
+At that console check, the runtime project still had the old pip-upgrade and
+unhashed installation commands. Push and verify the commit containing the hashed requirements
+before replacing them with the command documented above. Follow the
+[first-push checklist](../docs/runbooks/branch-and-release.md#첫-push-체크리스트)
+to coordinate the repository and console transition. Migration commands
 remain unchanged.
 
 Upload settings:

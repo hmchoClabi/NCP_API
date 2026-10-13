@@ -85,9 +85,9 @@ Keep Ingress disabled until the web portal passes the port-forward test.
 Use a versioned immutable tag. Do not put secrets in Docker build arguments.
 
 ```sh
-docker build --target runtime \
+docker build --file Dockerfile.runtime \
   -t your-registry.kr.ncr.ntruss.com/ncp-report:pilot-001 .
-docker build --target migration \
+docker build --file Dockerfile.migration \
   -t your-registry.kr.ncr.ntruss.com/ncp-report-migrate:pilot-001 .
 docker push your-registry.kr.ncr.ntruss.com/ncp-report:pilot-001
 docker push your-registry.kr.ncr.ntruss.com/ncp-report-migrate:pilot-001

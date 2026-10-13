@@ -15,8 +15,10 @@ if ($Tag -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$') {
     throw "Tag is not a valid container image tag."
 }
 $resolvedContext = (Resolve-Path -LiteralPath $Context).Path
-if (-not (Test-Path -LiteralPath (Join-Path $resolvedContext "Dockerfile"))) {
-    throw "Build context must contain Dockerfile."
+foreach ($dockerfile in @("Dockerfile.runtime", "Dockerfile.migration")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $resolvedContext $dockerfile) -PathType Leaf)) {
+        throw "Build context must contain $dockerfile."
+    }
 }
 if ($Revision -and $Revision -notmatch '^[0-9a-f]{40}$') {
     throw "Revision must be a full Git commit SHA."
@@ -33,11 +35,11 @@ if ($Revision) {
 }
 
 Write-Host "Building $runtimeImage"
-docker build @labelArguments --target runtime --tag $runtimeImage $resolvedContext
+docker build @labelArguments --file (Join-Path $resolvedContext "Dockerfile.runtime") --tag $runtimeImage $resolvedContext
 if ($LASTEXITCODE -ne 0) { throw "Runtime image build failed." }
 
 Write-Host "Building $migrationImage"
-docker build @labelArguments --target migration --tag $migrationImage $resolvedContext
+docker build @labelArguments --file (Join-Path $resolvedContext "Dockerfile.migration") --tag $migrationImage $resolvedContext
 if ($LASTEXITCODE -ne 0) { throw "Migration image build failed." }
 
 docker push $runtimeImage

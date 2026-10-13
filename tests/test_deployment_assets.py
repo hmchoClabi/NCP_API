@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import yaml
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -79,20 +80,17 @@ def test_database_backups_support_a_replacement_claim_and_are_verified():
 
 
 def test_runtime_and_migration_images_are_separate():
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     runtime_base = (ROOT / "Dockerfile.runtime").read_text(encoding="utf-8").splitlines()[0]
     migration_base = (ROOT / "Dockerfile.migration").read_text(encoding="utf-8").splitlines()[0]
     migration_script = (ROOT / "deploy" / "docker" / "migrate.sh").read_text(encoding="utf-8")
 
-    stages = {
-        stage: image for image, stage in re.findall(r"^FROM (\S+) AS (\S+)$", dockerfile, re.M)
-    }
-    assert stages == {
-        "runtime": runtime_base.removeprefix("FROM "),
-        "migration": migration_base.removeprefix("FROM "),
-    }
     assert re.fullmatch(r"FROM python:3\.13-slim@sha256:[0-9a-f]{64}", runtime_base)
     assert re.fullmatch(r"FROM postgres:16@sha256:[0-9a-f]{64}", migration_base)
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    assert compose["services"]["web"]["build"] == {
+        "context": ".",
+        "dockerfile": "Dockerfile.runtime",
+    }
     assert "psql -X -v ON_ERROR_STOP=1" in migration_script
     assert "wait_for_schema" in migration_script
 
@@ -490,6 +488,13 @@ def test_image_build_records_full_git_revision():
     assert "org.opencontainers.image.revision=$Revision" in script
     assert "Revision must be a full Git commit SHA" in script
     assert "[Parameter(Mandatory = $true)]" in script
+    assert '--file (Join-Path $resolvedContext "Dockerfile.runtime")' in script
+    assert '--file (Join-Path $resolvedContext "Dockerfile.migration")' in script
+    shell_script = (ROOT / "deploy" / "scripts" / "build-and-push.sh").read_text(encoding="utf-8")
+    assert "docker build --file Dockerfile.runtime" in shell_script
+    assert "docker build --file Dockerfile.migration" in shell_script
+    assert "--target" not in script
+    assert "--target" not in shell_script
 
 
 def test_sourcebuild_has_separate_runtime_and_migration_images():
@@ -500,21 +505,18 @@ def test_sourcebuild_has_separate_runtime_and_migration_images():
     assert "postgres:16" not in runtime
     assert "FROM postgres:16" in migration
     assert "database/schema" in migration
-    for recipe in (runtime, (ROOT / "Dockerfile").read_text(encoding="utf-8")):
-        assert "RUN python -m pip install --require-hashes -r /app/requirements.txt" in recipe
-        assert "pip install --upgrade pip" not in recipe
-        assert 'ARG GIT_SHA=""' in recipe
-        assert 'ARG APP_VERSION="local"' in recipe
-        assert "org.opencontainers.image.revision=$GIT_SHA" in recipe
-        assert "org.opencontainers.image.version=$APP_VERSION" in recipe
-        assert "ENV APP_VERSION=$APP_VERSION" in recipe
-        source_copy = recipe.index("COPY --chown=app:app . /app")
-        dependency_install = recipe.index("RUN python -m pip install --require-hashes")
-        metadata_start = min(
-            recipe.index('ARG GIT_SHA=""'), recipe.index('ARG APP_VERSION="local"')
-        )
-        assert dependency_install < source_copy < metadata_start
-        assert recipe.index("ENV PYTHONDONTWRITEBYTECODE=1") < dependency_install
+    assert "RUN python -m pip install --require-hashes -r /app/requirements.txt" in runtime
+    assert "pip install --upgrade pip" not in runtime
+    assert 'ARG GIT_SHA=""' in runtime
+    assert 'ARG APP_VERSION="local"' in runtime
+    assert "org.opencontainers.image.revision=$GIT_SHA" in runtime
+    assert "org.opencontainers.image.version=$APP_VERSION" in runtime
+    assert "ENV APP_VERSION=$APP_VERSION" in runtime
+    source_copy = runtime.index("COPY --chown=app:app . /app")
+    dependency_install = runtime.index("RUN python -m pip install --require-hashes")
+    metadata_start = min(runtime.index('ARG GIT_SHA=""'), runtime.index('ARG APP_VERSION="local"'))
+    assert dependency_install < source_copy < metadata_start
+    assert runtime.index("ENV PYTHONDONTWRITEBYTECODE=1") < dependency_install
     assert runtime.index("LABEL org.opencontainers.image.source=") < runtime.index("WORKDIR")
 
 

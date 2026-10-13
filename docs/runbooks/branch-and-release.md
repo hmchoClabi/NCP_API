@@ -1,5 +1,40 @@
 # 브랜치·릴리스 운영 런북
 
+## 첫 push 체크리스트
+
+A-3의 해시 잠금 파일을 처음 SourceCommit에 반영할 때 사용합니다.
+이 절차는 사용자가 수행하며, 체크리스트 작성 자체가 push·빌드·배포를
+실행하지는 않습니다.
+
+- [ ] 로컬 변경을 검토하고 테스트·Ruff 검사가 통과한 커밋을 준비합니다.
+- [ ] SourceBuild가 읽는 저장소와 브랜치를 확인합니다. 현재 문서 기준은
+  `architect_report` / `master`입니다.
+- [ ] 자동 빌드 또는 SourcePipeline 트리거가 있다면 전환 중 빌드가 시작되지
+  않도록 사용자가 일시 중지합니다. 기존 상태를 기록해 전환 후 복구합니다.
+- [ ] **해시 잠금 파일이 포함된 새 커밋을 먼저 SourceCommit에 push합니다.**
+  콘솔 설치 명령은 이 시점까지 기존 값으로 유지합니다.
+- [ ] 원격 브랜치의 전체 SHA가 push한 커밋과 같은지 확인합니다. 이전 커밋에는
+  해시가 없어 콘솔 명령을 먼저 바꾸면 `--require-hashes` 설치가 실패합니다.
+- [ ] **원격 커밋 확인 후** runtime 프로젝트의 빌드 전 명령 두 줄
+  (`python -m pip install --upgrade pip`,
+  `python -m pip install -r requirements-dev.txt`)을 아래 한 줄로 교체하고 저장합니다.
+
+  ```sh
+  python -m pip install --require-hashes -r requirements-dev.txt
+  ```
+
+- [ ] 저장된 runtime Dockerfile 경로가 `Dockerfile.runtime`인지 다시 확인합니다.
+  빌드 명령 `python -m pytest -q`와 빌드 후 `compileall` 명령은 유지합니다.
+- [ ] migration의 `Dockerfile.migration` 경로와 `test -f` / `test -d` / `echo`
+  명령은 유지합니다.
+- [ ] 콘솔 저장과 원격 커밋이 확인된 뒤 트리거를 복구합니다. 이후 빌드를
+  진행한다면 해당 새 커밋을 사용하고 소스 SHA·테스트 결과를 기록합니다.
+
+2026-10-13 사용자 콘솔 확인 결과 두 프로젝트에는 빌드 인수 입력란과
+환경 변수가 없습니다. SourceBuild 이미지의 OCI revision 라벨은 빈 값,
+version 라벨은 `local`로 남습니다. 실제 애플리케이션 버전 표시는 Helm이
+주입하는 `APP_VERSION`을 따릅니다. OCI 라벨을 채우는 작업은 A-5 후속 항목입니다.
+
 ## 월간 베이스 이미지 다이제스트 갱신
 
 월 1회 `python:3.13-slim`과 `postgres:16` 태그의 멀티 플랫폼 인덱스
@@ -53,14 +88,13 @@ docker buildx imagetools inspect docker.io/library/postgres:16
 1. 조회 일자, 태그, `sha256:` 뒤의 64자리 다이제스트를 기록합니다.
    헤더가 없거나 조회가 실패하면 기존 고정값을 유지하고 원인을 확인합니다.
 2. 값이 바뀌면 Python 값은 `Dockerfile.runtime`, PostgreSQL 값은
-   `Dockerfile.migration`의 `FROM`에 반영합니다. 루트 `Dockerfile`이
-   남아 있다면 해당 두 스테이지에도 같은 값을 적용합니다.
+   `Dockerfile.migration`의 `FROM`에 반영합니다.
 3. 요구사항 입력의 버전 범위와 해시 잠금 파일은 이 갱신에서 변경하지 않습니다.
    `PYTHON_DOTENV_DISABLED=1`로 기존 테스트를 실행하고 Ruff 린트·포맷 및
    최종 diff를 확인합니다.
 4. 다이제스트 갱신을 별도 커밋으로 검토합니다. 실제 이미지 빌드·푸시·배포는
    별도로 승인된 릴리스 작업에서 수행하고, 해당 결과를 갱신 기록에 남깁니다.
 
-SourceBuild의 실제 Dockerfile 경로와 빌드 인수 전달 방식은 콘솔에서
-확인해야 합니다. 콘솔과 저장소에서 루트 Dockerfile 사용이 끝난 것을
-확인하기 전에는 루트 파일을 삭제하지 않습니다.
+2026-10-13 사용자 확인으로 두 SourceBuild 프로젝트 모두 전용 Dockerfile을
+사용하며 루트 Dockerfile 참조가 없는 것을 확인했습니다. 빌드 인수 전달
+방식을 추가한다면 A-5에서 콘솔 지원 여부와 실제 이미지 라벨을 검증합니다.

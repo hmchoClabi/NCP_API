@@ -26,8 +26,8 @@ esac
 runtime_image="${registry}/ncp-report:${tag}"
 migration_image="${registry}/ncp-report-migrate:${tag}"
 
-docker build --target runtime --tag "$runtime_image" .
-docker build --target migration --tag "$migration_image" .
+docker build --file Dockerfile.runtime --tag "$runtime_image" .
+docker build --file Dockerfile.migration --tag "$migration_image" .
 docker push "$runtime_image"
 docker push "$migration_image"
 
